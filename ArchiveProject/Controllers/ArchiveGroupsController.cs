@@ -1,73 +1,4 @@
-﻿//using ArchiveProject.Application.Common.Interfaces;
-//using ArchiveProject.Application.Common.Results;
-//using ArchiveProject.Application.Dtos;
-//using ArchiveProject.Application.Dtos.ArchiveGroupDtos;
-//using ArchiveProject.Infrastructure.Services;
-//using Microsoft.AspNetCore.Mvc;
-
-//namespace ArchiveProject.API.Controllers
-//{
-//    [ApiController]
-//    [Route("api/[controller]")]
-//    public class ArchiveGroupsController : ControllerBase
-//    {
-//        private readonly IArchiveGroupService _service;
-
-//        public ArchiveGroupsController(IArchiveGroupService service)
-//        {
-//            _service = service;
-//        }
-
-//        // GET: api/ArchiveGroup/Create
-//        [HttpPost]
-//        public Task<Result<ArchiveGroupDto>> Create([FromForm] CreateArchiveGroupDto dto)
-//            => _service.CreateAsync(dto);
-
-
-//        // GET: api/ArchiveGroup/Update
-//        [HttpPut("{id:long}")]
-//        public Task<Result<string>> Update(long id, [FromForm] UpdateArchiveGroupDto dto)
-//            => _service.UpdateAsync(id, dto);
-
-
-//        // GET: api/ArchiveGroup/Delete
-//        [HttpDelete("{id:long}")]
-//        public Task<Result<string>> Delete(long id)
-//            => _service.DeleteAsync(id);
-
-
-//        // GET: api/ArchiveGroup/GetById
-//        [HttpGet("{id:long}")]
-//        public Task<Result<ArchiveGroupDto>> GetById(long id)
-//            => _service.GetByIdAsync(id);
-
-
-//        // GET: api/ArchiveGroup/dropdown
-//        [HttpGet("dropdown")]
-//        public Task<Result<IEnumerable<DropDownDto>>> GetDropdown()
-//            => _service.GetArchiveGroupsDropdownAsync();
-
-
-//        // GET: api/ArchiveGroup/GetAllArchiveGroups?pageNumber=1&pageSize=10&title=
-//        [HttpGet("GetAllArchiveGroups")]
-//        public Task<Result<PaginatedList<ArchiveGroupDto>>> GetAll(
-//            [FromQuery] int pageNumber = 1,
-//            [FromQuery] int pageSize = 10,
-//            [FromQuery] string? title = null)
-//            => _service.GetArchiveGroupsAsync(pageNumber, pageSize, title);
-
-
-//        //// POST: api/ArchiveGroup/search?pageNumber=1&pageSize=10
-//        //[HttpPost("search")]
-//        //public Task<Result<PaginatedList<ArchiveGroupDto>>> Search(
-//        //    [FromForm] ArchiveGroupSearchCriteria criteria,
-//        //    [FromForm] int pageNumber = 1,
-//        //    [FromForm] int pageSize = 10)
-//        //    => _service.SearchAsync(criteria, pageNumber, pageSize);
-//    }
-//}
-
-using ArchiveProject.Application.Common.Interfaces;
+﻿using ArchiveProject.Application.Common.Interfaces;
 using ArchiveProject.Application.Common.Results;
 using ArchiveProject.Application.Dtos;
 using ArchiveProject.Application.Dtos.ArchiveGroupDtos;
@@ -174,9 +105,9 @@ namespace ArchiveProject.API.Controllers
         // POST: api/ArchiveGroups/search?pageNumber=1&pageSize=10
         [HttpPost("search")]
         public async Task<Result<PaginatedList<ArchiveGroupDto>>> Search(
-            [FromBody] ArchiveGroupSearchCriteria criteria,
-            [FromQuery] int pageNumber = 1,
-            [FromQuery] int pageSize = 10)
+            [FromForm] ArchiveGroupSearchCriteria criteria,
+            [FromForm] int pageNumber = 1,
+            [FromForm] int pageSize = 10)
             => Pipe(await _service.SearchAsync(criteria, pageNumber, pageSize));
 
     }
