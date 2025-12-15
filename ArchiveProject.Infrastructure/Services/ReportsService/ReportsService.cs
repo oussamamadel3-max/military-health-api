@@ -1,0 +1,275 @@
+﻿using ArchiveProject.Application.Common.Interfaces.DashboardInterfaces;
+using ArchiveProject.Application.Common.Interfaces.ExportInterfaces;
+using ArchiveProject.Application.Common.Interfaces.Reports;
+using ArchiveProject.Application.Common.Interfaces.UserContextInterfaces;
+using ArchiveProject.Application.Dtos.DashboardDtos;
+using ArchiveProject.Application.Dtos.DocumentDtos;
+using ArchiveProject.Application.Dtos.ExportDtos;
+using ArchiveProject.Application.Dtos.ReportDtos;
+using ArchiveProject.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
+
+namespace ArchiveProject.Infrastructure.Services.Reports
+{
+    public class ReportsService : IReportsService
+    {
+        private readonly MainDbContext _context;
+        private readonly IUserContextService _userCtx;
+        private readonly IExportService _export;
+        private readonly IDashboardService _dashboard;
+
+        public ReportsService(MainDbContext context, IUserContextService userCtx, IExportService export, IDashboardService dashboard)
+        {
+            _context = context;
+            _userCtx = userCtx;
+            _export = export;
+            _dashboard = dashboard;
+        }
+
+        private sealed record Scope(bool IsSuper, bool IsBranchMgr, long? BranchId, long? DepartmentId, string UserId);
+
+        private async Task<Scope> GetScopeAsync()
+        {
+            var userId = _userCtx.UserId ?? "";
+
+            var roles = await _context.UserRoleAssociations
+                .Where(x => x.UserId == userId)
+                .Join(_context.Roles, a => a.RoleId, r => r.Id, (a, r) => r.NormalizedName)
+                .ToListAsync();
+
+            bool isSuper = roles.Any(r => r == "SUPERADMIN");
+            bool isMgr = roles.Any(r => r == "BRANCHMANAGER");
+
+            var actor = await _context.Users.AsNoTracking()
+                .Where(u => u.Id == userId)
+                .Select(u => new { u.BranchId, u.DepartmentId })
+                .FirstOrDefaultAsync();
+
+            return new Scope(isSuper, isMgr, actor?.BranchId, actor?.DepartmentId, userId);
+        }
+
+        private IQueryable<Domain.Entities.Document> ApplyScopeDocs(IQueryable<Domain.Entities.Document> q, Scope s)
+        {
+            if (s.IsSuper) return q;
+
+            var joined = from d in q
+                         join dep in _context.Departments.AsNoTracking() on d.DepartmentId equals dep.DepartmentId
+                         select new { d, dep.BranchId };
+
+            if (s.IsBranchMgr && s.BranchId.HasValue)
+                return joined.Where(x => x.BranchId == s.BranchId.Value).Select(x => x.d);
+
+            if (s.DepartmentId.HasValue)
+                return joined.Where(x => x.d.DepartmentId == s.DepartmentId.Value).Select(x => x.d);
+
+            return joined.Where(x => x.d.UserId == s.UserId).Select(x => x.d);
+        }
+
+        public async Task<Result<ExportFileDto>> ExportDocumentsAsync(DocumentSearchCriteria c, string format)
+        {
+            try
+            {
+                var s = await GetScopeAsync();
+
+                var q = ApplyScopeDocs(_context.Documents.AsNoTracking(), s);
+
+                // Filters
+                if (c.DepartmentId.HasValue) q = q.Where(d => d.DepartmentId == c.DepartmentId.Value);
+                if (c.DocumentTypeId.HasValue) q = q.Where(d => d.DocumentTypeId == c.DocumentTypeId.Value);
+                if (c.ArchiveGroupId.HasValue) q = q.Where(d => d.ArchiveGroupId == c.ArchiveGroupId.Value);
+                if (!string.IsNullOrWhiteSpace(c.Title)) q = q.Where(d => d.Title.Contains(c.Title));
+                if (!string.IsNullOrWhiteSpace(c.Description)) q = q.Where(d => d.Description.Contains(c.Description));
+                if (c.CreatedFrom.HasValue) q = q.Where(d => d.CreatedAt >= c.CreatedFrom.Value);
+                if (c.CreatedFrom.HasValue)
+                {
+                    var from = c.CreatedFrom.Value.Date;
+                    q = q.Where(d => d.CreatedAt >= from);
+                }
+
+                if (c.CreatedTo.HasValue)
+                {
+                    var toExclusive = c.CreatedTo.Value.Date.AddDays(1);
+                    q = q.Where(d => d.CreatedAt < toExclusive);
+                }
+
+                // Order newest first
+                q = q.OrderByDescending(d => d.CreatedAt).ThenByDescending(d => d.DocumentId);
+
+                // Projection (مع أسماء الفرع/القسم/النوع)
+                var rows = await (from d in q
+                                  join dep in _context.Departments.AsNoTracking() on d.DepartmentId equals dep.DepartmentId
+                                  join br in _context.Branchs.AsNoTracking() on dep.BranchId equals br.BranchId
+                                  join dt in _context.DocumentTypes.AsNoTracking() on d.DocumentTypeId equals dt.DocumentTypeId into dtt
+                                  from dt in dtt.DefaultIfEmpty()
+                                  join ag in _context.ArchiveGroups.AsNoTracking() on d.ArchiveGroupId equals ag.ArchiveGroupId into agg
+                                  from ag in agg.DefaultIfEmpty()
+                                  select new DocumentReportRowDto
+                                  {
+                                      DocumentNumber = d.DocumentNumber,
+                                      Title = d.Title ?? "",
+                                      BranchName = br.BranchName ?? "",
+                                      DepartmentName = dep.DepartmentName ?? "",
+                                      DocumentTypeName = dt != null ? dt.DocumentTypeName : "",
+                                      ArchiveGroupTitle = ag != null ? ag.Title : null,
+                                      CreatedAt = d.CreatedAt,
+                                      CreatedBy = d.User.UserName ?? ""
+                                  }).ToListAsync();
+
+                var deptName = c.DepartmentId.HasValue
+                    ? await _context.Departments.Where(x => x.DepartmentId == c.DepartmentId.Value).Select(x => x.DepartmentName).FirstOrDefaultAsync()
+                    : null;
+
+                var branchName = (s.IsBranchMgr && s.BranchId.HasValue)
+                    ? await _context.Branchs.Where(x => x.BranchId == s.BranchId.Value).Select(x => x.BranchName).FirstOrDefaultAsync()
+                    : null;
+
+                string? periodText = null;
+                if (c.CreatedFrom.HasValue || c.CreatedTo.HasValue)
+                {
+                    var fromTxt = c.CreatedFrom?.ToString("yyyy/MM/dd") ?? "غير محدد";
+                    var toTxt = c.CreatedTo?.ToString("yyyy/MM/dd") ?? "غير محدد";
+                    periodText = $"{fromTxt} → {toTxt}";
+                }
+
+                var opt = new ExportOptions
+                {
+                    ReportName = "Documents_Report",
+                    SheetName = "Documents",
+                    CustomTitle = "تقرير الوثائق",
+                    BranchName = branchName,
+                    DepartmentName = deptName,
+                    PeriodText = periodText,
+                    ColumnMappings = new Dictionary<string, string>
+                    {
+                        ["DocumentNumber"] = "رقم الوثيقة",
+                        ["Title"] = "العنوان",
+                        ["BranchName"] = "الفرع",
+                        ["DepartmentName"] = "القسم",
+                        ["DocumentTypeName"] = "نوع الوثيقة",
+                        ["ArchiveGroupTitle"] = "مجموعة الأرشفة",
+                        ["CreatedAt"] = "تاريخ الإنشاء",
+                        ["CreatedBy"] = "أنشئ بواسطة",
+                    }
+                };
+
+                ExportFileDto file = format.ToLower() == "pdf"
+                    ? await _export.ExportToPdfAsync(rows, opt)
+                    : await _export.ExportToExcelAsync(rows, opt);
+
+                return Result<ExportFileDto>.Success(file);
+            }
+            catch (Exception ex)
+            {
+                return Result<ExportFileDto>.Failure(new[] { $"خطأ بتصدير تقرير الوثائق: {ex.Message}" });
+            }
+        }
+
+        public async Task<Result<ExportFileDto>> ExportAuditLogsAsync(DashboardFilter filter, string format)
+        {
+            try
+            {
+                var s = await GetScopeAsync();
+
+                var toUtc = (filter.To ?? DateTime.UtcNow).Date.AddDays(1);
+                var fromUtc = (filter.From ?? DateTime.UtcNow.AddDays(-30)).Date;
+
+                var q = _context.AuditLogs.AsNoTracking()
+                    .Where(a => a.Timestamp >= fromUtc && a.Timestamp < toUtc);
+
+                if (!s.IsSuper)
+                {
+                    // فلترة حسب الفرع/القسم عبر المستخدم (مثل منطق DashboardService عندك)
+                    var joined = from a in q
+                                 join u in _context.Users.AsNoTracking() on a.UserId equals u.Id into uu
+                                 from u in uu.DefaultIfEmpty()
+                                 select new { a, u };
+
+                    if (s.IsBranchMgr && s.BranchId.HasValue)
+                        q = joined.Where(x => x.u != null && x.u.BranchId == s.BranchId.Value).Select(x => x.a);
+                    else if (s.DepartmentId.HasValue)
+                        q = joined.Where(x => x.u != null && x.u.DepartmentId == s.DepartmentId.Value).Select(x => x.a);
+                    else
+                        q = joined.Where(x => x.a.UserId == s.UserId).Select(x => x.a);
+                }
+
+                var rows = await q.OrderByDescending(a => a.Timestamp)
+                    .Select(a => new AuditLogReportRowDto
+                    {
+                        Timestamp = a.Timestamp.UtcDateTime,
+                        UserName = a.UserName ?? "",
+                        ActionType = a.ActionType ?? "",
+                        TableName = a.TableName ??"",
+                        DocumentId = a.RecordId,
+                    })
+                    .ToListAsync();
+
+                var opt = new ExportOptions
+                {
+                    ReportName = "AuditLogs_Report",
+                    SheetName = "AuditLogs",
+                    CustomTitle = "تقرير سجل التدقيق",
+                    PeriodText = $"{fromUtc:yyyy/MM/dd} → {toUtc.AddDays(-1):yyyy/MM/dd}",
+                    ColumnMappings = new Dictionary<string, string>
+                    {
+                        ["Timestamp"] = "التاريخ",
+                        ["UserName"] = "المستخدم",
+                        ["ActionType"] = "الإجراء",
+                        ["TableName"] = "اسم الجدول",
+                        ["DocumentId"] = "رقم السطر",
+                    }
+                };
+
+                ExportFileDto file = format.ToLower() == "pdf"
+                    ? await _export.ExportToPdfAsync(rows, opt)
+                    : await _export.ExportToExcelAsync(rows, opt);
+
+                return Result<ExportFileDto>.Success(file);
+            }
+            catch (Exception ex)
+            {
+                return Result<ExportFileDto>.Failure(new[] { $"خطأ بتصدير تقرير التدقيق: {ex.Message}" });
+            }
+        }
+
+        public async Task<Result<ExportFileDto>> ExportDashboardAsync(DashboardFilter filter, string format)
+        {
+            try
+            {
+                var res = await _dashboard.GetAsync(filter);
+                if (!res.Succeeded || res.Value == null)
+                    return Result<ExportFileDto>.Failure(res.Errors);
+
+                // نحول الـ DashboardStatsDto لصفوف بسيطة للتصدير (أو أكثر من شيت لاحقًا)
+                var rows = new List<DashboardExportRow>
+                {
+                    new() { Name = "عدد الوثائق", Value = (res.Value.DocumentsCount).ToString() },
+                    new() { Name = "عدد المجموعات", Value = (res.Value.GroupsCount).ToString() },
+                    new() { Name = "إجمالي التخزين", Value = res.Value.StorageUsage?.TotalReadable ?? "0 B" },
+                    new() { Name = "عدد الأنشطة الأخيرة", Value = (res.Value.RecentActivities?.Count ?? 0).ToString() }
+                };
+
+                var opt = new ExportOptions
+                {
+                    ReportName = "Dashboard_Report",
+                    SheetName = "Dashboard",
+                    CustomTitle = "تقرير لوحة التحكم",
+                    ColumnMappings = new Dictionary<string, string>
+                    {
+                        ["Name"] = "البند",
+                        ["Value"] = "القيمة"
+                    }
+                };
+
+                ExportFileDto file = format.ToLower() == "pdf"
+                    ? await _export.ExportToPdfAsync(rows, opt)
+                    : await _export.ExportToExcelAsync(rows, opt);
+
+                return Result<ExportFileDto>.Success(file);
+            }
+            catch (Exception ex)
+            {
+                return Result<ExportFileDto>.Failure(new[] { $"خطأ بتصدير تقرير الداشبورد: {ex.Message}" });
+            }
+        }
+    }
+}

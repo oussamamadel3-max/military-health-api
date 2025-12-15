@@ -5,6 +5,7 @@ using ArchiveProject.Application.Dtos.BranchDtos;
 using ArchiveProject.Application.Dtos.DepartmentDtos;
 using ArchiveProject.Application.Dtos.DocumentDtos;
 using ArchiveProject.Application.Dtos.DocumentTypeDtos;
+using ArchiveProject.Application.Dtos.ReportDtos;
 using ArchiveProject.Application.ModelsDto.AuditLogDtos;
 using ArchiveProject.Domain.Entities;
 using ArchiveProject.Domain.Entities.Auth;
@@ -75,6 +76,9 @@ namespace ArchiveProject.Application.Mappings
                 .ForMember(dest => dest.Timestamp, opt => opt.MapFrom(_ => DateTime.Now));
 
 
+            CreateMap<AuditLog, AuditLogReportRowDto>();
+
+
             #region Additional mappings can be added here
 
             //       Branch
@@ -104,9 +108,12 @@ namespace ArchiveProject.Application.Mappings
             CreateMap<CreateDocumentDto, Document>()
                 .ForMember(dest => dest.DocumentId, opt => opt.Ignore())
                 .ForMember(dest => dest.DocumentNumber, opt => opt.Ignore());
-
             CreateMap<UpdateDocumentDto, Document>();
 
+            CreateMap<Document, DocumentReportRowDto>();
+
+
+            //      Attachment
             CreateMap<Attachment, AttachmentReadDto>();
 
             #endregion

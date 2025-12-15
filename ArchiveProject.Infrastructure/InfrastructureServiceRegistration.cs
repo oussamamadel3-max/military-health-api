@@ -3,14 +3,18 @@ using ArchiveProject.Application.Common.Interfaces.AttachmentInterfaces;
 using ArchiveProject.Application.Common.Interfaces.AuditLogInterfaces;
 using ArchiveProject.Application.Common.Interfaces.AuthInterfaces;
 using ArchiveProject.Application.Common.Interfaces.DashboardInterfaces;
+using ArchiveProject.Application.Common.Interfaces.ExportInterfaces;
 using ArchiveProject.Application.Common.Interfaces.FileStorageInterfaces;
+using ArchiveProject.Application.Common.Interfaces.Reports;
 using ArchiveProject.Application.Common.Interfaces.UserContextInterfaces;
 using ArchiveProject.Infrastructure.Persistence;
 using ArchiveProject.Infrastructure.Services;
 using ArchiveProject.Infrastructure.Services.AttachmentService;
 using ArchiveProject.Infrastructure.Services.AuthServices;
 using ArchiveProject.Infrastructure.Services.Dashboard;
+using ArchiveProject.Infrastructure.Services.Exporting;
 using ArchiveProject.Infrastructure.Services.FileStorageService;
+using ArchiveProject.Infrastructure.Services.Reports;
 using FinanceProject.Infrastructure.Services;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -52,6 +56,9 @@ namespace ArchiveProject.Infrastructure
 
 
             services.AddScoped<IDashboardService, DashboardService>();
+
+            services.AddScoped<IExportService, ExportService>();
+            services.AddScoped<IReportsService, ReportsService>();
 
             #endregion
 

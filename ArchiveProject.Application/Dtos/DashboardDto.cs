@@ -78,4 +78,10 @@
         public StorageUsageDto StorageUsage { get; set; } = new();
         public List<TopDocumentTypeDto> TopDocumentTypes { get; set; } = new();
     }
+
+    public class DashboardExportRow
+    {
+        public string Name { get; set; } = "";
+        public string Value { get; set; } = "";
+    }
 }
