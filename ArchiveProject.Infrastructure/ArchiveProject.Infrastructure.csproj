@@ -7,6 +7,16 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <None Remove="Resources\Fonts\Amiri-Regular.ttf" />
+    <None Remove="Resources\Images\logo-192x192.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\Fonts\Amiri-Regular.ttf" />
+    <EmbeddedResource Include="Resources\Images\logo-192x192.png" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="ClosedXML" Version="0.105.0" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.21" />
     <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="8.0.21" />
@@ -20,10 +30,6 @@
   <ItemGroup>
     <ProjectReference Include="..\ArchiveProject.Application\ArchiveProject.Application.csproj" />
     <ProjectReference Include="..\ArchiveProject.Domain\ArchiveProject.Domain.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Folder Include="Resources\Fonts\" />
   </ItemGroup>
 
 </Project>

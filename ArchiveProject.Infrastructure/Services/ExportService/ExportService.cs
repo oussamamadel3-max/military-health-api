@@ -1,138 +1,857 @@
-﻿using ArchiveProject.Application.Common.Interfaces.ExportInterfaces;
+﻿//using ArchiveProject.Application.Common.Interfaces.ExportInterfaces;
+//using ArchiveProject.Application.Dtos.ExportDtos;
+//using ClosedXML.Excel;
+//using Microsoft.Extensions.Logging;
+//using QuestPDF.Fluent;
+//using QuestPDF.Helpers;
+//using QuestPDF.Infrastructure;
+//using System.Reflection;
+//using System.Text.RegularExpressions;
+
+//namespace ArchiveProject.Infrastructure.Services.Exporting
+//{
+//    public class ExportService : IExportService
+//    {
+//        private readonly Assembly _assembly;
+//        private readonly ILogger<ExportService>? _logger;
+
+//        // ملاحظة: سنبحث عن الـ resource فعلياً بدل الاعتماد على string ثابت
+//        private const string LogoFileName = "logo-192x192.png";
+//        private const string ArabicFontFileName = "Amiri-Regular.ttf";
+//        private const string ArabicFontFamily = "Noto Naskh Arabic";
+
+//        public ExportService()
+//        {
+//            _assembly = typeof(ExportService).Assembly;
+//        }
+
+//        public ExportService(ILogger<ExportService> logger) : this()
+//        {
+//            _logger = logger;
+//        }
+
+//        #region Quick
+//        public Task<ExportFileDto> QuickExportToExcelAsync<T>(IEnumerable<T> data, string reportName)
+//            => ExportToExcelAsync(data, new ExportOptions
+//            {
+//                ReportName = reportName,
+//                SheetName = reportName,
+//                CustomTitle = reportName,
+//                IncludeSummary = true,
+//                IncludeFooter = true,
+//                AutoFilter = true,
+//                FreezeHeaders = true
+//            });
+
+//        public Task<ExportFileDto> QuickExportToPdfAsync<T>(IEnumerable<T> data, string reportName)
+//            => ExportToPdfAsync(data, new ExportOptions
+//            {
+//                ReportName = reportName,
+//                CustomTitle = reportName,
+//                IncludeLogo = true,
+//                IncludeFooter = true
+//            });
+//        #endregion
+
+//        #region Excel
+//        public Task<ExportFileDto> ExportToExcelAsync<T>(IEnumerable<T> data, ExportOptions options)
+//        {
+//            using var wb = new XLWorkbook();
+
+//            var sheetNameRaw = string.IsNullOrWhiteSpace(options.SheetName) ? options.ReportName : options.SheetName;
+//            var sheetName = EnsureUniqueSheetName(wb, MakeValidExcelSheetName(sheetNameRaw, "تقرير"));
+//            var safeFileName = MakeSafeFileName(options.ReportName, "Report");
+
+//            var ws = wb.Worksheets.Add(sheetName);
+//            ws.RightToLeft = true;
+
+//            // ستايل عام للورقة (كل شي بالنص)
+//            ws.Style.Font.FontName = "Segoe UI";
+//            ws.Style.Font.FontSize = 10;
+//            ws.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+//            ws.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+//            ws.Style.Alignment.WrapText = true;
+
+//            var props = typeof(T).GetProperties().ToArray();
+//            if (options.ExcludedColumns?.Any() == true)
+//                props = props.Where(p => !options.ExcludedColumns.Contains(p.Name)).ToArray();
+
+//            var list = data?.ToList() ?? new List<T>();
+//            var title = options.CustomTitle ?? options.ReportName;
+
+//            CreateExcelHeader(ws, Math.Max(1, props.Length), title, options);
+
+//            if (props.Length == 0)
+//            {
+//                ws.Cell(4, 1).Value = "لا توجد أعمدة للعرض";
+//                ws.Cell(4, 1).Style.Font.Bold = true;
+//                ws.Cell(4, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+//            }
+//            else
+//            {
+//                var headerRow = CreateExcelColumnHeaders(ws, props, options);
+//                var endRow = FillExcelRows(ws, list, props, headerRow);
+
+//                if (list.Any())
+//                {
+//                    var tableRange = ws.Range(headerRow, 1, endRow - 1, props.Length);
+
+//                    // حدود + إطار أنيق
+//                    tableRange.Style.Border.OutsideBorder = XLBorderStyleValues.Medium;
+//                    tableRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+//                    tableRange.Style.Border.OutsideBorderColor = XLColor.FromHtml("#111827");
+//                    tableRange.Style.Border.InsideBorderColor = XLColor.FromHtml("#D1D5DB");
+
+//                    // Zebra rows
+//                    for (int r = headerRow + 1; r <= endRow - 1; r++)
+//                    {
+//                        var rr = ws.Range(r, 1, r, props.Length);
+//                        rr.Style.Fill.BackgroundColor =
+//                            ((r - (headerRow + 1)) % 2 == 0) ? XLColor.FromHtml("#FFFFFF") : XLColor.FromHtml("#F9FAFB");
+//                    }
+//                }
+
+//                // Autofilter + Freeze
+//                if (list.Any() && options.AutoFilter)
+//                {
+//                    ws.Range(headerRow, 1, endRow - 1, props.Length).SetAutoFilter();
+//                    if (options.FreezeHeaders)
+//                        ws.SheetView.FreezeRows(headerRow);
+//                }
+
+//                AutoFit(ws, props.Length);
+
+//                if (options.IncludeSummary)
+//                    CreateExcelSummary(ws, list.Count, endRow, props.Length);
+
+//                if (options.IncludeFooter)
+//                    AddExcelFooter(ws, endRow + 7, props.Length);
+//            }
+
+//            using var ms = new MemoryStream();
+//            wb.SaveAs(ms);
+
+//            return Task.FromResult(new ExportFileDto
+//            {
+//                FileContents = ms.ToArray(),
+//                ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+//                FileName = $"{safeFileName}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx"
+//            });
+//        }
+//        #endregion
+
+//        #region PDF
+//        public Task<ExportFileDto> ExportToPdfAsync<T>(IEnumerable<T> data, ExportOptions options)
+//        {
+//            QuestPDF.Settings.License = LicenseType.Community;
+
+//            TryRegisterArabicFont(); // مهم للعربي
+
+//            var props = typeof(T).GetProperties().ToArray();
+//            if (options.ExcludedColumns?.Any() == true)
+//                props = props.Where(p => !options.ExcludedColumns.Contains(p.Name)).ToArray();
+
+//            var list = data?.ToList() ?? new List<T>();
+
+//            // RTL عملي: نعكس الأعمدة
+//            var propsRtl = props.Reverse().ToArray();
+
+//            var titleText = CleanForXml(options.CustomTitle ?? options.ReportName);
+//            var printDate = DateTime.Now.ToString(options.DateFormat ?? "yyyy/MM/dd");
+//            var metaLine = BuildMetaLine(options); // "الفترة: ..."
+
+//            var pdfBytes = Document.Create(container =>
+//            {
+//                container.Page(page =>
+//                {
+//                    page.Size(PageSizes.A4);
+//                    page.Margin(22);
+
+//                    page.DefaultTextStyle(x => x
+//                        .FontFamily(ArabicFontFamily)
+//                        .FontSize(11)
+//                        .FontColor(Colors.Grey.Darken4));
+
+//                    // ===== Header =====
+//                    page.Header().PaddingBottom(12).Column(h =>
+//                    {
+//                        // سطر 1: (لوغو يسار) (عنوان وسط) (تاريخ يمين)
+//                        h.Item().Row(row =>
+//                        {
+//                            // يسار: اللوغو
+//                            row.ConstantItem(55).AlignLeft().Element(e =>
+//                            {
+//                                if (options.IncludeLogo)
+//                                    TryDrawLogo(e);
+//                            });
+
+//                            // وسط: العنوان
+//                            row.RelativeItem().AlignCenter().Text(titleText)
+//                               .FontSize(22).SemiBold().FontColor(Colors.Blue.Darken2);
+
+//                            // يمين: التاريخ
+//                            row.ConstantItem(130).AlignRight().Text(printDate)
+//                               .FontSize(10).FontColor(Colors.Grey.Darken1);
+//                        });
+
+//                        // سطر 2: فقط الفترة يمين (بدون خلفية/تحديد)
+//                        if (!string.IsNullOrWhiteSpace(metaLine))
+//                        {
+//                            h.Item().PaddingTop(6).AlignRight()
+//                                .Text(CleanForXml(metaLine))
+//                                .FontSize(10)
+//                                .FontColor(Colors.Grey.Darken2);
+//                        }
+
+//                        // خط فاصل أنيق
+//                        h.Item().PaddingTop(10).LineHorizontal(1).LineColor(Colors.Grey.Lighten2);
+//                    });
+
+//                    // ===== Content =====
+//                    page.Content().PaddingTop(14).Element(content =>
+//                    {
+//                        if (propsRtl.Length == 0)
+//                        {
+//                            content.AlignCenter().PaddingTop(40)
+//                                   .Text("لا توجد بيانات/أعمدة للعرض")
+//                                   .FontSize(14).SemiBold().FontColor(Colors.Grey.Darken2);
+//                            return;
+//                        }
+
+//                        content.Table(table =>
+//                        {
+//                            table.ColumnsDefinition(cols =>
+//                            {
+//                                foreach (var _ in propsRtl)
+//                                    cols.RelativeColumn();
+//                            });
+
+//                            // Table Header
+//                            table.Header(header =>
+//                            {
+//                                foreach (var p in propsRtl)
+//                                {
+//                                    var name = GetDisplayName(p.Name, options.ColumnMappings);
+
+//                                    header.Cell()
+//                                          .Background(Colors.Blue.Darken2)
+//                                          .PaddingVertical(7).PaddingHorizontal(6)
+//                                          .Border(1).BorderColor(Colors.Grey.Lighten2)
+//                                          .AlignCenter()
+//                                          .Text(CleanForXml(name))
+//                                          .FontColor(Colors.White)
+//                                          .FontSize(11)
+//                                          .SemiBold();
+//                                }
+//                            });
+
+//                            // Rows
+//                            for (int r = 0; r < list.Count; r++)
+//                            {
+//                                var item = list[r];
+//                                var bg = (r % 2 == 0) ? Colors.White : Colors.Grey.Lighten4;
+
+//                                foreach (var p in propsRtl)
+//                                {
+//                                    var raw = p.GetValue(item);
+//                                    var val = FormatPdfValue(raw, options);
+
+//                                    table.Cell()
+//                                         .Background(bg)
+//                                         .PaddingVertical(6).PaddingHorizontal(6)
+//                                         .BorderBottom(1).BorderColor(Colors.Grey.Lighten2)
+//                                         .AlignCenter()
+//                                         .Text(CleanForXml(val, null))
+//                                         .FontSize(10);
+//                                }
+//                            }
+//                        });
+//                    });
+
+//                    // ===== Footer =====
+//                    if (options.IncludeFooter)
+//                    {
+//                        page.Footer().PaddingTop(10).Column(f =>
+//                        {
+//                            f.Item().LineHorizontal(1).LineColor(Colors.Grey.Lighten2);
+
+//                            f.Item().AlignCenter().Text(t =>
+//                            {
+//                                t.Span("صفحة ").FontSize(10).FontColor(Colors.Grey.Darken2);
+//                                t.CurrentPageNumber().FontSize(10).FontColor(Colors.Grey.Darken2);
+//                                t.Span(" من ").FontSize(10).FontColor(Colors.Grey.Darken2);
+//                                t.TotalPages().FontSize(10).FontColor(Colors.Grey.Darken2);
+//                            });
+//                        });
+//                    }
+//                });
+//            }).GeneratePdf();
+
+//            var safeName = MakeSafeFileName(options.ReportName, "Report");
+
+//            return Task.FromResult(new ExportFileDto
+//            {
+//                FileContents = pdfBytes,
+//                ContentType = "application/pdf",
+//                FileName = $"{safeName}_{DateTime.Now:yyyyMMdd_HHmmss}.pdf"
+//            });
+//        }
+//        #endregion
+
+
+
+//        #region Helpers
+
+//        private string BuildMetaLine(ExportOptions o)
+//        {
+//            // المطلوب عندك غالباً: "الفترة: ...." فقط
+//            // إذا بدك تضيف فرع/قسم كمان خليهم
+//            var parts = new List<string>();
+
+//            if (!string.IsNullOrWhiteSpace(o.PeriodText))
+//                parts.Add($"{o.PeriodText}");
+
+//            // إذا بدك هذول يظهروا كمان (اختياري)
+//            if (!string.IsNullOrWhiteSpace(o.BranchName))
+//                parts.Add($"الفرع: {o.BranchName}");
+//            if (!string.IsNullOrWhiteSpace(o.DepartmentName))
+//                parts.Add($"القسم: {o.DepartmentName}");
+
+//            // خلينا الفترة أول شي باليمين
+//            return string.Join("   |   ", parts);
+//        }
+
+//        private string FormatPdfValue(object? value, ExportOptions opt)
+//        {
+//            if (value == null) return "";
+
+//            if (value is DateTime dt)
+//                return dt.ToString(opt.DateFormat ?? "yyyy/MM/dd");
+
+//            return value.ToString() ?? "";
+//        }
+
+//        private void TryRegisterArabicFont()
+//        {
+//            try
+//            {
+//                var fontResId = FindResourceIdEndsWith(ArabicFontFileName);
+//                if (fontResId == null)
+//                {
+//                    _logger?.LogWarning("Arabic font resource not found (EmbeddedResource): {File}", ArabicFontFileName);
+//                    return;
+//                }
+
+//                using var s = _assembly.GetManifestResourceStream(fontResId);
+//                if (s != null)
+//                {
+//                    s.Position = 0;
+//                    QuestPDF.Drawing.FontManager.RegisterFont(s);
+//                }
+//            }
+//            catch (Exception ex)
+//            {
+//                _logger?.LogWarning(ex, "Register Arabic font failed.");
+//            }
+//        }
+
+//        private void TryDrawLogo(IContainer container)
+//        {
+//            try
+//            {
+//                var logoResId = FindResourceIdEndsWith(LogoFileName);
+//                if (logoResId == null)
+//                {
+//                    _logger?.LogWarning("Logo resource not found (EmbeddedResource): {File}", LogoFileName);
+//                    return;
+//                }
+
+//                using var s = _assembly.GetManifestResourceStream(logoResId);
+//                if (s != null)
+//                    container.Height(45).Width(45).Image(s);
+//            }
+//            catch (Exception ex)
+//            {
+//                _logger?.LogWarning(ex, "Drawing logo failed.");
+//            }
+//        }
+
+//        private string? FindResourceIdEndsWith(string fileName)
+//        {
+//            // بيلتقطه حتى لو اختلف namespace/resource path
+//            var names = _assembly.GetManifestResourceNames();
+//            return names.FirstOrDefault(n => n.EndsWith(fileName, StringComparison.OrdinalIgnoreCase));
+//        }
+
+//        private void CreateExcelHeader(IXLWorksheet ws, int colCount, string title, ExportOptions opt)
+//        {
+//            // Title
+//            var t = ws.Range(1, 1, 1, colCount);
+//            t.Merge();
+//            t.Value = CleanForXml(title);
+//            t.Style.Font.Bold = true;
+//            t.Style.Font.FontSize = 18;
+//            t.Style.Font.FontColor = XLColor.White;
+//            t.Style.Fill.BackgroundColor = XLColor.FromHtml("#1E3A8A");
+//            t.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+//            t.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+//            t.Style.Border.OutsideBorder = XLBorderStyleValues.Medium;
+//            ws.Row(1).Height = 30;
+
+//            // Meta
+//            var meta = BuildMetaLine(opt);
+//            var m = ws.Range(2, 1, 2, colCount);
+//            m.Merge();
+//            m.Value = CleanForXml($"تاريخ التقرير: {DateTime.Now:yyyy/MM/dd HH:mm}" + (string.IsNullOrWhiteSpace(meta) ? "" : $"   |   {meta}"));
+//            m.Style.Font.FontSize = 10;
+//            m.Style.Font.FontColor = XLColor.FromHtml("#374151");
+//            m.Style.Fill.BackgroundColor = XLColor.FromHtml("#F3F4F6");
+//            m.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+//            m.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+//            m.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+//            ws.Row(2).Height = 20;
+
+//            ws.Row(3).Height = 6;
+//        }
+
+//        private int CreateExcelColumnHeaders(IXLWorksheet ws, PropertyInfo[] props, ExportOptions opt)
+//        {
+//            int r = 4;
+//            for (int i = 0; i < props.Length; i++)
+//            {
+//                var cell = ws.Cell(r, i + 1);
+//                cell.Value = CleanForXml(GetDisplayName(props[i].Name, opt.ColumnMappings));
+
+//                cell.Style.Font.Bold = true;
+//                cell.Style.Font.FontSize = 11;
+//                cell.Style.Font.FontColor = XLColor.White;
+//                cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#111827");
+//                cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+//                cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+
+//                cell.Style.Border.TopBorder = XLBorderStyleValues.Medium;
+//                cell.Style.Border.BottomBorder = XLBorderStyleValues.Medium;
+//                cell.Style.Border.LeftBorder = XLBorderStyleValues.Thin;
+//                cell.Style.Border.RightBorder = XLBorderStyleValues.Thin;
+//                cell.Style.Border.LeftBorderColor = XLColor.FromHtml("#374151");
+//                cell.Style.Border.RightBorderColor = XLColor.FromHtml("#374151");
+//            }
+
+//            ws.Row(r).Height = 24;
+//            return r;
+//        }
+
+//        private int FillExcelRows<T>(IXLWorksheet ws, List<T> list, PropertyInfo[] props, int headerRow)
+//        {
+//            int r = headerRow + 1;
+
+//            foreach (var item in list)
+//            {
+//                for (int c = 0; c < props.Length; c++)
+//                {
+//                    var v = props[c].GetValue(item);
+//                    var cell = ws.Cell(r, c + 1);
+
+//                    if (v is DateTime dt)
+//                    {
+//                        cell.Value = dt;
+//                        cell.Style.DateFormat.Format = "yyyy/mm/dd";
+//                    }
+//                    else
+//                    {
+//                        cell.Value = CleanForXml(v?.ToString());
+//                    }
+
+//                    cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+//                    cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+//                }
+
+//                ws.Row(r).Height = 20;
+//                r++;
+//            }
+
+//            return r;
+//        }
+
+//        private void AutoFit(IXLWorksheet ws, int colCount)
+//        {
+//            for (int c = 1; c <= colCount; c++)
+//            {
+//                ws.Column(c).AdjustToContents();
+//                ws.Column(c).Width = Math.Min(Math.Max(ws.Column(c).Width, 14), 45);
+//            }
+//        }
+
+//        private void CreateExcelSummary(IXLWorksheet ws, int count, int startRow, int colCount)
+//        {
+//            var r = startRow + 2;
+
+//            var rg = ws.Range(r, 1, r, Math.Max(1, Math.Min(colCount, 6)));
+//            rg.Merge();
+//            rg.Value = $"ملخص التقرير: إجمالي السجلات = {count}";
+//            rg.Style.Font.Bold = true;
+//            rg.Style.Font.FontColor = XLColor.FromHtml("#065F46");
+//            rg.Style.Fill.BackgroundColor = XLColor.FromHtml("#ECFDF5");
+//            rg.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+//            rg.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+//            rg.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+
+//            ws.Row(r).Height = 20;
+//        }
+
+//        private void AddExcelFooter(IXLWorksheet ws, int row, int colCount)
+//        {
+//            var rg = ws.Range(row, 1, row, Math.Max(1, colCount));
+//            rg.Merge();
+//            rg.Value = "تم إنشاء هذا التقرير بواسطة نظام الأرشفة";
+//            rg.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+//            rg.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+//            rg.Style.Font.FontSize = 9;
+//            rg.Style.Font.FontColor = XLColor.FromHtml("#6B7280");
+//            rg.Style.Fill.BackgroundColor = XLColor.FromHtml("#F9FAFB");
+//            rg.Style.Border.TopBorder = XLBorderStyleValues.Thin;
+//            ws.Row(row).Height = 18;
+//        }
+
+//        private static string GetDisplayName(string propertyName, Dictionary<string, string>? map = null)
+//            => (map != null && map.TryGetValue(propertyName, out var v)) ? v : propertyName;
+
+//        private static string CleanForXml(string? input, int? maxLen = 32767)
+//        {
+//            if (string.IsNullOrEmpty(input)) return string.Empty;
+//            var cleaned = Regex.Replace(input, @"[\x00-\x08\x0B\x0C\x0E-\x1F]", "");
+//            if (maxLen.HasValue && cleaned.Length > maxLen.Value) cleaned = cleaned[..maxLen.Value];
+//            return cleaned;
+//        }
+
+//        private static string MakeValidExcelSheetName(string? name, string fallback)
+//        {
+//            var s = string.IsNullOrWhiteSpace(name) ? fallback : name.Trim();
+//            foreach (var ch in new[] { ':', '\\', '/', '?', '*', '[', ']' })
+//                s = s.Replace(ch.ToString(), "");
+//            s = Regex.Replace(s, @"\s{2,}", " ").Trim();
+//            if (s.Length > 31) s = s[..31];
+//            return string.IsNullOrWhiteSpace(s) ? fallback : s;
+//        }
+
+//        private static string EnsureUniqueSheetName(XLWorkbook wb, string desired)
+//        {
+//            var name = desired; int i = 2;
+//            while (wb.Worksheets.Any(w => w.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+//            {
+//                var suffix = $" ({i})";
+//                var baseLen = Math.Max(1, 31 - suffix.Length);
+//                var baseName = desired.Length > baseLen ? desired[..baseLen] : desired;
+//                name = baseName + suffix;
+//                i++;
+//            }
+//            return name;
+//        }
+
+//        private static string MakeSafeFileName(string? name, string fallback)
+//        {
+//            var s = string.IsNullOrWhiteSpace(name) ? fallback : name.Trim();
+//            foreach (var ch in Path.GetInvalidFileNameChars())
+//                s = s.Replace(ch.ToString(), "");
+//            s = Regex.Replace(s, @"\s{2,}", " ").Trim();
+//            return string.IsNullOrWhiteSpace(s) ? fallback : s;
+//        }
+//        #endregion
+//    }
+//}
+
+using ArchiveProject.Application.Common.Interfaces;
 using ArchiveProject.Application.Dtos.ExportDtos;
 using ClosedXML.Excel;
+using Microsoft.Extensions.Logging;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
 using System.Reflection;
 using System.Text.RegularExpressions;
 
-namespace ArchiveProject.Infrastructure.Services.Exporting
+namespace ArchiveProject.Infrastructure.Services
 {
     public class ExportService : IExportService
     {
+        private readonly string _logoPath;
         private readonly Assembly _assembly;
-        private readonly string? _logoResId;
+
+        // اختياري: لوج (يبقى null في حال استخدام المنشئ الافتراضي)
+        private readonly ILogger<ExportService>? _logger;
 
         public ExportService()
         {
             _assembly = typeof(ExportService).Assembly;
-            _logoResId = "ArchiveProject.Infrastructure.Resources.Images.logo-192x192.png";
+            _logoPath = "FinanceProject.Infrastructure.Resources.Images.logo-192x192.png";
         }
 
-        public Task<ExportFileDto> QuickExportToExcelAsync<T>(IEnumerable<T> data, string reportName)
-            => ExportToExcelAsync(data, new ExportOptions
-            {
-                ReportName = reportName,
-                SheetName = reportName,
-                CustomTitle = reportName
-            });
-
-        public Task<ExportFileDto> QuickExportToPdfAsync<T>(IEnumerable<T> data, string reportName)
-            => ExportToPdfAsync(data, new ExportOptions
-            {
-                ReportName = reportName,
-                CustomTitle = reportName,
-                IncludeLogo = true
-            });
-
-        // =========================
-        // Excel
-        // =========================
-        public Task<ExportFileDto> ExportToExcelAsync<T>(IEnumerable<T> data, ExportOptions options)
+        // منشئ بديل في حال رغبت بالحقن عبر DI
+        public ExportService(ILogger<ExportService> logger)
+            : this()
         {
-            using var wb = new XLWorkbook();
+            _logger = logger;
+        }
 
-            var sheetNameRaw = string.IsNullOrWhiteSpace(options.SheetName) ? options.ReportName : options.SheetName;
-            var sheetName = EnsureUniqueSheetName(wb, MakeValidExcelSheetName(sheetNameRaw, "تقرير"));
-            var fileName = MakeSafeFileName(options.ReportName, "Report");
 
-            var ws = wb.Worksheets.Add(sheetName);
-            ws.RightToLeft = true;
+        #region ExportToExcel (خيارات موسعة)
+        public async Task<ExportFileDto> ExportToExcelAsync<T>(IEnumerable<T> data, ExportOptions options)
+        {
+            using var workbook = new XLWorkbook();
 
-            // ستايل عام للورقة
-            ws.Style.Font.FontName = "Segoe UI";
-            ws.Style.Font.FontSize = 10;
-            ws.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-            ws.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-            ws.Style.Alignment.WrapText = true;
+            var rawSheet = string.IsNullOrWhiteSpace(options.SheetName) ? (options.ReportName ?? "تقرير") : options.SheetName!;
+            var safeSheetName = EnsureUniqueSheetName(workbook, MakeValidExcelSheetName(rawSheet, "تقرير"));
+            var safeReportName = MakeSafeFileName(options.ReportName ?? "Report");
+
+            var worksheet = workbook.Worksheets.Add(safeSheetName);
+            worksheet.RightToLeft = true;
 
             var props = typeof(T).GetProperties().ToArray();
+            var dataList = data?.ToList() ?? new List<T>();
+
             if (options.ExcludedColumns?.Any() == true)
                 props = props.Where(p => !options.ExcludedColumns.Contains(p.Name)).ToArray();
 
-            var list = data?.ToList() ?? new List<T>();
-
-            var title = options.CustomTitle ?? options.ReportName;
-            CreateHeader(ws, Math.Max(1, props.Length), title, options);
-
             if (props.Length == 0)
             {
-                ws.Cell(4, 1).Value = "لا توجد أعمدة للعرض";
-                ws.Cell(4, 1).Style.Font.Bold = true;
-                ws.Cell(4, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-            }
-            else
-            {
-                var headerRow = CreateColumnHeaders(ws, props, options);
-                var endRow = FillRows(ws, list, props, headerRow, options);
+                worksheet.Cell(1, 1).Value = CleanForXml(options.CustomTitle ?? $"تقرير {options.ReportName}");
+                worksheet.Cell(2, 1).Value = "لا توجد بيانات للعرض";
+                worksheet.Cell(3, 1).Value = $"تاريخ التقرير: {DateTime.Now:yyyy/MM/dd HH:mm}";
 
-                // Table styling range
-                if (list.Any())
+                using var emptyStream2 = new MemoryStream();
+                workbook.SaveAs(emptyStream2);
+
+                return new ExportFileDto
                 {
-                    var rng = ws.Range(headerRow, 1, endRow - 1, props.Length);
-
-                    // Borders
-                    rng.Style.Border.OutsideBorder = XLBorderStyleValues.Medium;
-                    rng.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
-                    rng.Style.Border.OutsideBorderColor = XLColor.FromHtml("#111827");
-                    rng.Style.Border.InsideBorderColor = XLColor.FromHtml("#D1D5DB");
-
-                    // Zebra rows for data only
-                    for (int r = headerRow + 1; r <= endRow - 1; r++)
-                    {
-                        var rowRange = ws.Range(r, 1, r, props.Length);
-                        rowRange.Style.Fill.BackgroundColor =
-                            (r - (headerRow + 1)) % 2 == 0 ? XLColor.FromHtml("#FFFFFF") : XLColor.FromHtml("#F9FAFB");
-                    }
-                }
-
-                // Autofilter + Freeze
-                if (list.Any() && options.AutoFilter)
-                {
-                    ws.Range(headerRow, 1, endRow - 1, props.Length).SetAutoFilter();
-                    if (options.FreezeHeaders)
-                        ws.SheetView.FreezeRows(headerRow);
-                }
-
-                AutoFit(ws, props.Length);
-
-                if (options.IncludeSummary)
-                    CreateSummary(ws, list.Cast<object>().ToList(), props, endRow, options);
-
-                if (options.IncludeFooter)
-                    AddFooter(ws, endRow + 7, props.Length);
+                    FileContents = emptyStream2.ToArray(),
+                    ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    FileName = $"{safeReportName}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx"
+                };
             }
 
-            using var ms = new MemoryStream();
-            wb.SaveAs(ms);
+            var headerTitle = options.CustomTitle ?? $"تقرير {options.ReportName}";
+            worksheet.PageSetup.Header.Center.AddText(CleanForXml(headerTitle));
+            worksheet.PageSetup.Footer.Center.AddText("صفحة &P / &N");
 
-            return Task.FromResult(new ExportFileDto
+            // عنوان
+            CreateModernHeader(worksheet, props.Length, CleanForXml(headerTitle), options);
+
+            // رؤوس الأعمدة
+            var headerRow = CreateModernColumnHeaders(worksheet, props, options);
+
+            // البيانات
+            var dataRow = CreateModernDataRows(worksheet, dataList.Cast<object>().ToList(), props, headerRow, options);
+
+            // إطار حول الجدول
+            if (dataList.Any() && props.Length > 0)
             {
-                FileContents = ms.ToArray(),
+                var tableRange = worksheet.Range(headerRow, 1, dataRow - 1, props.Length);
+                tableRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thick;
+                tableRange.Style.Border.OutsideBorderColor = XLColor.FromHtml("#000000");
+            }
+
+            // تنسيق الأعمدة
+            FormatModernColumns(worksheet, props.Length);
+
+            // AutoFilter + Freeze
+            if (dataList.Any() && props.Length > 0 && options.AutoFilter)
+            {
+                var dataRange = worksheet.Range(headerRow, 1, dataRow - 1, props.Length);
+                dataRange.SetAutoFilter();
+                if (options.FreezeHeaders)
+                    worksheet.SheetView.FreezeRows(headerRow);
+            }
+
+            // ملخص (مع حماية)
+            if (options.IncludeSummary)
+            {
+                try
+                {
+                    CreateModernSummary(worksheet, dataList.Cast<object>().ToList(), props, dataRow, options);
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Summary block failed; continuing without summary.");
+                }
+            }
+
+            // إطار خارجي
+            var lastUsedRow = worksheet.LastRowUsed()?.RowNumber() ?? 1;
+            var lastUsedColumn = worksheet.LastColumnUsed()?.ColumnNumber() ?? 1;
+            if (lastUsedRow > 0 && lastUsedColumn > 0)
+            {
+                var fullRange = worksheet.Range(1, 1, lastUsedRow, lastUsedColumn);
+                fullRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thick;
+                fullRange.Style.Border.OutsideBorderColor = XLColor.FromHtml("#000000");
+            }
+
+            // Footer داخلي
+            if (options.IncludeFooter)
+                AddFooterInfo(worksheet, dataRow + 10);
+
+            using var stream = new MemoryStream();
+            workbook.SaveAs(stream);
+
+            return new ExportFileDto
+            {
+                FileContents = stream.ToArray(),
                 ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                FileName = $"{fileName}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx"
-            });
+                FileName = $"{safeReportName}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx"
+            };
         }
+        #endregion
 
-        // =========================
-        // PDF
-        // =========================
+        #region ExportToPdf
+        //public async Task<ExportFileDto> ExportToPdfAsync<T>(IEnumerable<T> data, ExportOptions options)
+        //{
+        //    QuestPDF.Settings.EnableDebugging = true;
+        //    QuestPDF.Settings.License = LicenseType.Community;
+
+        //    // (اختياري لكن مهم) تسجيل خط عربي من Embedded Resource
+        //    // ضع الخط ضمن: FinanceProject.Infrastructure/Resources/Fonts/NotoNaskhArabic-Regular.ttf
+        //    var fontResId = "FinanceProject.Infrastructure.Resources.Fonts.NotoNaskhArabic-Regular.ttf";
+        //    try
+        //    {
+        //        using var fontStream = _assembly.GetManifestResourceStream(fontResId);
+        //        if (fontStream != null)
+        //        {
+        //            fontStream.Position = 0; // احتياط
+        //            QuestPDF.Drawing.FontManager.RegisterFont(fontStream);
+        //        }
+        //        else
+        //        {
+        //            _logger?.LogWarning("PDF font resource not found: {Res}", fontResId);
+        //        }
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        _logger?.LogWarning(ex, "Registering embedded font failed; proceeding with default font.");
+        //    }
+
+        //    try
+        //    {
+        //        var pdfBytes = Document.Create(container =>
+        //        {
+        //            container.Page(page =>
+        //            {
+        //                page.Size(PageSizes.A4);
+        //                page.Margin(20);
+        //                page.DefaultTextStyle(x => x.FontSize(12));
+
+        //                // Header
+        //                page.Header().Row(row =>
+        //                {
+        //                    if (options.IncludeLogo)
+        //                    {
+        //                        try
+        //                        {
+        //                            using var stream = _assembly.GetManifestResourceStream(_logoPath);
+        //                            if (stream != null)
+        //                            {
+        //                                row.ConstantItem(60).AlignLeft().Image(stream);
+        //                            }
+        //                            else
+        //                            {
+        //                                _logger?.LogWarning("Logo resource not found: {Res}", _logoPath);
+        //                            }
+        //                        }
+        //                        catch (Exception ex)
+        //                        {
+        //                            _logger?.LogWarning(ex, "Skipping logo due to load error on this environment.");
+        //                        }
+        //                    }
+
+        //                    row.RelativeItem()
+        //                       .AlignCenter()
+        //                       .Text(CleanForXml(options.CustomTitle ?? options.ReportName))
+        //                       .FontSize(18).SemiBold().FontColor(Colors.Blue.Darken1);
+
+        //                    row.ConstantItem(100)
+        //                       .AlignRight()
+        //                       .Text(DateTime.Now.ToString(options.DateFormat ?? "yyyy/MM/dd"))
+        //                       .FontSize(10).FontColor(Colors.Grey.Darken1);
+        //                });
+
+        //                // Content
+        //                page.Content().PaddingVertical(10).Table(table =>
+        //                {
+        //                    var props = typeof(T).GetProperties();
+
+        //                    if (options.ExcludedColumns?.Any() == true)
+        //                        props = props.Where(p => !options.ExcludedColumns.Contains(p.Name)).ToArray();
+
+        //                    table.ColumnsDefinition(columns =>
+        //                    {
+        //                        foreach (var _ in props) columns.RelativeColumn();
+        //                    });
+
+        //                    // Header
+        //                    table.Header(header =>
+        //                    {
+        //                        foreach (var prop in props)
+        //                        {
+        //                            var columnName = GetDisplayName(prop.Name, options.ColumnMappings);
+        //                            header.Cell()
+        //                                  .Background(Colors.Grey.Lighten3)
+        //                                  .Padding(2).AlignCenter()
+        //                                  .Text(CleanForXml(columnName, null)).SemiBold().FontSize(10);
+        //                        }
+        //                    });
+
+        //                    // Rows
+        //                    int rowIndex = 0;
+        //                    foreach (var item in data)
+        //                    {
+        //                        foreach (var prop in props)
+        //                        {
+        //                            var raw = prop.GetValue(item)?.ToString() ?? "";
+        //                            var value = CleanForXml(raw, null); // لا نقيّد PDF بحد Excel
+        //                            table.Cell()
+        //                                  .Background(rowIndex % 2 == 0 ? Colors.White : Colors.Grey.Lighten4)
+        //                                  .Padding(2).AlignCenter()
+        //                                  .Text(value).FontSize(10);
+        //                        }
+        //                        rowIndex++;
+        //                    }
+        //                });
+
+        //                // Footer
+        //                if (options.IncludeFooter)
+        //                {
+        //                    page.Footer().AlignCenter().Text(txt =>
+        //                    {
+        //                        txt.Span("صفحة ").FontSize(10).FontColor(Colors.Grey.Darken2);
+        //                        txt.CurrentPageNumber().FontSize(10).FontColor(Colors.Grey.Darken2);
+        //                        txt.Span(" من ").FontSize(10).FontColor(Colors.Grey.Darken2);
+        //                        txt.TotalPages().FontSize(10).FontColor(Colors.Grey.Darken2);
+        //                    });
+        //                }
+        //            });
+        //        }).GeneratePdf();
+
+        //        var safeName = MakeSafeFileName(options.ReportName ?? "Report");
+        //        return new ExportFileDto
+        //        {
+        //            FileContents = pdfBytes,
+        //            ContentType = "application/pdf",
+        //            FileName = $"{safeName}_{DateTime.Now:yyyyMMdd_HHmmss}.pdf"
+        //        };
+        //    }
+        //    catch (QuestPDF.Drawing.Exceptions.DocumentLayoutException ex)
+        //    {
+        //        _logger?.LogError(ex, "QuestPDF Layout Error");
+        //        throw;
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        _logger?.LogError(ex, "PDF export failed (likely data-related or missing native assets).");
+        //        throw;
+        //    }
+        //}
+
         public Task<ExportFileDto> ExportToPdfAsync<T>(IEnumerable<T> data, ExportOptions options)
         {
             QuestPDF.Settings.License = LicenseType.Community;
-
-            TryRegisterArabicFont();
 
             var props = typeof(T).GetProperties().ToArray();
             if (options.ExcludedColumns?.Any() == true)
@@ -144,8 +863,8 @@ namespace ArchiveProject.Infrastructure.Services.Exporting
             var propsRtl = props.Reverse().ToArray();
 
             var titleText = CleanForXml(options.CustomTitle ?? options.ReportName);
-            var metaLine = BuildMetaLine(options);
             var printDate = DateTime.Now.ToString(options.DateFormat ?? "yyyy/MM/dd");
+            var metaLine = BuildMetaLine(options); // "الفترة: ..."
 
             var pdfBytes = Document.Create(container =>
             {
@@ -154,46 +873,52 @@ namespace ArchiveProject.Infrastructure.Services.Exporting
                     page.Size(PageSizes.A4);
                     page.Margin(22);
 
-                    // خط عربي + ستايل عام
                     page.DefaultTextStyle(x => x
-                        .FontFamily("Noto Naskh Arabic")
+                        .FontFamily()
                         .FontSize(11)
                         .FontColor(Colors.Grey.Darken4));
 
                     // ===== Header =====
-                    page.Header().PaddingBottom(10).Column(h =>
+                    page.Header().PaddingBottom(12).Column(h =>
                     {
+                        // سطر 1: (لوغو يسار) (عنوان وسط) (تاريخ يمين)
                         h.Item().Row(row =>
                         {
-                            // ✅ لوغو يسار
-                            if (options.IncludeLogo)
-                                TryDrawLogo(row);
+                            // يسار: اللوغو
+                            row.ConstantItem(55).AlignLeft().Element(e =>
+                            {
+                                if (options.IncludeLogo)
+                                    TryDrawLogo(e);
+                            });
 
-                            // ✅ عنوان وسط
+                            // وسط: العنوان
                             row.RelativeItem().AlignCenter().Text(titleText)
-                               .FontSize(18).SemiBold().FontColor(Colors.Blue.Darken2);
+                               .FontSize(22).SemiBold().FontColor(Colors.Blue.Darken2);
 
-                            // ✅ تاريخ يمين
-                            row.ConstantItem(120).AlignRight().Text(printDate)
-                               .FontSize(9).FontColor(Colors.Grey.Darken1);
+                            // يمين: التاريخ
+                            row.ConstantItem(130).AlignRight().Text(printDate)
+                               .FontSize(10).FontColor(Colors.Grey.Darken1);
                         });
 
+                        // سطر 2: فقط الفترة يمين (بدون خلفية/تحديد)
                         if (!string.IsNullOrWhiteSpace(metaLine))
                         {
-                            h.Item().PaddingTop(4).AlignRight()
+                            h.Item().PaddingTop(6).AlignRight()
                                 .Text(CleanForXml(metaLine))
-                                .FontSize(9).FontColor(Colors.Grey.Darken1);
+                                .FontSize(10)
+                                .FontColor(Colors.Grey.Darken2);
                         }
 
-                        h.Item().PaddingTop(8).LineHorizontal(1).LineColor(Colors.Grey.Lighten2);
+                        // خط فاصل أنيق
+                        h.Item().PaddingTop(10).LineHorizontal(1).LineColor(Colors.Grey.Lighten2);
                     });
 
                     // ===== Content =====
-                    page.Content().PaddingTop(10).Element(content =>
+                    page.Content().PaddingTop(14).Element(content =>
                     {
                         if (propsRtl.Length == 0)
                         {
-                            content.AlignCenter().PaddingTop(30)
+                            content.AlignCenter().PaddingTop(40)
                                    .Text("لا توجد بيانات/أعمدة للعرض")
                                    .FontSize(14).SemiBold().FontColor(Colors.Grey.Darken2);
                             return;
@@ -207,7 +932,7 @@ namespace ArchiveProject.Infrastructure.Services.Exporting
                                     cols.RelativeColumn();
                             });
 
-                            // Header
+                            // Table Header
                             table.Header(header =>
                             {
                                 foreach (var p in propsRtl)
@@ -216,12 +941,12 @@ namespace ArchiveProject.Infrastructure.Services.Exporting
 
                                     header.Cell()
                                           .Background(Colors.Blue.Darken2)
-                                          .PaddingVertical(6).PaddingHorizontal(4)
+                                          .PaddingVertical(7).PaddingHorizontal(6)
                                           .Border(1).BorderColor(Colors.Grey.Lighten2)
                                           .AlignCenter()
                                           .Text(CleanForXml(name))
                                           .FontColor(Colors.White)
-                                          .FontSize(10)
+                                          .FontSize(11)
                                           .SemiBold();
                                 }
                             });
@@ -234,16 +959,16 @@ namespace ArchiveProject.Infrastructure.Services.Exporting
 
                                 foreach (var p in propsRtl)
                                 {
-                                    var raw = p.GetValue(item)?.ToString() ?? "";
-                                    var val = CleanForXml(raw, null);
+                                    var raw = p.GetValue(item);
+                                    var val = FormatPdfValue(raw, options);
 
                                     table.Cell()
                                          .Background(bg)
-                                         .PaddingVertical(5).PaddingHorizontal(4)
+                                         .PaddingVertical(6).PaddingHorizontal(6)
                                          .BorderBottom(1).BorderColor(Colors.Grey.Lighten2)
                                          .AlignCenter()
-                                         .Text(val)
-                                         .FontSize(9);
+                                         .Text(CleanForXml(val, null))
+                                         .FontSize(10);
                                 }
                             }
                         });
@@ -256,13 +981,12 @@ namespace ArchiveProject.Infrastructure.Services.Exporting
                         {
                             f.Item().LineHorizontal(1).LineColor(Colors.Grey.Lighten2);
 
-                            // ✅ بدون فواصل منقوطة غلط + chaining صحيح
                             f.Item().AlignCenter().Text(t =>
                             {
-                                t.Span("صفحة ").FontSize(9).FontColor(Colors.Grey.Darken2);
-                                t.CurrentPageNumber().FontSize(9).FontColor(Colors.Grey.Darken2);
-                                t.Span(" من ").FontSize(9).FontColor(Colors.Grey.Darken2);
-                                t.TotalPages().FontSize(9).FontColor(Colors.Grey.Darken2);
+                                t.Span("صفحة ").FontSize(10).FontColor(Colors.Grey.Darken2);
+                                t.CurrentPageNumber().FontSize(10).FontColor(Colors.Grey.Darken2);
+                                t.Span(" من ").FontSize(10).FontColor(Colors.Grey.Darken2);
+                                t.TotalPages().FontSize(10).FontColor(Colors.Grey.Darken2);
                             });
                         });
                     }
@@ -279,218 +1003,608 @@ namespace ArchiveProject.Infrastructure.Services.Exporting
             });
         }
 
-        // =========================
-        // Helpers
-        // =========================
-        private string BuildMetaLine(ExportOptions o)
-        {
-            var parts = new List<string>();
-            if (!string.IsNullOrWhiteSpace(o.BranchName)) parts.Add($"الفرع: {o.BranchName}");
-            if (!string.IsNullOrWhiteSpace(o.DepartmentName)) parts.Add($"القسم: {o.DepartmentName}");
-            if (!string.IsNullOrWhiteSpace(o.PeriodText)) parts.Add($"الفترة: {o.PeriodText}");
-            return string.Join("  |  ", parts);
-        }
+        #endregion
 
-        private void TryRegisterArabicFont()
-        {
-            var fontResId = "ArchiveProject.Infrastructure.Resources.Fonts.NotoNaskhArabic-Regular.ttf";
-            try
+        #region QuickExport
+
+        public Task<ExportFileDto> QuickExportToExcelAsync<T>(IEnumerable<T> data, string reportName)
+            => ExportToExcelAsync(data, new ExportOptions
             {
-                using var s = _assembly.GetManifestResourceStream(fontResId);
-                if (s != null)
-                {
-                    s.Position = 0;
-                    QuestPDF.Drawing.FontManager.RegisterFont(s);
-                }
-            }
-            catch { }
-        }
+                ReportName = reportName,
+                SheetName = reportName,
+                CustomTitle = reportName,
+                IncludeSummary = true,
+                IncludeFooter = true,
+                AutoFilter = true,
+                FreezeHeaders = true
+            });
 
-        private void TryDrawLogo(QuestPDF.Fluent.RowDescriptor row)
-        {
-            if (string.IsNullOrWhiteSpace(_logoResId)) return;
-            try
+        public Task<ExportFileDto> QuickExportToPdfAsync<T>(IEnumerable<T> data, string reportName)
+            => ExportToPdfAsync(data, new ExportOptions
             {
-                using var s = _assembly.GetManifestResourceStream(_logoResId);
-                if (s != null)
-                {
-                    row.ConstantItem(48).AlignLeft().Image(s);
-                    row.Spacing(8);
-                }
-            }
-            catch { }
-        }
+                ReportName = reportName,
+                CustomTitle = reportName,
+                IncludeLogo = true,
+                IncludeFooter = true
+            });
 
-        private void CreateHeader(IXLWorksheet ws, int colCount, string title, ExportOptions opt)
-        {
-            // Title
-            var t = ws.Range(1, 1, 1, colCount);
-            t.Merge();
-            t.Value = CleanForXml(title);
-            t.Style.Font.Bold = true;
-            t.Style.Font.FontSize = 18;
-            t.Style.Font.FontColor = XLColor.White;
-            t.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-            t.Style.Fill.BackgroundColor = XLColor.FromHtml("#1E3A8A");
-            t.Style.Border.OutsideBorder = XLBorderStyleValues.Medium;
-            ws.Row(1).Height = 28;
+        #endregion
 
-            // Meta
-            var meta = BuildMetaLine(opt);
-            var m = ws.Range(2, 1, 2, colCount);
-            m.Merge();
-            m.Value = CleanForXml($"تاريخ التقرير: {DateTime.Now:yyyy/MM/dd HH:mm}" + (string.IsNullOrWhiteSpace(meta) ? "" : $"  |  {meta}"));
-            m.Style.Font.FontSize = 10;
-            m.Style.Font.FontColor = XLColor.FromHtml("#374151");
-            m.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-            m.Style.Fill.BackgroundColor = XLColor.FromHtml("#F3F4F6");
-            m.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-            ws.Row(2).Height = 20;
 
-            ws.Row(3).Height = 6;
-        }
 
-        private int CreateColumnHeaders(IXLWorksheet ws, PropertyInfo[] props, ExportOptions opt)
-        {
-            int r = 4;
-            for (int i = 0; i < props.Length; i++)
-            {
-                var cell = ws.Cell(r, i + 1);
-                cell.Value = CleanForXml(GetDisplayName(props[i].Name, opt.ColumnMappings));
-
-                cell.Style.Font.Bold = true;
-                cell.Style.Font.FontSize = 11;
-                cell.Style.Font.FontColor = XLColor.White;
-                cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-                cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-                cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#111827");
-
-                cell.Style.Border.TopBorder = XLBorderStyleValues.Medium;
-                cell.Style.Border.BottomBorder = XLBorderStyleValues.Medium;
-                cell.Style.Border.LeftBorder = XLBorderStyleValues.Thin;
-                cell.Style.Border.RightBorder = XLBorderStyleValues.Thin;
-
-                cell.Style.Border.TopBorderColor = XLColor.FromHtml("#111827");
-                cell.Style.Border.BottomBorderColor = XLColor.FromHtml("#111827");
-                cell.Style.Border.LeftBorderColor = XLColor.FromHtml("#374151");
-                cell.Style.Border.RightBorderColor = XLColor.FromHtml("#374151");
-            }
-            ws.Row(r).Height = 24;
-            return r;
-        }
-
-        private int FillRows<T>(IXLWorksheet ws, List<T> list, PropertyInfo[] props, int headerRow, ExportOptions opt)
-        {
-            int r = headerRow + 1;
-
-            foreach (var item in list)
-            {
-                for (int c = 0; c < props.Length; c++)
-                {
-                    var v = props[c].GetValue(item);
-                    var cell = ws.Cell(r, c + 1);
-
-                    // قيم منسقة بسيطة
-                    if (v is DateTime dt)
-                    {
-                        cell.Value = dt;
-                        cell.Style.DateFormat.Format = "yyyy/mm/dd";
-                    }
-                    else
-                    {
-                        cell.Value = CleanForXml(v?.ToString());
-                    }
-
-                    cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-                    cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-                }
-                ws.Row(r).Height = 20;
-                r++;
-            }
-
-            return r;
-        }
-
-        private void AutoFit(IXLWorksheet ws, int colCount)
-        {
-            for (int c = 1; c <= colCount; c++)
-            {
-                ws.Column(c).AdjustToContents();
-                ws.Column(c).Width = Math.Min(Math.Max(ws.Column(c).Width, 14), 40);
-            }
-        }
-
-        private void CreateSummary(IXLWorksheet ws, List<object> data, PropertyInfo[] props, int startRow, ExportOptions opt)
-        {
-            var r = startRow + 2;
-
-            var rg = ws.Range(r, 1, r, Math.Max(2, Math.Min(props.Length, 6)));
-            rg.Merge();
-            rg.Value = $"ملخص: إجمالي السجلات = {data.Count}";
-            rg.Style.Font.Bold = true;
-            rg.Style.Font.FontColor = XLColor.FromHtml("#065F46");
-            rg.Style.Fill.BackgroundColor = XLColor.FromHtml("#ECFDF5");
-            rg.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-            rg.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-
-            ws.Row(r).Height = 20;
-        }
-
-        private void AddFooter(IXLWorksheet ws, int row, int colCount)
-        {
-            var rg = ws.Range(row, 1, row, Math.Max(1, colCount));
-            rg.Merge();
-            rg.Value = "تم إنشاء هذا التقرير بواسطة نظام الأرشفة";
-            rg.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-            rg.Style.Font.FontSize = 9;
-            rg.Style.Font.FontColor = XLColor.FromHtml("#6B7280");
-            rg.Style.Fill.BackgroundColor = XLColor.FromHtml("#F9FAFB");
-            rg.Style.Border.TopBorder = XLBorderStyleValues.Thin;
-            ws.Row(row).Height = 18;
-        }
-
-        private static string GetDisplayName(string propertyName, Dictionary<string, string>? map = null)
-            => (map != null && map.TryGetValue(propertyName, out var v)) ? v : propertyName;
-
-        private static string CleanForXml(string? input, int? maxLen = 32767)
-        {
-            if (string.IsNullOrEmpty(input)) return string.Empty;
-            var cleaned = Regex.Replace(input, @"[\x00-\x08\x0B\x0C\x0E-\x1F]", "");
-            if (maxLen.HasValue && cleaned.Length > maxLen.Value) cleaned = cleaned[..maxLen.Value];
-            return cleaned;
-        }
-
-        private static string MakeValidExcelSheetName(string? name, string fallback)
+        #region Helpers: Sheet/File name sanitizers
+        private static string MakeValidExcelSheetName(string? name, string fallback = "Sheet1")
         {
             var s = string.IsNullOrWhiteSpace(name) ? fallback : name.Trim();
-            foreach (var ch in new[] { ':', '\\', '/', '?', '*', '[', ']' })
-                s = s.Replace(ch.ToString(), "");
+
+            var invalid = new[] { ':', '\\', '/', '?', '*', '[', ']' };
+            foreach (var ch in invalid) s = s.Replace(ch.ToString(), string.Empty);
+
+            s = string.Concat(s.Where(c => !char.IsControl(c)));
             s = Regex.Replace(s, @"\s{2,}", " ").Trim();
-            if (s.Length > 31) s = s[..31];
+
+            if (s.Length > 31) s = s.Substring(0, 31);
             return string.IsNullOrWhiteSpace(s) ? fallback : s;
         }
 
         private static string EnsureUniqueSheetName(XLWorkbook wb, string desired)
         {
-            var name = desired; int i = 2;
-            while (wb.Worksheets.Any(w => w.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+            var name = desired;
+            int i = 2;
+            while (wb.Worksheets.Any(w => string.Equals(w.Name, name, StringComparison.OrdinalIgnoreCase)))
             {
                 var suffix = $" ({i})";
-                var baseLen = Math.Max(1, 31 - suffix.Length);
-                var baseName = desired.Length > baseLen ? desired[..baseLen] : desired;
+                var maxBase = 31 - suffix.Length;
+                var baseName = desired.Length > maxBase ? desired[..maxBase] : desired;
                 name = baseName + suffix;
                 i++;
             }
             return name;
         }
 
-        private static string MakeSafeFileName(string? name, string fallback)
+        private static string MakeSafeFileName(string? name, string fallback = "Report")
         {
             var s = string.IsNullOrWhiteSpace(name) ? fallback : name.Trim();
-            foreach (var ch in Path.GetInvalidFileNameChars())
-                s = s.Replace(ch.ToString(), "");
+            foreach (var ch in Path.GetInvalidFileNameChars()) s = s.Replace(ch.ToString(), string.Empty);
             s = Regex.Replace(s, @"\s{2,}", " ").Trim();
             return string.IsNullOrWhiteSpace(s) ? fallback : s;
         }
+
+        // 7) تنسيقات وعناصر العرض
+        private void CreateModernHeader(IXLWorksheet worksheet, int columnCount, string title, ExportOptions? options = null)
+        {
+            if (columnCount <= 0) columnCount = 1;
+
+            var titleRow = 1;
+            var titleRange = worksheet.Range(titleRow, 1, titleRow, columnCount);
+            titleRange.Merge();
+            titleRange.Value = CleanForXml(title);
+
+            var themeColors = GetThemeColors(options?.Theme ?? ExportTheme.Modern);
+            titleRange.Style.Font.FontSize = 18;
+            titleRange.Style.Font.Bold = true;
+            titleRange.Style.Font.FontColor = XLColor.White;
+            titleRange.Style.Fill.BackgroundColor = themeColors.PrimaryColor;
+            titleRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            titleRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+            titleRange.Style.Border.TopBorder = XLBorderStyleValues.Double;
+            titleRange.Style.Border.BottomBorder = XLBorderStyleValues.Double;
+            titleRange.Style.Border.LeftBorder = XLBorderStyleValues.Double;
+            titleRange.Style.Border.RightBorder = XLBorderStyleValues.Double;
+            titleRange.Style.Border.TopBorderColor = themeColors.DarkColor;
+            titleRange.Style.Border.BottomBorderColor = themeColors.DarkColor;
+            titleRange.Style.Border.LeftBorderColor = themeColors.DarkColor;
+            titleRange.Style.Border.RightBorderColor = themeColors.DarkColor;
+
+            var infoRow = 2;
+            var infoRange = worksheet.Range(infoRow, 1, infoRow, columnCount);
+            infoRange.Merge();
+
+            var infoText = $"📅 تاريخ التقرير: {DateTime.Now.ToString(options?.DateFormat ?? "yyyy/MM/dd HH:mm")}";
+            
+            infoText += "  تم إنشاؤه بواسطة: نظام الارشفة المتطور";
+
+            infoRange.Value = CleanForXml(infoText);
+            infoRange.Style.Font.FontSize = 10;
+            infoRange.Style.Font.FontColor = XLColor.FromHtml("#666666");
+            infoRange.Style.Fill.BackgroundColor = XLColor.FromHtml("#F8F9FA");
+            infoRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            infoRange.Style.Border.BottomBorder = XLBorderStyleValues.Thin;
+            infoRange.Style.Border.BottomBorderColor = XLColor.FromHtml("#E9ECEF");
+
+            worksheet.Row(3).Height = 8;
+        }
+
+        private int CreateModernColumnHeaders(IXLWorksheet worksheet, System.Reflection.PropertyInfo[] props, ExportOptions? options = null)
+        {
+            var headerRow = 4;
+            var themeColors = GetThemeColors(options?.Theme ?? ExportTheme.Modern);
+
+            if (props.Length == 0) return headerRow;
+
+            for (int i = 0; i < props.Length; i++)
+            {
+                var cell = worksheet.Cell(headerRow, i + 1);
+                cell.Value = CleanForXml(GetDisplayName(props[i].Name, options?.ColumnMappings));
+
+                cell.Style.Font.Bold = true;
+                cell.Style.Font.FontSize = 11;
+                cell.Style.Font.FontColor = XLColor.White;
+                cell.Style.Fill.BackgroundColor = themeColors.SecondaryColor;
+                cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+                cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+
+                cell.Style.Border.TopBorder = XLBorderStyleValues.Double;
+                cell.Style.Border.BottomBorder = XLBorderStyleValues.Double;
+                cell.Style.Border.LeftBorder = XLBorderStyleValues.Thin;
+                cell.Style.Border.RightBorder = XLBorderStyleValues.Thin;
+                cell.Style.Border.TopBorderColor = themeColors.DarkColor;
+                cell.Style.Border.BottomBorderColor = themeColors.DarkColor;
+                cell.Style.Border.LeftBorderColor = themeColors.LightColor;
+                cell.Style.Border.RightBorderColor = themeColors.LightColor;
+            }
+
+            worksheet.Row(headerRow).Height = 25;
+            return headerRow;
+        }
+
+        private int CreateModernDataRows(IXLWorksheet worksheet, List<object> dataList, System.Reflection.PropertyInfo[] props, int headerRow, ExportOptions? options = null)
+        {
+            int dataRow = headerRow + 1;
+
+            if (props.Length == 0 || !dataList.Any()) return dataRow;
+
+            foreach (var item in dataList)
+            {
+                for (int col = 0; col < props.Length; col++)
+                {
+                    var cell = worksheet.Cell(dataRow, col + 1);
+                    var value = props[col].GetValue(item);
+
+                    FormatCellValueAdvanced(cell, value ?? "", props[col].PropertyType, options);
+                    ApplyModernCellStyling(cell, props[col].PropertyType, dataRow - headerRow, options);
+                }
+                dataRow++;
+            }
+
+            return dataRow;
+        }
+
+        private void ApplyModernCellStyling(IXLCell cell, Type propertyType, int rowIndex, ExportOptions? options = null)
+        {
+            var themeColors = GetThemeColors(options?.Theme ?? ExportTheme.Modern);
+            XLColor backgroundColor;
+
+            if (propertyType == typeof(decimal) || propertyType == typeof(decimal?) ||
+                propertyType == typeof(double) || propertyType == typeof(double?) ||
+                propertyType == typeof(int) || propertyType == typeof(int?))
+            {
+                backgroundColor = rowIndex % 2 == 0 ? themeColors.LightAccent : themeColors.VeryLightAccent;
+            }
+            else if (propertyType == typeof(DateTime) || propertyType == typeof(DateTime?))
+            {
+                backgroundColor = rowIndex % 2 == 0 ? themeColors.LightBlue : themeColors.VeryLightBlue;
+            }
+            else if (propertyType == typeof(bool) || propertyType == typeof(bool?))
+            {
+                backgroundColor = rowIndex % 2 == 0 ? themeColors.LightYellow : themeColors.VeryLightYellow;
+            }
+            else
+            {
+                backgroundColor = rowIndex % 2 == 0 ? themeColors.LightGray : XLColor.White;
+            }
+
+            cell.Style.Fill.BackgroundColor = backgroundColor;
+
+            cell.Style.Border.TopBorder = XLBorderStyleValues.Thin;
+            cell.Style.Border.BottomBorder = XLBorderStyleValues.Thin;
+            cell.Style.Border.LeftBorder = XLBorderStyleValues.Thin;
+            cell.Style.Border.RightBorder = XLBorderStyleValues.Thin;
+            cell.Style.Border.TopBorderColor = themeColors.LightColor;
+            cell.Style.Border.BottomBorderColor = themeColors.DarkColor;
+            cell.Style.Border.LeftBorderColor = themeColors.LightColor;
+            cell.Style.Border.RightBorderColor = themeColors.DarkColor;
+
+            cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+            cell.Style.Alignment.Horizontal = GetAlignmentForType(propertyType);
+
+            cell.Style.Font.FontName = "Segoe UI";
+            cell.Style.Font.FontSize = 10;
+
+            if (rowIndex == 1)
+            {
+                cell.Style.Font.Bold = true;
+                cell.Style.Fill.BackgroundColor = themeColors.VeryLightGray;
+            }
+        }
+
+        private XLAlignmentHorizontalValues GetAlignmentForType(Type propertyType)
+        {
+            if (propertyType == typeof(decimal) || propertyType == typeof(decimal?) ||
+                propertyType == typeof(double) || propertyType == typeof(double?) ||
+                propertyType == typeof(int) || propertyType == typeof(int?))
+                return XLAlignmentHorizontalValues.Right;
+            else if (propertyType == typeof(DateTime) || propertyType == typeof(DateTime?))
+                return XLAlignmentHorizontalValues.Center;
+            else
+                return XLAlignmentHorizontalValues.Right;
+        }
+
+        private void FormatModernColumns(IXLWorksheet worksheet, int columnCount)
+        {
+            if (columnCount <= 0) return;
+
+            for (int col = 1; col <= columnCount; col++)
+            {
+                worksheet.Column(col).AdjustToContents();
+                worksheet.Column(col).Width = Math.Max(worksheet.Column(col).Width, 15);
+                worksheet.Column(col).Width = Math.Min(worksheet.Column(col).Width, 30);
+            }
+        }
+
+        private void CreateModernSummary(IXLWorksheet worksheet, List<object> dataList, System.Reflection.PropertyInfo[] props, int dataRow, ExportOptions? options = null)
+        {
+            if (!dataList.Any()) return;
+
+            var summaryStartRow = dataRow + 3;
+            var themeColors = GetThemeColors(options?.Theme ?? ExportTheme.Modern);
+
+            var summaryTitleRange = worksheet.Range(summaryStartRow, 1, summaryStartRow, props.Length);
+            summaryTitleRange.Merge();
+            summaryTitleRange.Value = "ملخص التقرير والإحصائيات";
+            summaryTitleRange.Style.Font.Bold = true;
+            summaryTitleRange.Style.Font.FontSize = 14;
+            summaryTitleRange.Style.Font.FontColor = XLColor.White;
+            summaryTitleRange.Style.Fill.BackgroundColor = themeColors.SuccessColor;
+            summaryTitleRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            summaryTitleRange.Style.Border.TopBorder = XLBorderStyleValues.Double;
+            summaryTitleRange.Style.Border.BottomBorder = XLBorderStyleValues.Double;
+            summaryTitleRange.Style.Border.LeftBorder = XLBorderStyleValues.Double;
+            summaryTitleRange.Style.Border.RightBorder = XLBorderStyleValues.Double;
+            summaryTitleRange.Style.Border.TopBorderColor = themeColors.DarkColor;
+            summaryTitleRange.Style.Border.BottomBorderColor = themeColors.DarkColor;
+            summaryTitleRange.Style.Border.LeftBorderColor = themeColors.DarkColor;
+            summaryTitleRange.Style.Border.RightBorderColor = themeColors.DarkColor;
+
+            var totalRow = summaryStartRow + 2;
+            worksheet.Cell(totalRow, 1).Value = " إجمالي عدد السجلات : ";
+            worksheet.Cell(totalRow, 1).Style.Font.Bold = true;
+            worksheet.Cell(totalRow, 1).Style.Fill.BackgroundColor = themeColors.LightAccent;
+            worksheet.Cell(totalRow, 2).Value = dataList.Count;
+            worksheet.Cell(totalRow, 2).Style.Font.Bold = true;
+            worksheet.Cell(totalRow, 2).Style.Fill.BackgroundColor = themeColors.LightAccent;
+            worksheet.Cell(totalRow, 2).Style.NumberFormat.Format = "#,##0";
+
+            var numericColumns = new List<(string name, int index)>();
+            // استخرج قائمة الأعمدة المستثناة من التجميع (مع جعلها كبيرة للتأكد من المقارنة)
+            var nonSummarized = options?.NonSummarizedColumns?.Select(c => c.ToUpper()) ?? Enumerable.Empty<string>();
+            for (int i = 0; i < props.Length; i++)
+            {
+                // 1. تحقق من النوع (باقي كما هو)
+                if (props[i].PropertyType == typeof(decimal) || props[i].PropertyType == typeof(decimal?) ||
+                    props[i].PropertyType == typeof(double) || props[i].PropertyType == typeof(double?) ||
+                    props[i].PropertyType == typeof(int) || props[i].PropertyType == typeof(int?))
+                {
+                    // 2. تحقق من الاستثناء
+                    if (!nonSummarized.Contains(props[i].Name.ToUpper()))
+                    {
+                        numericColumns.Add((props[i].Name, i + 1));
+                    }
+                }
+            }
+
+            if (numericColumns.Any())
+            {
+                totalRow += 2;
+                foreach (var (columnName, columnIndex) in numericColumns)
+                {
+                    var values = dataList.Select(x => props[columnIndex - 1].GetValue(x))
+                                         .Where(x => x != null)
+                                         .Select(x => TryToDecimal(x!, out var dec) ? dec : (decimal?)null)
+                                         .Where(x => x.HasValue)
+                                         .Select(x => x!.Value)
+                                         .ToList();
+
+                    if (values.Any())
+                    {
+                        worksheet.Cell(totalRow, 1).Value = $" إجمالي {CleanForXml(GetDisplayName(columnName, options?.ColumnMappings))} :";
+                        worksheet.Cell(totalRow, 1).Style.Font.Bold = true;
+                        worksheet.Cell(totalRow, 1).Style.Fill.BackgroundColor = themeColors.LightBlue;
+
+                        worksheet.Cell(totalRow, 2).Value = values.Sum();
+                        worksheet.Cell(totalRow, 2).Style.NumberFormat.Format = options?.NumberFormat ?? "#,##0.00;[Red]-#,##0.00";
+                        worksheet.Cell(totalRow, 2).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+                        worksheet.Cell(totalRow, 2).Style.Font.Bold = true;
+                        worksheet.Cell(totalRow, 2).Style.Fill.BackgroundColor = themeColors.LightBlue;
+                        totalRow++;
+                    }
+                }
+            }
+        }
+
+        private void AddFooterInfo(IXLWorksheet worksheet, int startRow)
+        {
+            var footerRow = startRow + 2;
+            var footerRange = worksheet.Range(footerRow, 1, footerRow, 10);
+            footerRange.Merge();
+            footerRange.Value = " تم إنشاء هذا التقرير بواسطة نظام الارشفة المتطور  ";
+            footerRange.Style.Font.FontSize = 9;
+            footerRange.Style.Font.FontColor = XLColor.FromHtml("#6C757D");
+            footerRange.Style.Fill.BackgroundColor = XLColor.FromHtml("#F8F9FA");
+            footerRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            footerRange.Style.Border.TopBorder = XLBorderStyleValues.Thin;
+            footerRange.Style.Border.TopBorderColor = XLColor.FromHtml("#E9ECEF");
+        }
+
+        private void FormatCellValueAdvanced(IXLCell cell, object value, Type propertyType, ExportOptions? options = null)
+        {
+            if (value == null) { cell.Value = ""; return; }
+
+            var dateFormat = options?.DateFormat ?? "yyyy/MM/dd";
+            var numberFormat = options?.NumberFormat ?? "#,##0.00";
+
+            switch (Type.GetTypeCode(propertyType))
+            {
+                case TypeCode.DateTime:
+                    if (value is DateTime dt)
+                    {
+                        cell.Value = dt.ToString(dateFormat);
+                        // ملاحظة: Excel format للأشهر هو m وليس M
+                        cell.Style.DateFormat.Format = "yyyy/mm/dd";
+                        cell.Style.Font.FontColor = XLColor.FromHtml("#0066CC");
+                    }
+                    break;
+
+                case TypeCode.Decimal:
+                case TypeCode.Double:
+                case TypeCode.Single:
+                    if (decimal.TryParse(value.ToString(), out var dec))
+                    {
+                        cell.Value = dec;
+                        cell.Style.NumberFormat.Format = numberFormat;
+                        cell.Style.Font.FontColor = XLColor.FromHtml("#059669");
+                        cell.Style.Font.Bold = true;
+
+                        if (Math.Abs(dec) >= 1_000_000)
+                        {
+                            cell.Style.Font.FontColor = XLColor.FromHtml("#DC2626");
+                            cell.Style.Font.Bold = true;
+                        }
+                        else if (Math.Abs(dec) >= 100_000)
+                        {
+                            cell.Style.Font.FontColor = XLColor.FromHtml("#D97706");
+                            cell.Style.Font.Bold = true;
+                        }
+                    }
+                    break;
+
+                case TypeCode.Int32:
+                case TypeCode.Int64:
+                    if (long.TryParse(value.ToString(), out var lng))
+                    {
+                        cell.Value = lng;
+                        cell.Style.NumberFormat.Format = "#,##0";
+                        cell.Style.Font.FontColor = XLColor.FromHtml("#17A2B8");
+                    }
+                    break;
+
+                default:
+                    // تنظيف نصوص من محارف التحكم + قصها لحد Excel
+                    var s = value.ToString();
+                    cell.Value = CleanForXml(s);
+                    cell.Style.Font.FontColor = XLColor.FromHtml("#495057");
+                    break;
+            }
+        }
+
+        // 8) تنظيف النصوص والأرقام (جديد)
+        private static string CleanForXml(string? input, int? maxLen = 32767)
+        {
+            if (string.IsNullOrEmpty(input))
+                return string.Empty;
+
+            var cleaned = System.Text.RegularExpressions.Regex.Replace(
+                input,
+                @"[\x00-\x08\x0B\x0C\x0E-\x1F]",
+                string.Empty
+            );
+
+            if (maxLen.HasValue && cleaned.Length > maxLen.Value)
+                cleaned = cleaned.Substring(0, maxLen.Value);
+
+            return cleaned;
+        }
+
+        private static bool TryToDecimal(object obj, out decimal result)
+        {
+            switch (obj)
+            {
+                case decimal d: result = d; return true;
+                case double db: result = (decimal)db; return true;
+                case float f: result = (decimal)f; return true;
+                case int i: result = i; return true;
+                case long l: result = l; return true;
+                case string s:
+                    if (decimal.TryParse(s, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d1))
+                    { result = d1; return true; }
+                    if (decimal.TryParse(s, out var d2))
+                    { result = d2; return true; }
+                    break;
+            }
+            result = 0;
+            return false;
+        }
+
+        // 9) الثيمات والألوان
+        private ThemeColors GetThemeColors(ExportTheme theme)
+        {
+            return theme switch
+            {
+                ExportTheme.Modern => new ThemeColors
+                {
+                    PrimaryColor = XLColor.FromHtml("#2E86AB"),
+                    SecondaryColor = XLColor.FromHtml("#495057"),
+                    SuccessColor = XLColor.FromHtml("#28A745"),
+                    DarkColor = XLColor.FromHtml("#1A5490"),
+                    LightColor = XLColor.FromHtml("#6C757D"),
+                    LightAccent = XLColor.FromHtml("#E8F8F5"),
+                    VeryLightAccent = XLColor.FromHtml("#F0FDF4"),
+                    LightBlue = XLColor.FromHtml("#EBF8FF"),
+                    VeryLightBlue = XLColor.FromHtml("#F0F9FF"),
+                    LightYellow = XLColor.FromHtml("#FFFBEB"),
+                    VeryLightYellow = XLColor.FromHtml("#FFFDF7"),
+                    LightGray = XLColor.FromHtml("#F9FAFB"),
+                    VeryLightGray = XLColor.FromHtml("#F8FAFC")
+                },
+                ExportTheme.Classic => new ThemeColors
+                {
+                    PrimaryColor = XLColor.FromHtml("#6C757D"),
+                    SecondaryColor = XLColor.FromHtml("#495057"),
+                    SuccessColor = XLColor.FromHtml("#28A745"),
+                    DarkColor = XLColor.FromHtml("#343A40"),
+                    LightColor = XLColor.FromHtml("#ADB5BD"),
+                    LightAccent = XLColor.FromHtml("#F8F9FA"),
+                    VeryLightAccent = XLColor.FromHtml("#FFFFFF"),
+                    LightBlue = XLColor.FromHtml("#E9ECEF"),
+                    VeryLightBlue = XLColor.FromHtml("#F8F9FA"),
+                    LightYellow = XLColor.FromHtml("#FFF3CD"),
+                    VeryLightYellow = XLColor.FromHtml("#FFF8E1"),
+                    LightGray = XLColor.FromHtml("#F8F9FA"),
+                    VeryLightGray = XLColor.FromHtml("#FFFFFF")
+                },
+                ExportTheme.Minimal => new ThemeColors
+                {
+                    PrimaryColor = XLColor.FromHtml("#000000"),
+                    SecondaryColor = XLColor.FromHtml("#6C757D"),
+                    SuccessColor = XLColor.FromHtml("#28A745"),
+                    DarkColor = XLColor.FromHtml("#000000"),
+                    LightColor = XLColor.FromHtml("#E9ECEF"),
+                    LightAccent = XLColor.FromHtml("#FFFFFF"),
+                    VeryLightAccent = XLColor.FromHtml("#FFFFFF"),
+                    LightBlue = XLColor.FromHtml("#FFFFFF"),
+                    VeryLightBlue = XLColor.FromHtml("#FFFFFF"),
+                    LightYellow = XLColor.FromHtml("#FFFFFF"),
+                    VeryLightYellow = XLColor.FromHtml("#FFFFFF"),
+                    LightGray = XLColor.FromHtml("#FFFFFF"),
+                    VeryLightGray = XLColor.FromHtml("#FFFFFF")
+                },
+                ExportTheme.Corporate => new ThemeColors
+                {
+                    PrimaryColor = XLColor.FromHtml("#1E3A8A"),
+                    SecondaryColor = XLColor.FromHtml("#374151"),
+                    SuccessColor = XLColor.FromHtml("#059669"),
+                    DarkColor = XLColor.FromHtml("#1E40AF"),
+                    LightColor = XLColor.FromHtml("#9CA3AF"),
+                    LightAccent = XLColor.FromHtml("#EFF6FF"),
+                    VeryLightAccent = XLColor.FromHtml("#F8FAFC"),
+                    LightBlue = XLColor.FromHtml("#DBEAFE"),
+                    VeryLightBlue = XLColor.FromHtml("#F0F9FF"),
+                    LightYellow = XLColor.FromHtml("#FEF3C7"),
+                    VeryLightYellow = XLColor.FromHtml("#FFFBEB"),
+                    LightGray = XLColor.FromHtml("#F9FAFB"),
+                    VeryLightGray = XLColor.FromHtml("#F8FAFC")
+                },
+                ExportTheme.Financial => new ThemeColors
+                {
+                    PrimaryColor = XLColor.FromHtml("#059669"),
+                    SecondaryColor = XLColor.FromHtml("#374151"),
+                    SuccessColor = XLColor.FromHtml("#059669"),
+                    DarkColor = XLColor.FromHtml("#047857"),
+                    LightColor = XLColor.FromHtml("#9CA3AF"),
+                    LightAccent = XLColor.FromHtml("#ECFDF5"),
+                    VeryLightAccent = XLColor.FromHtml("#F0FDF4"),
+                    LightBlue = XLColor.FromHtml("#DBEAFE"),
+                    VeryLightBlue = XLColor.FromHtml("#F0F9FF"),
+                    LightYellow = XLColor.FromHtml("#FEF3C7"),
+                    VeryLightYellow = XLColor.FromHtml("#FFFBEB"),
+                    LightGray = XLColor.FromHtml("#F9FAFB"),
+                    VeryLightGray = XLColor.FromHtml("#F8FAFC")
+                },
+                _ => new ThemeColors()
+            };
+        }
+
+        private class ThemeColors
+        {
+            public XLColor PrimaryColor { get; set; } = XLColor.FromHtml("#2E86AB");
+            public XLColor SecondaryColor { get; set; } = XLColor.FromHtml("#495057");
+            public XLColor SuccessColor { get; set; } = XLColor.FromHtml("#28A745");
+            public XLColor DarkColor { get; set; } = XLColor.FromHtml("#1A5490");
+            public XLColor LightColor { get; set; } = XLColor.FromHtml("#6C757D");
+            public XLColor LightAccent { get; set; } = XLColor.FromHtml("#E8F8F5");
+            public XLColor VeryLightAccent { get; set; } = XLColor.FromHtml("#F0FDF4");
+            public XLColor LightBlue { get; set; } = XLColor.FromHtml("#EBF8FF");
+            public XLColor VeryLightBlue { get; set; } = XLColor.FromHtml("#F0F9FF");
+            public XLColor LightYellow { get; set; } = XLColor.FromHtml("#FFFBEB");
+            public XLColor VeryLightYellow { get; set; } = XLColor.FromHtml("#FFFDF7");
+            public XLColor LightGray { get; set; } = XLColor.FromHtml("#F9FAFB");
+            public XLColor VeryLightGray { get; set; } = XLColor.FromHtml("#F8FAFC");
+        }
+
+
+        private string BuildMetaLine(ExportOptions o)
+        {
+            // المطلوب عندك غالباً: "الفترة: ...." فقط
+            // إذا بدك تضيف فرع/قسم كمان خليهم
+            var parts = new List<string>();
+
+            if (!string.IsNullOrWhiteSpace(o.PeriodText))
+                parts.Add($"{o.PeriodText}");
+
+            // إذا بدك هذول يظهروا كمان (اختياري)
+            if (!string.IsNullOrWhiteSpace(o.BranchName))
+                parts.Add($"الفرع: {o.BranchName}");
+            if (!string.IsNullOrWhiteSpace(o.DepartmentName))
+                parts.Add($"القسم: {o.DepartmentName}");
+
+            // خلينا الفترة أول شي باليمين
+            return string.Join("   |   ", parts);
+        }
+
+        private void TryDrawLogo(IContainer container)
+        {
+            try
+            {
+                var logoResId = FindResourceIdEndsWith(_logoPath);
+                if (logoResId == null)
+                {
+                    _logger?.LogWarning("Logo resource not found (EmbeddedResource): {File}", _logoPath);
+                    return;
+                }
+
+                using var s = _assembly.GetManifestResourceStream(logoResId);
+                if (s != null)
+                    container.Height(45).Width(45).Image(s);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Drawing logo failed.");
+            }
+        }
+
+        private string? FindResourceIdEndsWith(string fileName)
+        {
+            // بيلتقطه حتى لو اختلف namespace/resource path
+            var names = _assembly.GetManifestResourceNames();
+            return names.FirstOrDefault(n => n.EndsWith(fileName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string GetDisplayName(string propertyName, Dictionary<string, string>? map = null)
+            => (map != null && map.TryGetValue(propertyName, out var v)) ? v : propertyName;
+
+        private string FormatPdfValue(object? value, ExportOptions opt)
+        {
+            if (value == null) return "";
+
+            if (value is DateTime dt)
+                return dt.ToString(opt.DateFormat ?? "yyyy/MM/dd");
+
+            return value.ToString() ?? "";
+        }
+        #endregion
     }
 }
+
+
+
+

@@ -40,5 +40,6 @@ namespace ArchiveProject.API.Controllers
             if (!res.Succeeded || res.Value == null) return BadRequest(res);
             return File(res.Value.FileContents, res.Value.ContentType, res.Value.FileName);
         }
+
     }
 }
