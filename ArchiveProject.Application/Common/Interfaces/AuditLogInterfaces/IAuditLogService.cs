@@ -7,7 +7,7 @@ namespace ArchiveProject.Application.Common.Interfaces.AuditLogInterfaces
     {
         Task<Result<AuditLogDetailsDto>> GetByIdAsync(long id);
         Task<Result<PaginatedList<AuditLogListDto>>> GetAllAsync(int pageNumber, int pageSize);
-        Task<Result<PaginatedList<AuditLogListDto>>> GetAllFilteredAsync(int pageNumber, int pageSize, string? userName, AuditActionType? actionType, List<string>? tableNames, DateTime? date);
+        Task<Result<PaginatedList<AuditLogListDto>>> GetAllFilteredAsync(int pageNumber,int pageSize,AuditLogFilter auditLogFilter);
         Task<Result<AuditLogSummaryDto>> GetSummaryAsync();
 
     }

@@ -6,6 +6,8 @@ using ArchiveProject.Application.Dtos.DashboardDtos;
 using ArchiveProject.Application.Dtos.DocumentDtos;
 using ArchiveProject.Application.Dtos.ExportDtos;
 using ArchiveProject.Application.Dtos.ReportDtos;
+using ArchiveProject.Application.ModelsDto.AuditLogDtos;
+using ArchiveProject.Domain.Entities;
 using ArchiveProject.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -65,6 +67,7 @@ namespace ArchiveProject.Infrastructure.Services.Reports
             return joined.Where(x => x.d.UserId == s.UserId).Select(x => x.d);
         }
 
+        #region Export Documents
         public async Task<Result<ExportFileDto>> ExportDocumentsAsync(DocumentSearchCriteria c, string format)
         {
             try
@@ -163,22 +166,22 @@ namespace ArchiveProject.Infrastructure.Services.Reports
                 return Result<ExportFileDto>.Failure(new[] { $"خطأ بتصدير تقرير الوثائق: {ex.Message}" });
             }
         }
+        #endregion
 
-        public async Task<Result<ExportFileDto>> ExportAuditLogsAsync(DashboardFilter filter, string format)
+        #region Export Audit Logs
+        public async Task<Result<ExportFileDto>> ExportAuditLogsAsync(AuditLogFilter filter, string format)
         {
             try
             {
+                filter ??= new AuditLogFilter();
+
                 var s = await GetScopeAsync();
 
-                var toUtc = (filter.To ?? DateTime.UtcNow).Date.AddDays(1);
-                var fromUtc = (filter.From ?? DateTime.UtcNow.AddDays(-30)).Date;
+                var q = _context.AuditLogs.AsNoTracking().AsQueryable();
 
-                var q = _context.AuditLogs.AsNoTracking()
-                    .Where(a => a.Timestamp >= fromUtc && a.Timestamp < toUtc);
-
+                // ====== Apply Scope ======
                 if (!s.IsSuper)
                 {
-                    // فلترة حسب الفرع/القسم عبر المستخدم (مثل منطق DashboardService عندك)
                     var joined = from a in q
                                  join u in _context.Users.AsNoTracking() on a.UserId equals u.Id into uu
                                  from u in uu.DefaultIfEmpty()
@@ -192,23 +195,61 @@ namespace ArchiveProject.Infrastructure.Services.Reports
                         q = joined.Where(x => x.a.UserId == s.UserId).Select(x => x.a);
                 }
 
-                var rows = await q.OrderByDescending(a => a.Timestamp)
-                    .Select(a => new AuditLogReportRowDto
-                    {
-                        Timestamp = a.Timestamp.UtcDateTime,
-                        UserName = a.UserName ?? "",
-                        ActionType = a.ActionType ?? "",
-                        TableName = a.TableName ??"",
-                        DocumentId = a.RecordId,
-                    })
-                    .ToListAsync();
+                // ====== Filters (نفس GetAllFiltered) ======
+
+                if (!string.IsNullOrWhiteSpace(filter.searchUserName))
+                {
+                    var ns = filter.searchUserName.Trim().ToLower();
+                    q = q.Where(a =>
+                        (a.UserName ?? "").ToLower().Contains(ns));
+                }
+
+                if (!string.IsNullOrWhiteSpace(filter.userName))
+                {
+                    var name = filter.userName.Trim().ToLower();
+                    q = q.Where(a =>
+                        (a.UserName ?? "").ToLower().Contains(name) ||
+                        (a.UserId ?? "").ToLower().Contains(name));
+                }
+
+                if (filter.actionType.HasValue)
+                {
+                    var at = filter.actionType.Value.ToString();
+                    q = q.Where(a => a.ActionType == at);
+                }
+
+                if (filter.tableNames != null && filter.tableNames.Count > 0)
+                {
+                    var set = filter.tableNames
+                        .Where(t => !string.IsNullOrWhiteSpace(t))
+                        .Select(t => t.Trim().ToLower())
+                        .Distinct()
+                        .ToList();
+
+                    if (set.Count > 0)
+                        q = q.Where(a => set.Contains((a.TableName ?? "").ToLower()));
+                }
+
+                // Date Range (From/To)
+                ApplyDateRangeForExport(ref q, filter.From, filter.To, out var periodText);
+
+                q = q.OrderByDescending(a => a.Timestamp);
+
+                var rows = await q.Select(a => new AuditLogReportRowDto
+                {
+                    Timestamp = a.Timestamp.UtcDateTime,
+                    UserName = a.UserName ?? "",
+                    ActionType = a.ActionType ?? "",
+                    TableName = a.TableName ?? "",
+                    DocumentId = a.RecordId
+                }).ToListAsync();
 
                 var opt = new ExportOptions
                 {
                     ReportName = "AuditLogs_Report",
                     SheetName = "AuditLogs",
                     CustomTitle = "تقرير سجل التدقيق",
-                    PeriodText = $"{fromUtc:yyyy/MM/dd} → {toUtc.AddDays(-1):yyyy/MM/dd}",
+                    PeriodText = periodText,
                     ColumnMappings = new Dictionary<string, string>
                     {
                         ["Timestamp"] = "التاريخ",
@@ -231,6 +272,42 @@ namespace ArchiveProject.Infrastructure.Services.Reports
             }
         }
 
+        // ===== Helper: Date Range + PeriodText =====
+        private static void ApplyDateRangeForExport(ref IQueryable<AuditLog> q, DateTime? from, DateTime? to, out string? periodText)
+        {
+            periodText = null;
+            if (!from.HasValue && !to.HasValue) return;
+
+            var tz = TimeZoneInfo.FindSystemTimeZoneById("Europe/Istanbul");
+
+            DateTimeOffset? start = null;
+            DateTimeOffset? endExclusive = null;
+
+            if (from.HasValue)
+            {
+                var f = DateTime.SpecifyKind(from.Value, DateTimeKind.Unspecified);
+                var localStart = (f.TimeOfDay == TimeSpan.Zero) ? f.Date : f;
+                start = new DateTimeOffset(localStart, tz.GetUtcOffset(localStart));
+            }
+
+            if (to.HasValue)
+            {
+                var t = DateTime.SpecifyKind(to.Value, DateTimeKind.Unspecified);
+                var localEndEx = (t.TimeOfDay == TimeSpan.Zero) ? t.Date.AddDays(1) : t;
+                endExclusive = new DateTimeOffset(localEndEx, tz.GetUtcOffset(localEndEx));
+            }
+
+            if (start.HasValue) q = q.Where(a => a.Timestamp >= start.Value);
+            if (endExclusive.HasValue) q = q.Where(a => a.Timestamp < endExclusive.Value);
+
+            // period text للعنوان
+            var fromText = from.HasValue ? from.Value.Date.ToString("yyyy/MM/dd") : "—";
+            var toText = to.HasValue ? to.Value.Date.ToString("yyyy/MM/dd") : "—";
+            periodText = $"{fromText} → {toText}";
+        }
+        #endregion
+
+        #region Export Dashboard
         public async Task<Result<ExportFileDto>> ExportDashboardAsync(DashboardFilter filter, string format)
         {
             try
@@ -271,5 +348,6 @@ namespace ArchiveProject.Infrastructure.Services.Reports
                 return Result<ExportFileDto>.Failure(new[] { $"خطأ بتصدير تقرير الداشبورد: {ex.Message}" });
             }
         }
+        #endregion
     }
 }

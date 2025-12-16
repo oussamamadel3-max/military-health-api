@@ -1,6 +1,5 @@
 ﻿using ArchiveProject.Application.Common.Interfaces.DashboardInterfaces;
 using ArchiveProject.Application.Common.Interfaces.UserContextInterfaces;
-using ArchiveProject.Application.Common.Results;
 using ArchiveProject.Application.Dtos.DashboardDtos;
 using ArchiveProject.Domain.Entities;
 using ArchiveProject.Infrastructure.Data;
@@ -46,28 +45,138 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
             return new Scope(isSuper, isMgr, actor?.BranchId, actor?.DepartmentId, userId);
         }
 
-        // نطاق الوثائق (سوبر: الكل، مدير فرع: وثائق أقسام الفرع، موظف: قسمه أو وثائقه)
-        private IQueryable<Domain.Entities.Document> ApplyScopeDocs(IQueryable<Domain.Entities.Document> q, Scope s)
+        // ======== Date Range Helper (Europe/Istanbul -> UTC DateTimeOffset) ========
+        private static (DateTimeOffset? Start, DateTimeOffset? EndExclusive, string? PeriodText)
+            NormalizeRange(DateTime? from, DateTime? to)
+        {
+            if (!from.HasValue && !to.HasValue)
+                return (null, null, null);
+
+            var tz = TimeZoneInfo.FindSystemTimeZoneById("Europe/Istanbul");
+
+            DateTimeOffset? start = null;
+            DateTimeOffset? endEx = null;
+
+            if (from.HasValue)
+            {
+                var f = DateTime.SpecifyKind(from.Value, DateTimeKind.Unspecified);
+                start = new DateTimeOffset(f, tz.GetUtcOffset(f));
+            }
+
+            if (to.HasValue)
+            {
+                var t = DateTime.SpecifyKind(to.Value, DateTimeKind.Unspecified);
+                endEx = new DateTimeOffset(t, tz.GetUtcOffset(t));
+
+                // إذا المستخدم عم يرسل تاريخ فقط (00:00:00) بدنا نعتبره يوم كامل:
+                if (to.Value.TimeOfDay == TimeSpan.Zero)
+                    endEx = endEx.Value.AddDays(1);
+            }
+
+            // إذا from فقط
+            if (start.HasValue && !endEx.HasValue)
+                endEx = DateTimeOffset.UtcNow;
+
+            // إذا to فقط
+            if (!start.HasValue && endEx.HasValue)
+                start = DateTimeOffset.MinValue;
+
+            string? text = null;
+            if (from.HasValue && to.HasValue)
+                text = $"{from:yyyy/MM/dd} → {to:yyyy/MM/dd}";
+            else if (from.HasValue)
+                text = $"من {from:yyyy/MM/dd}";
+            else if (to.HasValue)
+                text = $"حتى {to:yyyy/MM/dd}";
+
+            return (start, endEx, text);
+        }
+
+        private static IQueryable<T> ApplyRange<T>(
+            IQueryable<T> q,
+            DateTimeOffset? start,
+            DateTimeOffset? endEx,
+            System.Linq.Expressions.Expression<Func<T, DateTimeOffset>> selector)
+        {
+            if (start.HasValue)
+                q = q.Where(BuildGreaterOrEqual(selector, start.Value));
+            if (endEx.HasValue)
+                q = q.Where(BuildLessThan(selector, endEx.Value));
+            return q;
+        }
+
+        private static System.Linq.Expressions.Expression<Func<T, bool>> BuildGreaterOrEqual<T>(
+            System.Linq.Expressions.Expression<Func<T, DateTimeOffset>> selector,
+            DateTimeOffset value)
+        {
+            var p = selector.Parameters[0];
+            var body = System.Linq.Expressions.Expression.GreaterThanOrEqual(
+                selector.Body,
+                System.Linq.Expressions.Expression.Constant(value));
+            return System.Linq.Expressions.Expression.Lambda<Func<T, bool>>(body, p);
+        }
+
+        private static System.Linq.Expressions.Expression<Func<T, bool>> BuildLessThan<T>(
+            System.Linq.Expressions.Expression<Func<T, DateTimeOffset>> selector,
+            DateTimeOffset value)
+        {
+            var p = selector.Parameters[0];
+            var body = System.Linq.Expressions.Expression.LessThan(
+                selector.Body,
+                System.Linq.Expressions.Expression.Constant(value));
+            return System.Linq.Expressions.Expression.Lambda<Func<T, bool>>(body, p);
+        }
+
+        // ======== Docs Scope (يدعم DepartmentId null عبر User.BranchId) ========
+        private IQueryable<Document> ApplyScopeDocs(IQueryable<Document> q, Scope s)
         {
             if (s.IsSuperAdmin) return q;
 
-            var joined = from d in q
-                         join dep in _context.Departments.AsNoTracking()
-                             on d.DepartmentId equals dep.DepartmentId
-                         select new { d, dep.BranchId };
+            // left join departments + users to decide branch/department visibility safely
+            var joined =
+                from d in q
+                join dep in _context.Departments.AsNoTracking()
+                    on d.DepartmentId equals dep.DepartmentId into depj
+                from dep in depj.DefaultIfEmpty()
+                join u in _context.Users.AsNoTracking()
+                    on d.UserId equals u.Id into uj
+                from u in uj.DefaultIfEmpty()
+                select new
+                {
+                    Doc = d,
+                    DepId = (long?)d.DepartmentId,
+                    DepBranchId = (long?)(dep == null ? null : dep.BranchId),
+                    UserBranchId = (long?)(u == null ? null : u.BranchId),
+                    UserId = d.UserId
+                };
 
             if (s.IsBranchManager && s.BranchId.HasValue)
-                return joined.Where(x => x.BranchId == s.BranchId.Value).Select(x => x.d);
+            {
+                // كل وثائق الفرع: (وثائق الأقسام التي BranchId=فرعي) + (وثائق بلا قسم لكن User.BranchId=فرعي)
+                var bid = s.BranchId.Value;
+                return joined
+                    .Where(x => (x.DepBranchId.HasValue && x.DepBranchId.Value == bid)
+                             || (!x.DepBranchId.HasValue && x.UserBranchId.HasValue && x.UserBranchId.Value == bid))
+                    .Select(x => x.Doc);
+            }
 
+            // Employee
             if (s.DepartmentId.HasValue)
-                return joined.Where(x => x.d.DepartmentId == s.DepartmentId.Value || x.d.UserId == s.UserId)
-                             .Select(x => x.d);
+            {
+                var did = s.DepartmentId.Value;
+                return joined
+                    .Where(x =>
+                        (x.DepId.HasValue && x.DepId.Value == did) // وثائق القسم
+                        || (x.UserId == s.UserId)                  // وثائق المستخدم بأي حال
+                    )
+                    .Select(x => x.Doc);
+            }
 
-            return joined.Where(x => x.d.UserId == s.UserId).Select(x => x.d);
+            return joined.Where(x => x.UserId == s.UserId).Select(x => x.Doc);
         }
 
-        // نطاق السجلات (Audit) بنفس المنطق
-        private IQueryable<Domain.Entities.AuditLog> ApplyScopeAudit(IQueryable<Domain.Entities.AuditLog> q, Scope s)
+        // ======== Audit Scope (مثل قبل لكن ثابت) ========
+        private IQueryable<AuditLog> ApplyScopeAudit(IQueryable<AuditLog> q, Scope s)
         {
             if (s.IsSuperAdmin) return q;
 
@@ -76,19 +185,19 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
                          from u in uu.DefaultIfEmpty()
                          select new
                          {
-                             a,
+                             Log = a,
                              BranchId = (long?)(u == null ? null : u.BranchId),
                              DepartmentId = (long?)(u == null ? null : u.DepartmentId)
                          };
 
             if (s.IsBranchManager && s.BranchId.HasValue)
-                return joined.Where(x => x.BranchId == s.BranchId.Value).Select(x => x.a);
+                return joined.Where(x => x.BranchId == s.BranchId.Value).Select(x => x.Log);
 
             if (s.DepartmentId.HasValue)
-                return joined.Where(x => x.DepartmentId == s.DepartmentId.Value || x.a.UserId == s.UserId)
-                             .Select(x => x.a);
+                return joined.Where(x => x.DepartmentId == s.DepartmentId.Value || x.Log.UserId == s.UserId)
+                             .Select(x => x.Log);
 
-            return joined.Where(x => x.a.UserId == s.UserId).Select(x => x.a);
+            return joined.Where(x => x.Log.UserId == s.UserId).Select(x => x.Log);
         }
 
         public async Task<Result<DashboardStatsDto>> GetAsync(DashboardFilter f)
@@ -97,34 +206,54 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
             {
                 var s = await GetScopeAsync();
 
-                // حدود التاريخ الافتراضية
-                var toUtc = (f.To ?? DateTime.UtcNow).Date.AddDays(1);
-                var fromUtc = (f.From ?? DateTime.UtcNow.AddMonths(-Math.Abs(f.GrowthMonths))).Date;
+                // ====== Date Range (optional) ======
+                var (start, endEx, periodText) = NormalizeRange(f.From, f.To);
 
-                // ====== Documents Query (scoped) ======
+                // ====== Base Docs Query (scoped) ======
                 var docsQ = ApplyScopeDocs(_context.Documents.AsNoTracking(), s);
 
-                // فلترة إضافية اختيارية (لكن ضمن صلاحيات scope)
+                // filters (within scope)
                 if (f.DepartmentId.HasValue)
                     docsQ = docsQ.Where(d => d.DepartmentId == f.DepartmentId.Value);
 
                 if (f.BranchId.HasValue)
                 {
-                    // فلترة فرع (من خلال الأقسام)
-                    docsQ = from d in docsQ
-                            join dep in _context.Departments.AsNoTracking()
-                                on d.DepartmentId equals dep.DepartmentId
-                            where dep.BranchId == f.BranchId.Value
-                            select d;
+                    // branch filter عبر الأقسام أو عبر User.BranchId لو الوثيقة بدون قسم
+                    var bid = f.BranchId.Value;
+                    docsQ =
+                        from d in docsQ
+                        join dep in _context.Departments.AsNoTracking()
+                            on d.DepartmentId equals dep.DepartmentId into depj
+                        from dep in depj.DefaultIfEmpty()
+                        join u in _context.Users.AsNoTracking()
+                            on d.UserId equals u.Id into uj
+                        from u in uj.DefaultIfEmpty()
+                        where (dep != null && dep.BranchId == bid)
+                           || (dep == null && u != null && u.BranchId == bid)
+                        select d;
                 }
 
-                // ====== Groups Count ======
+                // apply date range on documents if provided (CreatedAt is DateTime)
+                if (start.HasValue || endEx.HasValue)
+                {
+                    var startUtc = start?.UtcDateTime;
+                    var endUtc = endEx?.UtcDateTime;
+
+                    if (startUtc.HasValue)
+                        docsQ = docsQ.Where(d => d.CreatedAt >= startUtc.Value);
+                    if (endUtc.HasValue)
+                        docsQ = docsQ.Where(d => d.CreatedAt < endUtc.Value);
+                }
+
+                var documentsCount = await docsQ.LongCountAsync();
+
+                // ====== Groups (إذا ما عندك CreatedAt للمجموعات، ما فينا نفلترها زمنياً بشكل صحيح) ======
                 var groupsQ = from g in _context.ArchiveGroups.AsNoTracking()
                               join dep in _context.Departments.AsNoTracking()
                                   on g.DepartmentId equals dep.DepartmentId
                               select new { g, dep.BranchId, dep.DepartmentId };
 
-                // طبق نفس منطق النطاق على المجموعات
+                // scope
                 if (!s.IsSuperAdmin)
                 {
                     if (s.IsBranchManager && s.BranchId.HasValue)
@@ -135,17 +264,18 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
                         groupsQ = groupsQ.Where(x => false);
                 }
 
-                // فلاتر إضافية اختيارية
                 if (f.DepartmentId.HasValue) groupsQ = groupsQ.Where(x => x.DepartmentId == f.DepartmentId.Value);
                 if (f.BranchId.HasValue) groupsQ = groupsQ.Where(x => x.BranchId == f.BranchId.Value);
 
-                var documentsCount = await docsQ.LongCountAsync();
                 var groupsCount = await groupsQ.LongCountAsync();
 
-                // ====== Recent Activities ======
-                var auditQ = ApplyScopeAudit(_context.AuditLogs.AsNoTracking(), s)
-                    .Where(a => a.Timestamp >= fromUtc && a.Timestamp < toUtc);
+                // ====== Audit (scoped + date range optional) ======
+                var auditQ = ApplyScopeAudit(_context.AuditLogs.AsNoTracking(), s);
 
+                if (start.HasValue || endEx.HasValue)
+                    auditQ = ApplyRange(auditQ, start, endEx, a => a.Timestamp);
+
+                // Recent
                 var recentRaw = await auditQ
                     .OrderByDescending(a => a.Timestamp)
                     .Select(a => new
@@ -171,16 +301,12 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
                     Timestamp = a.Timestamp.UtcDateTime.ToString("o")
                 }).ToList();
 
-                // عناوين المستندات للأنشطة
-                var docIdsInRecent = recent.Where(r => r.DocumentId.HasValue)
-                                           .Select(r => r.DocumentId!.Value)
-                                           .Distinct()
-                                           .ToList();
-
-                if (docIdsInRecent.Count > 0)
+                // Titles (ضمن نفس docs scope)
+                var docIds = recent.Where(r => r.DocumentId.HasValue).Select(r => r.DocumentId!.Value).Distinct().ToList();
+                if (docIds.Count > 0)
                 {
-                    var titles = await ApplyScopeDocs(_context.Documents.AsNoTracking(), s)
-                        .Where(d => docIdsInRecent.Contains(d.DocumentId))
+                    var titles = await docsQ
+                        .Where(d => docIds.Contains(d.DocumentId))
                         .Select(d => new { d.DocumentId, d.Title })
                         .ToDictionaryAsync(x => x.DocumentId, x => x.Title);
 
@@ -188,7 +314,7 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
                         if (titles.TryGetValue(r.DocumentId!.Value, out var t)) r.DocumentTitle = t;
                 }
 
-                // ====== Most Active Users ======
+                // Top Users
                 var topUsersRaw = await (from a in auditQ
                                          group a by new { a.UserId, a.UserName } into g
                                          select new
@@ -211,31 +337,32 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
                     LastActivityAt = x.LastActivity.UtcDateTime.ToString("o")
                 }).ToList();
 
-                // ====== Branches Stats (فروع فعليًا) ======
-                // نعرض فقط الفروع ضمن النطاق (سوبر: الكل، مدير فرع: فرعه، موظف: فرع قسمه)
+                // ====== Branches Stats (مرئية حسب الدور) ======
                 IQueryable<Branch> branchesVisibleQ = _context.Branchs.AsNoTracking();
 
                 if (!s.IsSuperAdmin)
                 {
                     if (s.IsBranchManager && s.BranchId.HasValue)
                         branchesVisibleQ = branchesVisibleQ.Where(b => b.BranchId == s.BranchId.Value);
-                    else if (s.DepartmentId.HasValue)
-                    {
-                        var deptBranchId = await _context.Departments.AsNoTracking()
-                            .Where(d => d.DepartmentId == s.DepartmentId.Value)
-                            .Select(d => (long?)d.BranchId)
-                            .FirstOrDefaultAsync();
-
-                        if (deptBranchId.HasValue)
-                            branchesVisibleQ = branchesVisibleQ.Where(b => b.BranchId == deptBranchId.Value);
-                        else
-                            branchesVisibleQ = branchesVisibleQ.Where(b => false);
-                    }
                     else
-                        branchesVisibleQ = branchesVisibleQ.Where(b => false);
+                    {
+                        // موظف: فرع قسمه (إذا عنده قسم)
+                        if (s.DepartmentId.HasValue)
+                        {
+                            var deptBranchId = await _context.Departments.AsNoTracking()
+                                .Where(d => d.DepartmentId == s.DepartmentId.Value)
+                                .Select(d => (long?)d.BranchId)
+                                .FirstOrDefaultAsync();
+
+                            if (deptBranchId.HasValue)
+                                branchesVisibleQ = branchesVisibleQ.Where(b => b.BranchId == deptBranchId.Value);
+                            else
+                                branchesVisibleQ = branchesVisibleQ.Where(b => false);
+                        }
+                        else branchesVisibleQ = branchesVisibleQ.Where(b => false);
+                    }
                 }
 
-                // فلتر branchId (اختياري) لكن ضمن المرئي
                 if (f.BranchId.HasValue)
                     branchesVisibleQ = branchesVisibleQ.Where(b => b.BranchId == f.BranchId.Value);
 
@@ -252,8 +379,7 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
                     .OrderByDescending(x => x.DocumentsCount)
                     .ToListAsync();
 
-                // ====== Departments Stats (الأقسام) ======
-                // الأقسام المرئية حسب النطاق
+                // ====== Departments Stats ======
                 var departmentsVisibleQ = _context.Departments.AsNoTracking().AsQueryable();
 
                 if (!s.IsSuperAdmin)
@@ -266,14 +392,12 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
                         departmentsVisibleQ = departmentsVisibleQ.Where(d => false);
                 }
 
-                // فلاتر إضافية
                 if (f.BranchId.HasValue)
                     departmentsVisibleQ = departmentsVisibleQ.Where(d => d.BranchId == f.BranchId.Value);
 
                 if (f.DepartmentId.HasValue)
                     departmentsVisibleQ = departmentsVisibleQ.Where(d => d.DepartmentId == f.DepartmentId.Value);
 
-                // left join لإظهار القسم حتى لو 0 وثائق
                 var departmentsStats = await (
                     from dep in departmentsVisibleQ
                     join d in docsQ on dep.DepartmentId equals d.DepartmentId into dg
@@ -286,9 +410,25 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
                     .OrderByDescending(x => x.DocumentsCount)
                     .ToListAsync();
 
-                // ====== Document Growth ======
-                var growthRaw = await (from d in docsQ
-                                       where d.CreatedAt >= fromUtc && d.CreatedAt < toUtc
+                // ====== Growth (إذا ما في range بنستخدم GrowthMonths كـ default) ======
+                // إذا المستخدم ما حدد from/to: منطبق GrowthMonths فقط على الـ growth chart وليس على باقي الإحصائيات.
+                DateTime growthFromUtc;
+                DateTime growthToUtc;
+
+                if (start.HasValue || endEx.HasValue)
+                {
+                    growthFromUtc = (start ?? DateTimeOffset.UtcNow.AddMonths(-6)).UtcDateTime;
+                    growthToUtc = (endEx ?? DateTimeOffset.UtcNow).UtcDateTime;
+                }
+                else
+                {
+                    var months = Math.Abs(f.GrowthMonths <= 0 ? 6 : f.GrowthMonths);
+                    growthToUtc = DateTime.UtcNow.Date.AddDays(1);
+                    growthFromUtc = DateTime.UtcNow.AddMonths(-months).Date;
+                }
+
+                var growthRaw = await (from d in ApplyScopeDocs(_context.Documents.AsNoTracking(), s)
+                                       where d.CreatedAt >= growthFromUtc && d.CreatedAt < growthToUtc
                                        group d by new { d.CreatedAt.Year, d.CreatedAt.Month } into g
                                        orderby g.Key.Year, g.Key.Month
                                        select new
@@ -305,9 +445,9 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
                     Count = x.Count
                 }).ToList();
 
-                growth = FillMissingMonths(growth, fromUtc, toUtc);
+                growth = FillMissingMonths(growth, growthFromUtc, growthToUtc);
 
-                // ====== Storage Usage ======
+                // ====== Storage Usage (ضمن docsQ => إذا في range رح ينحصر تلقائياً) ======
                 var attScoped = from a in _context.Attachments.AsNoTracking()
                                 join d in docsQ on a.OwnerId equals d.DocumentId
                                 where a.OwnerType == "Document"
@@ -339,7 +479,7 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
                     ByType = byType
                 };
 
-                // ====== Top Document Types ======
+                // ====== Top Document Types (ضمن docsQ => ضمن الفترة) ======
                 var topTypes = await (from d in docsQ
                                       join t in _context.DocumentTypes.AsNoTracking()
                                           on d.DocumentTypeId equals t.DocumentTypeId
@@ -358,22 +498,20 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
                 foreach (var t in topTypes)
                     t.TotalSizeBytes = sizeByType.TryGetValue(t.DocumentTypeId, out var sz) ? sz : 0;
 
-                // ====== Result ======
                 var dto = new DashboardStatsDto
                 {
                     DocumentsCount = documentsCount,
                     GroupsCount = groupsCount,
                     RecentActivities = recent,
                     MostActiveUsers = topUsers,
-
                     BranchesStats = branchesStats,
                     DepartmentsStats = departmentsStats,
-
                     DocumentGrowth = growth,
                     StorageUsage = storage,
                     TopDocumentTypes = topTypes
                 };
 
+                // إذا بدك تعرض periodText بالـ API ممكن تضيفه للـ DTO أو تحطه warnings… تركته كما هو.
                 return Result<DashboardStatsDto>.Success(dto);
             }
             catch (Exception ex)
@@ -395,6 +533,7 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
         {
             var map = data.ToDictionary(x => x.Period, x => x.Count);
             var list = new List<DocumentGrowthPointDto>();
+
             var cur = new DateTime(fromUtc.Year, fromUtc.Month, 1);
             var end = new DateTime(toUtc.Year, toUtc.Month, 1);
 

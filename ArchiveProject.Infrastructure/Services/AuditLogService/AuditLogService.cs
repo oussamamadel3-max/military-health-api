@@ -5,7 +5,6 @@ using ArchiveProject.Application.ModelsDto.AuditLogDtos;
 using ArchiveProject.Domain.Entities;
 using ArchiveProject.Infrastructure.Data;
 using AutoMapper;
-using AutoMapper.QueryableExtensions;
 using Microsoft.EntityFrameworkCore;
 
 namespace FinanceProject.Infrastructure.Services
@@ -23,17 +22,6 @@ namespace FinanceProject.Infrastructure.Services
         }
 
         #region استرجاع سجل حسب المعرف (يستخدم AuditLogDetailsDto)
-        //public async Task<Result<AuditLogDetailsDto>> GetByIdAsync(long id)
-        //{
-        //    // هنا يجب التأكد من جلب الكيان كاملاً لعملية الـ Mapping
-        //    var entity = await _context.AuditLogs.AsNoTracking().FirstOrDefaultAsync(x => x.LogId == id);
-
-        //    if (entity == null)
-        //        return Result<AuditLogDetailsDto>.Failure(new List<string> { "Not found" }, null);
-
-        //    // Mapping إلى DTO التفاصيل الذي يحتوي على OldValue/NewValue
-        //    return Result<AuditLogDetailsDto>.Success(_mapper.Map<AuditLogDetailsDto>(entity));
-        //}
         public async Task<Result<AuditLogDetailsDto>> GetByIdAsync(long id)
         {
             var (isSuper, isMgr, brId, depId, userId) = await GetActorScopeAsync();
@@ -51,23 +39,6 @@ namespace FinanceProject.Infrastructure.Services
         #endregion
 
         #region استرجاع جميع السجلات مع دعم pagination (يستخدم AuditLogListDto)
-        //public async Task<Result<PaginatedList<AuditLogListDto>>> GetAllAsync(int pageNumber, int pageSize)
-        //{
-        //    // الترتيب حسب الوقت (الأحدث أولاً)
-        //    var query = _context.AuditLogs.AsNoTracking().OrderByDescending(a => a.Timestamp);
-        //    var total = await query.CountAsync();
-
-        //    var list = await query
-        //        .Skip((pageNumber - 1) * pageSize)
-        //        .Take(pageSize)
-        //        .ToListAsync();
-
-        //    // Mapping إلى DTO القائمة (لا يتم تضمين OldValue/NewValue)
-        //    var mapped = _mapper.Map<List<AuditLogListDto>>(list);
-        //    var paginated = new PaginatedList<AuditLogListDto>(mapped, total, pageNumber, pageSize);
-
-        //    return Result<PaginatedList<AuditLogListDto>>.Success(paginated);
-        //}
         public async Task<Result<PaginatedList<AuditLogListDto>>> GetAllAsync(int pageNumber, int pageSize)
         {
             if (pageNumber < 1) pageNumber = 1;
@@ -92,119 +63,56 @@ namespace FinanceProject.Infrastructure.Services
         #endregion
 
         #region    استرجاع حميع السجلات مع فلترة و pagination
-        //public async Task<Result<PaginatedList<AuditLogListDto>>> GetAllFilteredAsync(
-        //    int pageNumber, int pageSize,
-        //    string? userName,
-        //    AuditActionType? actionType,
-        //    List<string>? tableNames,
-        //    DateTime? date)
-        //{
-        //    if (pageNumber < 1) pageNumber = 1;
-        //    if (pageSize < 1) pageSize = 10;
-
-        //    var q = _context.AuditLogs.AsNoTracking();
-
-        //    // 1) بحث المستخدم
-        //    if (!string.IsNullOrWhiteSpace(userName))
-        //    {
-        //        var s = userName.Trim().ToLower();
-        //        q = q.Where(a =>
-        //            (a.UserName ?? "").ToLower().Contains(s) ||
-        //            (a.UserId ?? "").ToLower().Contains(s));
-        //    }
-
-        //    // 2) نوع العملية
-        //    if (actionType.HasValue)
-        //    {
-        //        var actionText = actionType.Value.ToString(); // Added/Modified/Deleted
-        //        q = q.Where(a => a.ActionType == actionText);
-        //    }
-
-        //    // 3) أسماء الجداول (اختيار متعدد)
-        //    if (tableNames != null && tableNames.Count > 0)
-        //    {
-        //        var set = tableNames
-        //            .Where(t => !string.IsNullOrWhiteSpace(t))
-        //            .Select(t => t.Trim().ToLower())
-        //            .ToList();
-
-        //        if (set.Count > 0)
-        //            q = q.Where(a => set.Contains(a.TableName.ToLower()));
-        //    }
-
-        //    // 4) التاريخ (احترام التوقيت المحلي -> Europe/Istanbul)
-        //    if (date.HasValue)
-        //    {
-        //        // حدّد المنطقة الزمنية (يفضّل تقرأها من الإعدادات)
-        //        var tz = TimeZoneInfo.FindSystemTimeZoneById("Europe/Istanbul");
-
-        //        // اليوم المطلوب بدون نوع (Unspecified) حتى ما يعتبره .NET UTC أو Local
-        //        var dayLocal = DateTime.SpecifyKind(date.Value.Date, DateTimeKind.Unspecified);
-
-        //        // بداية اليوم المحلي كـ DateTimeOffset حسب إزاحة المنطقة
-        //        var startLocal = new DateTimeOffset(dayLocal, tz.GetUtcOffset(dayLocal));
-        //        var endLocal = startLocal.AddDays(1);
-
-        //        // قارن مباشرة بـ DateTimeOffset (EF/Npgsql يحوّلها صح)
-        //        q = q.Where(a => a.Timestamp >= startLocal && a.Timestamp < endLocal);
-        //    }
-
-        //    q = q.OrderByDescending(a => a.Timestamp);
-
-        //    var total = await q.CountAsync();
-
-        //    var items = await q
-        //        .Skip((pageNumber - 1) * pageSize)
-        //        .Take(pageSize)
-        //        .ProjectTo<AuditLogListDto>(_mapper.ConfigurationProvider)
-        //        .ToListAsync();
-
-        //    var page = new PaginatedList<AuditLogListDto>(items, total, pageNumber, pageSize);
-        //    return Result<PaginatedList<AuditLogListDto>>.Success(page);
-        //}
-
-        public async Task<Result<PaginatedList<AuditLogListDto>>> GetAllFilteredAsync(int pageNumber, int pageSize, string? userName, AuditActionType? actionType,List<string>? tableNames, DateTime? date)
+        public async Task<Result<PaginatedList<AuditLogListDto>>> GetAllFilteredAsync(int pageNumber,int pageSize,AuditLogFilter auditLogFilter)
         {
             if (pageNumber < 1) pageNumber = 1;
             if (pageSize < 1) pageSize = 10;
+
+            auditLogFilter ??= new AuditLogFilter();
 
             var (isSuper, isMgr, brId, depId, userId) = await GetActorScopeAsync();
 
             var scoped = ApplyScope(_context.AuditLogs.AsNoTracking(), isSuper, isMgr, brId, depId, userId);
 
-            // فلتر المستخدم (اسم أو Id)
-            if (!string.IsNullOrWhiteSpace(userName))
+            // ========= searchUserName (بحث بالاسم فقط) =========
+            if (!string.IsNullOrWhiteSpace(auditLogFilter.searchUserName))
             {
-                var s = userName.Trim().ToLower();
-                scoped = scoped.Where(a => (a.UserName ?? "").ToLower().Contains(s) || (a.UserId ?? "").ToLower().Contains(s));
+                var s = auditLogFilter.searchUserName.Trim().ToLower();
+                scoped = scoped.Where(a =>
+                    (a.UserName ?? "").ToLower().Contains(s));
             }
 
-            // نوع العملية
-            if (actionType.HasValue)
+            // ========= userName (اسم أو Id) =========
+            if (!string.IsNullOrWhiteSpace(auditLogFilter.userName))
             {
-                var at = actionType.Value.ToString(); // Added/Modified/Deleted
+                var s = auditLogFilter.userName.Trim().ToLower();
+                scoped = scoped.Where(a =>
+                    (a.UserName ?? "").ToLower().Contains(s) ||
+                    (a.UserId ?? "").ToLower().Contains(s));
+            }
+
+            // ========= actionType =========
+            if (auditLogFilter.actionType.HasValue)
+            {
+                var at = auditLogFilter.actionType.Value.ToString(); // Added/Modified/Deleted...
                 scoped = scoped.Where(a => a.ActionType == at);
             }
 
-            // أسماء الجداول
-            if (tableNames != null && tableNames.Count > 0)
+            // ========= tableNames =========
+            if (auditLogFilter.tableNames != null && auditLogFilter.tableNames.Count > 0)
             {
-                var set = tableNames.Where(t => !string.IsNullOrWhiteSpace(t))
-                                    .Select(t => t.Trim().ToLower())
-                                    .ToList();
+                var set = auditLogFilter.tableNames
+                    .Where(t => !string.IsNullOrWhiteSpace(t))
+                    .Select(t => t.Trim().ToLower())
+                    .Distinct()
+                    .ToList();
+
                 if (set.Count > 0)
-                    scoped = scoped.Where(a => set.Contains(a.TableName.ToLower()));
+                    scoped = scoped.Where(a => set.Contains((a.TableName ?? "").ToLower()));
             }
 
-            // التاريخ (يوم واحد محلياً)
-            if (date.HasValue)
-            {
-                var tz = TimeZoneInfo.FindSystemTimeZoneById("Europe/Istanbul");
-                var dayLocal = DateTime.SpecifyKind(date.Value.Date, DateTimeKind.Unspecified);
-                var start = new DateTimeOffset(dayLocal, tz.GetUtcOffset(dayLocal));
-                var end = start.AddDays(1);
-                scoped = scoped.Where(a => a.Timestamp >= start && a.Timestamp < end);
-            }
+            // ========= Date Range: From/To (محلياً) =========
+            ApplyDateRange(ref scoped, auditLogFilter.From, auditLogFilter.To);
 
             scoped = scoped.OrderByDescending(a => a.Timestamp);
 
@@ -216,37 +124,47 @@ namespace FinanceProject.Infrastructure.Services
                 .ToListAsync();
 
             var mapped = _mapper.Map<List<AuditLogListDto>>(list);
-            return Result<PaginatedList<AuditLogListDto>>.Success(new(mapped, total, pageNumber, pageSize));
+
+            return Result<PaginatedList<AuditLogListDto>>.Success(
+                new PaginatedList<AuditLogListDto>(mapped, total, pageNumber, pageSize));
+        }
+
+
+        // ===== Helper: Date Range (local) =====
+        private static void ApplyDateRange(ref IQueryable<AuditLog> q, DateTime? from, DateTime? to)
+        {
+            if (!from.HasValue && !to.HasValue) return;
+
+            // نفس سلوكك السابق
+            var tz = TimeZoneInfo.FindSystemTimeZoneById("Europe/Istanbul");
+
+            DateTimeOffset? start = null;
+            DateTimeOffset? endExclusive = null;
+
+            if (from.HasValue)
+            {
+                var f = DateTime.SpecifyKind(from.Value, DateTimeKind.Unspecified);
+                // إذا داخل بوقت = 00:00 غالباً قصدك تاريخ فقط
+                var localStart = (f.TimeOfDay == TimeSpan.Zero) ? f.Date : f;
+                start = new DateTimeOffset(localStart, tz.GetUtcOffset(localStart));
+            }
+
+            if (to.HasValue)
+            {
+                var t = DateTime.SpecifyKind(to.Value, DateTimeKind.Unspecified);
+
+                // إذا وقت = 00:00 اعتبره تاريخ فقط وخليه inclusive لليوم (endExclusive = next day)
+                var localEndEx = (t.TimeOfDay == TimeSpan.Zero) ? t.Date.AddDays(1) : t;
+                endExclusive = new DateTimeOffset(localEndEx, tz.GetUtcOffset(localEndEx));
+            }
+
+            if (start.HasValue) q = q.Where(a => a.Timestamp >= start.Value);
+            if (endExclusive.HasValue) q = q.Where(a => a.Timestamp < endExclusive.Value);
         }
 
         #endregion
 
         #region   جلب ملخص إحصائي للسجلات
-        //public async Task<Result<AuditLogSummaryDto>> GetSummaryAsync()
-        //{
-        //    var q = _context.AuditLogs.AsNoTracking();
-
-        //    var grouped = await q
-        //        .GroupBy(a => a.ActionType)
-        //        .Select(g => new { ActionType = g.Key, Count = g.LongCount() })
-        //        .ToListAsync();
-
-        //    long added = grouped.FirstOrDefault(x => x.ActionType == "Added")?.Count ?? 0;
-        //    long modified = grouped.FirstOrDefault(x => x.ActionType == "Modified")?.Count ?? 0;
-        //    long deleted = grouped.FirstOrDefault(x => x.ActionType == "Deleted")?.Count ?? 0;
-
-        //    long total = added + modified + deleted;
-
-        //    var dto = new AuditLogSummaryDto
-        //    {
-        //        Total = total,
-        //        Added = added,
-        //        Modified = modified,
-        //        Deleted = deleted
-        //    };
-
-        //    return Result<AuditLogSummaryDto>.Success(dto);
-        //}
         public async Task<Result<AuditLogSummaryDto>> GetSummaryAsync()
         {
             var (isSuper, isMgr, brId, depId, userId) = await GetActorScopeAsync();

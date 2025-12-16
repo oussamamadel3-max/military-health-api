@@ -1,5 +1,4 @@
-﻿using ArchiveProject.Application.Common.Results;
-using ArchiveProject.Application.Dtos.DashboardDtos;
+﻿using ArchiveProject.Application.Dtos.DashboardDtos;
 
 namespace ArchiveProject.Application.Common.Interfaces.DashboardInterfaces
 {

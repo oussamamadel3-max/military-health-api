@@ -30,22 +30,6 @@ public class AuditLogController : ControllerBase
         return Ok(result.Value);
     }
 
-    //// استرجاع جميع السجلات مع دعم Pagination
-    //[HttpGet("[action]")]
-    //[AuthorizePermission("AuditLog.Read")]
-    //public async Task<IActionResult> GetAll([FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 10)
-    //{
-    //    if (pageNumber < 1) pageNumber = 1;
-    //    if (pageSize < 1) pageSize = 10;
-
-    //    var result = await _service.GetAllAsync(pageNumber, pageSize);
-    //    if (!result.Succeeded || result.Value == null)
-    //        return BadRequest(new { Errors = result.Errors });
-
-    //    return Ok(result.Value);
-    //}
-
-
     [HttpGet("[action]")]
     [AuthorizePermission("AuditLog.Read")]
     public ActionResult<List<string>> GetAuditEntities()
@@ -65,24 +49,20 @@ public class AuditLogController : ControllerBase
     }
 
 
-
-    [HttpGet("[action]")]
+    [HttpPost("[action]")]
     [AuthorizePermission("AuditLog.Read")]
-    public async Task<IActionResult> GetAllFiltered(
-    [FromQuery] int pageNumber = 1,
-    [FromQuery] int pageSize = 10,
-    [FromQuery] string? userName = null,
-    [FromQuery] AuditActionType? actionType = null,
-    [FromQuery] List<string>? tableNames = null,
-    [FromQuery] DateTime? date = null)
+    public async Task<IActionResult> GetAllFiltered([FromQuery] int pageNumber = 1,[FromQuery] int pageSize = 10,[FromForm] AuditLogFilter filter = null!)
     {
-        var result = await _service.GetAllFilteredAsync(pageNumber, pageSize, userName, actionType, tableNames, date);
+        filter ??= new AuditLogFilter();
+
+        var result = await _service.GetAllFilteredAsync(pageNumber, pageSize, filter);
 
         if (!result.Succeeded || result.Value == null)
             return BadRequest(new { Errors = result.Errors });
 
         return Ok(result.Value);
     }
+
 
 
     [HttpGet("[action]")]

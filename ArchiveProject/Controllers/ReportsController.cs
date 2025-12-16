@@ -1,6 +1,7 @@
 ﻿using ArchiveProject.Application.Common.Interfaces.DashboardInterfaces;
 using ArchiveProject.Application.Common.Interfaces.Reports;
 using ArchiveProject.Application.Dtos.DocumentDtos;
+using ArchiveProject.Application.ModelsDto.AuditLogDtos;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ArchiveProject.API.Controllers
@@ -24,7 +25,7 @@ namespace ArchiveProject.API.Controllers
 
         // POST api/reports/auditlogs/export?format=pdf
         [HttpPost("auditlogs/export")]
-        public async Task<IActionResult> ExportAudit([FromForm] DashboardFilter filter, [FromQuery] string format = "excel")
+        public async Task<IActionResult> ExportAudit([FromForm] AuditLogFilter filter,[FromQuery] string format = "excel")
         {
             var res = await _reports.ExportAuditLogsAsync(filter, format);
             if (!res.Succeeded || res.Value == null) return BadRequest(res);

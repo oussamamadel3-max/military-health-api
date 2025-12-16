@@ -1,4 +1,7 @@
-﻿namespace ArchiveProject.Application.ModelsDto.AuditLogDtos
+﻿using ArchiveProject.Application.Common.Results;
+using ArchiveProject.Application.ModelsDto.AuditLogDtos;
+
+namespace ArchiveProject.Application.ModelsDto.AuditLogDtos
 {
     // DTO لعرض سجلات التدقيق في القائمة (شاملة المعلومات الأساسية)
     public class AuditLogListDto
@@ -61,5 +64,14 @@
         public long Modified { get; set; }
         public long Deleted { get; set; }
     }
-}
+    public class AuditLogFilter
+    {
+        public string? searchUserName { get; set; }
+        public DateTime? From { get; set; }
+        public DateTime? To { get; set; }
+        public string? userName { get; set; }     
+        public AuditActionType? actionType { get; set; }
+        public List<string>? tableNames { get; set; }  
 
+    }
+}
