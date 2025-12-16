@@ -31,42 +31,42 @@ namespace ArchiveProject.API.Controllers
 
         // POST: api/DocumentTypes
         [HttpPost]
-        //[AuthorizePermission("DocumentType.Create")]
+        [AuthorizePermission("DocumentType.Create")]
         public async Task<Result<DocumentTypeDto>> Create([FromBody] CreateDocumentTypeDto dto)
             => Pipe(await _service.CreateAsync(dto));
 
 
         // PUT: api/DocumentTypes/{id}
         [HttpPut("{id:long}")]
-        //[AuthorizePermission("DocumentType.Edit")]
+        [AuthorizePermission("DocumentType.Edit")]
         public async Task<Result<string>> Update(long id, [FromBody] UpdateDocumentTypeDto dto)
             => Pipe(await _service.UpdateAsync(id, dto));
 
 
         // DELETE: api/DocumentTypes/{id}
         [HttpDelete("{id:long}")]
-        //[AuthorizePermission("DocumentType.Delete")]
+        [AuthorizePermission("DocumentType.Delete")]
         public async Task<Result<string>> Delete(long id)
             => Pipe(await _service.DeleteAsync(id));
 
 
         // GET: api/DocumentTypes/{id}
         [HttpGet("{id:long}")]
-        //[AuthorizePermission("DocumentType.Read")]
+        [AuthorizePermission("DocumentType.Read")]
         public async Task<Result<DocumentTypeDto>> GetById(long id)
             => Pipe(await _service.GetByIdAsync(id));
 
 
         // GET: api/DocumentTypes/dropdown
         [HttpGet("dropdown")]
-        //[AuthorizePermission("DocumentType.Read")]
+        [AuthorizePermission("DocumentType.Read")]
         public async Task<Result<IEnumerable<DropDownDto>>> GetDropdown()
             => Pipe(await _service.GetDocumentTypesDropdownAsync());
 
 
         // GET: api/DocumentTypes/GetAllDocumentTypes?pageNumber=1&pageSize=10&name=
         [HttpGet("GetAllDocumentTypes")]
-        //[AuthorizePermission("DocumentType.Read")]
+        [AuthorizePermission("DocumentType.Read")]
         public async Task<Result<PaginatedList<DocumentTypeDto>>> GetAll(
             [FromQuery] int pageNumber = 1,
             [FromQuery] int pageSize = 10,

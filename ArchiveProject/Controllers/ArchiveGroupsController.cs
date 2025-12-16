@@ -33,7 +33,7 @@ namespace ArchiveProject.API.Controllers
 
         // POST: api/ArchiveGroups
         [HttpPost]
-        //[AuthorizePermission("ArchiveGroup.Create")]
+        [AuthorizePermission("ArchiveGroup.Create")]
         public async Task<Result<ArchiveGroupDto>> Create([FromBody] CreateArchiveGroupDto dto)
         {
             var res = await _service.CreateAsync(dto);
@@ -42,7 +42,7 @@ namespace ArchiveProject.API.Controllers
 
         // PUT: api/ArchiveGroups/{id}
         [HttpPut("{id:long}")]
-        //[AuthorizePermission("ArchiveGroup.Edit")]
+        [AuthorizePermission("ArchiveGroup.Edit")]
         public async Task<Result<string>> Update(long id, [FromBody] UpdateArchiveGroupDto dto)
         {
             var res = await _service.UpdateAsync(id, dto);
@@ -51,7 +51,7 @@ namespace ArchiveProject.API.Controllers
 
         // DELETE: api/ArchiveGroups/{id}
         [HttpDelete("{id:long}")]
-        //[AuthorizePermission("ArchiveGroup.Delete")]
+        [AuthorizePermission("ArchiveGroup.Delete")]
         public async Task<Result<string>> Delete(long id)
         {
             var res = await _service.DeleteAsync(id);
@@ -60,7 +60,7 @@ namespace ArchiveProject.API.Controllers
 
         // GET: api/ArchiveGroups/{id}
         [HttpGet("{id:long}")]
-        //[AuthorizePermission("ArchiveGroup.Read")]
+        [AuthorizePermission("ArchiveGroup.Read")]
         public async Task<Result<ArchiveGroupDto>> GetById(long id)
         {
             var res = await _service.GetByIdAsync(id);
@@ -70,7 +70,7 @@ namespace ArchiveProject.API.Controllers
 
         // GET: api/ArchiveGroups/dropdown
         [HttpGet("dropdown")]
-        //[AuthorizePermission("ArchiveGroup.Read")]
+        [AuthorizePermission("ArchiveGroup.Read")]
         public async Task<Result<IEnumerable<DropDownDto>>> GetDropdown()
         {
             var res = await _service.GetArchiveGroupsDropdownAsync();
@@ -79,7 +79,7 @@ namespace ArchiveProject.API.Controllers
 
         // GET: api/ArchiveGroups/by-department/5
         [HttpGet("by-department/{departmentId:long}")]
-        //[AuthorizePermission("ArchiveGroup.Read")]
+        [AuthorizePermission("ArchiveGroup.Read")]
         public async Task<Result<IEnumerable<ArchiveGroupDto>>> GetByDepartment(long departmentId)
         {
             var res = await _service.GetArchiveGroupsByDepartmentAsync(departmentId);
@@ -92,7 +92,7 @@ namespace ArchiveProject.API.Controllers
 
         // GET: api/ArchiveGroups/GetAllArchiveGroups?pageNumber=1&pageSize=10&title=
         [HttpGet("GetAllArchiveGroups")]
-        //[AuthorizePermission("ArchiveGroup.Read")]
+        [AuthorizePermission("ArchiveGroup.Read")]
         public async Task<Result<PaginatedList<ArchiveGroupDto>>> GetAll(
             [FromQuery] int pageNumber = 1,
             [FromQuery] int pageSize = 10,

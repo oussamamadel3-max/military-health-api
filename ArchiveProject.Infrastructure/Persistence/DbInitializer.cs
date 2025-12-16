@@ -1,5 +1,4 @@
-﻿using ArchiveProject.Domain.Entities;
-using ArchiveProject.Domain.Entities.Auth;
+﻿using ArchiveProject.Domain.Entities.Auth;
 using ArchiveProject.Infrastructure.Data;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -176,6 +175,10 @@ namespace ArchiveProject.Infrastructure.Persistence
 
                 // علامة عامة (اختياري)
                 ("SuperAdmin", "مدير النظام"),
+                ("Dashboard.Read", "قراءة لوحة التحكم"),
+                ("ReportsDocuments.Export", "تصدير تقرير الوثائق"),
+                ("ReportsAuditLogs.Export", "تصدير تقرير السجل"),
+                ("ReportsDashboard.Export", "تصدير تقرير لوحة التحكم")
             };
 
             // 3.2) صلاحيات عامة: تُنشأ فقط (لا تُمنح لأحد افتراضياً)

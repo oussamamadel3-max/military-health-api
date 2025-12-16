@@ -15,6 +15,7 @@ namespace ArchiveProject.API.Controllers
 
         // POST api/reports/documents/export?format=excel
         [HttpPost("documents/export")]
+        [AuthorizePermission("ReportsDocuments.Export")]
         public async Task<IActionResult> ExportDocuments([FromForm] DocumentSearchCriteria criteria, [FromQuery] string format = "excel")
         {
             var res = await _reports.ExportDocumentsAsync(criteria, format);
@@ -25,6 +26,7 @@ namespace ArchiveProject.API.Controllers
 
         // POST api/reports/auditlogs/export?format=pdf
         [HttpPost("auditlogs/export")]
+        [AuthorizePermission("ReportsAuditLogs.Export")]
         public async Task<IActionResult> ExportAudit([FromForm] AuditLogFilter filter,[FromQuery] string format = "excel")
         {
             var res = await _reports.ExportAuditLogsAsync(filter, format);
@@ -35,6 +37,7 @@ namespace ArchiveProject.API.Controllers
 
         // POST api/reports/dashboard/export?format= 
         [HttpPost("dashboard/export")]
+        [AuthorizePermission("ReportsDashboard.Export")]
         public async Task<IActionResult> ExportDashboard([FromForm] DashboardFilter filter, [FromQuery] string format = "excel")
         {
             var res = await _reports.ExportDashboardAsync(filter, format);

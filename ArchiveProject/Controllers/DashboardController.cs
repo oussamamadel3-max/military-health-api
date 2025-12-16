@@ -13,6 +13,7 @@ namespace ArchiveProject.API.Controllers
         public DashboardController(IDashboardService service) => _service = service;
 
         [HttpGet]
+        [AuthorizePermission("Dashboard.Read")]
         public async Task<ActionResult<Result<DashboardStatsDto>>> Get([FromQuery] DashboardFilter filter)
         {
             filter ??= new DashboardFilter();

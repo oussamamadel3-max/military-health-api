@@ -31,13 +31,13 @@ namespace ArchiveProject.API.Controllers
 
         // POST: api/Documents
         [HttpPost]
-        //[AuthorizePermission("Document.Create")]
+        [AuthorizePermission("Document.Create")]
         public async Task<Result<List<DocumentDto>>> Create([FromForm] CreateDocumentManyDto dto)
             => Pipe(await _service.CreateAsync(dto));
 
 
         // PUT: api/Documents/{id}
-        //[AuthorizePermission("Document.Edit")]
+        [AuthorizePermission("Document.Edit")]
         [HttpPut("{id:long}")]
         public async Task<Result<string>> Update(long id, [FromForm] UpdateDocumentDto dto)
             => Pipe(await _service.UpdateAsync(id, dto));
@@ -45,28 +45,28 @@ namespace ArchiveProject.API.Controllers
 
         // DELETE: api/Documents/{id}
         [HttpDelete("{id:long}")]
-        //[AuthorizePermission("Document.Delete")]
+        [AuthorizePermission("Document.Delete")]
         public async Task<Result<string>> Delete(long id)
             => Pipe(await _service.DeleteAsync(id));
 
 
         // GET: api/Documents/{id}
         [HttpGet("{id:long}")]
-        //[AuthorizePermission("Document.Read")]
+        [AuthorizePermission("Document.Read")]
         public async Task<Result<DocumentDto>> GetById(long id)
             => Pipe(await _service.GetByIdAsync(id));
 
 
         // GET: api/Documents/dropdown
         [HttpGet("dropdown")]
-        //[AuthorizePermission("Document.Read")]
+        [AuthorizePermission("Document.Read")]
         public async Task<Result<IEnumerable<DropDownDto>>> GetDropdown()
             => Pipe(await _service.GetDocumentsDropdownAsync());
 
 
         // GET: api/Documents/by-group/10?pageNumber=1&pageSize=20
         [HttpGet("by-group/{groupId:long}")]
-        //[AuthorizePermission("Document.Read")]
+        [AuthorizePermission("Document.Read")]
         public async Task<Result<PaginatedList<DocumentDto>>> GetByGroup(
             long groupId,
             [FromQuery] int pageNumber = 1,
@@ -76,7 +76,7 @@ namespace ArchiveProject.API.Controllers
 
         // GET: api/Documents/ungrouped/by-department/5?pageNumber=1&pageSize=20
         [HttpGet("ungrouped/by-department/{departmentId:long}")]
-        //[AuthorizePermission("Document.Read")]
+        [AuthorizePermission("Document.Read")]
         public async Task<Result<PaginatedList<DocumentDto>>> GetUngrouped(
             long departmentId,
             [FromQuery] int pageNumber = 1,
@@ -86,7 +86,7 @@ namespace ArchiveProject.API.Controllers
 
         // GET: api/Documents/GetAllDocuments?pageNumber=1&pageSize=10&title=
         [HttpGet("GetAllDocuments")]
-        //[AuthorizePermission("Document.Read")]
+        [AuthorizePermission("Document.Read")]
         public async Task<Result<PaginatedList<DocumentDto>>> GetAll(
             [FromQuery] int pageNumber = 1,
             [FromQuery] int pageSize = 10,
@@ -96,7 +96,7 @@ namespace ArchiveProject.API.Controllers
 
         // POST: api/Documents/search?pageNumber=1&pageSize=10
         [HttpPost("search")]
-        //[AuthorizePermission("Document.Read")]
+        [AuthorizePermission("Document.Read")]
         public async Task<Result<PaginatedList<DocumentDto>>> Search(
             [FromForm] DocumentSearchCriteria criteria,
             [FromForm] int pageNumber = 1,
