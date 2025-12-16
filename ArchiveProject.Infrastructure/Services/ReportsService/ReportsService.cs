@@ -372,7 +372,6 @@ namespace ArchiveProject.Infrastructure.Services.Reports
             new() { Name = "عدد الوثائق", Value = dto.DocumentsCount.ToString() },
             new() { Name = "عدد المجموعات", Value = dto.GroupsCount.ToString() },
             new() { Name = "إجمالي التخزين", Value = dto.StorageUsage?.TotalReadable ?? "0 B" },
-            new() { Name = "عدد الأنشطة الأخيرة", Value = (dto.RecentActivities?.Count ?? 0).ToString() },
 
             // فاصل/عنوان قسم
             new() { Name = "", Value = "" },
