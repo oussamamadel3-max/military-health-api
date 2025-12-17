@@ -15,7 +15,8 @@ namespace ArchiveProject.API.Extensions
             services.AddDbContext<MainDbContext>((sp, options) =>
             {
                 var currentUser = sp.GetRequiredService<ICurrentUserService>();
-                options.UseSqlServer(connectionString);
+                //options.UseSqlServer(connectionString);
+                options.UseNpgsql(connectionString);
             });
 
             services.AddIdentity<User, Role>(options =>

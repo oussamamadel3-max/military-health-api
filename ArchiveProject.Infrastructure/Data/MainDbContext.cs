@@ -52,6 +52,14 @@ namespace ArchiveProject.Infrastructure.Data
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+
+            // 💡 الحل: إجبار Npgsql على استخدام UTC لجميع التواريخ
+            AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+            // 💡 الحل: فرض نوع عمود "Timestamp" في كيان AuditLog ليتوافق مع PostgreSQL
+            modelBuilder.Entity<AuditLog>()
+                .Property(a => a.Timestamp)
+                .HasColumnType("timestamp with time zone");
+
             base.OnModelCreating(modelBuilder);
 
             #region === Mapping Authorization ===
@@ -339,14 +347,14 @@ namespace ArchiveProject.Infrastructure.Data
                       .HasDefaultValue(false);
 
                 entity.Property(a => a.UploadedAt)
-                      .HasDefaultValueSql("GETUTCDATE()");
+                      .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
                 // فهارس
                 entity.HasIndex(a => new { a.OwnerType, a.OwnerId });
 
                 // (اختياري قوي) فهرس فريد للصورة الشخصية لكل مالك/نوع
                 entity.HasIndex(a => new { a.OwnerType, a.OwnerId, a.IsProfilePhoto })
-                      .HasFilter("[IsProfilePhoto] = 1")
+                      .HasFilter("\"IsProfilePhoto\" = true")
                       .IsUnique();
             });
             #endregion
