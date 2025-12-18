@@ -107,10 +107,23 @@ namespace ArchiveProject.Infrastructure.Services.FileStorageService
             return true;
         }
 
+        //public string GetFullPath(string relativePath)
+        //{
+        //    return Path.Combine(_environment.ContentRootPath, relativePath.Replace("/", "\\"));
+        //}
+
         public string GetFullPath(string relativePath)
         {
-            return Path.Combine(_environment.ContentRootPath, relativePath.Replace("/", "\\"));
+            if (string.IsNullOrWhiteSpace(relativePath))
+                return _environment.ContentRootPath;
+
+            // خلي الفواصل حسب نظام التشغيل
+            relativePath = relativePath.Replace('/', Path.DirectorySeparatorChar)
+                                       .Replace('\\', Path.DirectorySeparatorChar);
+
+            return Path.Combine(_environment.ContentRootPath, relativePath);
         }
+
     }
 
 }

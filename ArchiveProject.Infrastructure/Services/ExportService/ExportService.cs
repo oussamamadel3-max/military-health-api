@@ -1126,7 +1126,7 @@ namespace ArchiveProject.Infrastructure.Services
             worksheet.Cell(totalRow, 2).Value = dataList.Count;
             worksheet.Cell(totalRow, 2).Style.Font.Bold = true;
             worksheet.Cell(totalRow, 2).Style.Fill.BackgroundColor = themeColors.LightAccent;
-            worksheet.Cell(totalRow, 2).Style.NumberFormat.Format = "#,##0";
+            worksheet.Cell(totalRow, 2).Style.NumberFormat.Format = "0";
 
             var numericColumns = new List<(string name, int index)>();
             // استخرج قائمة الأعمدة المستثناة من التجميع (مع جعلها كبيرة للتأكد من المقارنة)
@@ -1165,7 +1165,7 @@ namespace ArchiveProject.Infrastructure.Services
                         worksheet.Cell(totalRow, 1).Style.Fill.BackgroundColor = themeColors.LightBlue;
 
                         worksheet.Cell(totalRow, 2).Value = values.Sum();
-                        worksheet.Cell(totalRow, 2).Style.NumberFormat.Format = options?.NumberFormat ?? "#,##0.00;[Red]-#,##0.00";
+                        worksheet.Cell(totalRow, 2).Style.NumberFormat.Format = options?.NumberFormat ?? "0.00;[Red]-0.00";
                         worksheet.Cell(totalRow, 2).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
                         worksheet.Cell(totalRow, 2).Style.Font.Bold = true;
                         worksheet.Cell(totalRow, 2).Style.Fill.BackgroundColor = themeColors.LightBlue;
@@ -1194,7 +1194,7 @@ namespace ArchiveProject.Infrastructure.Services
             if (value == null) { cell.Value = ""; return; }
 
             var dateFormat = options?.DateFormat ?? "yyyy/MM/dd";
-            var numberFormat = options?.NumberFormat ?? "#,##0.00";
+            var numberFormat = options?.NumberFormat ?? "0.00";
 
             switch (Type.GetTypeCode(propertyType))
             {
@@ -1236,7 +1236,7 @@ namespace ArchiveProject.Infrastructure.Services
                     if (long.TryParse(value.ToString(), out var lng))
                     {
                         cell.Value = lng;
-                        cell.Style.NumberFormat.Format = "#,##0";
+                        cell.Style.NumberFormat.Format = "0";
                         cell.Style.Font.FontColor = XLColor.FromHtml("#17A2B8");
                     }
                     break;

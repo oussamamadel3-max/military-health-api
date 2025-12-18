@@ -143,7 +143,7 @@ namespace ArchiveProject.Infrastructure.Services
                     UserId = userId,
                     DocumentNumber = currentMax + 1
                 };
-
+                entity.Description ??= string.Empty;
                 _context.Documents.Add(entity);
 
                 // حفظ مع معالجة تعارض ترقيم داخل القسم
@@ -450,6 +450,7 @@ namespace ArchiveProject.Infrastructure.Services
                         .MaxAsync() ?? 0;
                     entity.DocumentNumber = newMax + 1;
                 }
+                entity.Description ??= string.Empty;
 
                 using var tx = await _context.Database.BeginTransactionAsync();
                 try
