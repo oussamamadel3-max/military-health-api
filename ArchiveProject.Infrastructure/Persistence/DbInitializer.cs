@@ -173,7 +173,7 @@ namespace ArchiveProject.Infrastructure.Persistence
                 // Audit
                 ("AuditLog.Read", "قراءة سجلات التدقيق"),
 
-                // علامة عامة (اختياري)
+                // عامة
                 ("SuperAdmin", "مدير النظام"),
                 ("Dashboard.Read", "قراءة لوحة التحكم"),
                 ("ReportsDocuments.Export", "تصدير تقرير الوثائق"),
@@ -181,7 +181,7 @@ namespace ArchiveProject.Infrastructure.Persistence
                 ("ReportsDashboard.Export", "تصدير تقرير لوحة التحكم")
             };
 
-            // 3.2) صلاحيات عامة: تُنشأ فقط (لا تُمنح لأحد افتراضياً)
+            // 3.2) صلاحيات عامة: تُنشأ فقط
             var publicPermsOnly = new (string Name, string? Desc)[]
             {
                 // ========== Branch CRUD ===================
@@ -214,14 +214,12 @@ namespace ArchiveProject.Infrastructure.Persistence
                 ("Document.Edit",   "تعديل الوثائق"),
                 ("Document.Delete", "حذف الوثائق"),
 
-                // صلاحية عامة باسم BranchManager (اختياري استخدامها)
+                // (موجودة ولكن لن تُمنح للسوبر)
                 ("BranchManager", "مدير الفرع"),
             };
 
-            // أنشئ العامة فقط
+            // إنشاء جميع الصلاحيات العامة
             await EnsurePermissionsSetAsync(publicPermsOnly);
-
-            
 
             // ============================
             // 5) المستخدمون
@@ -238,8 +236,16 @@ namespace ArchiveProject.Infrastructure.Persistence
                 attachRoles: new[] { roleSuperAdmin }
             );
 
-            // امنح SuperAdmin الصلاحيات الأساسية فقط
+            // امنح SuperAdmin الصلاحيات الأساسية
             await EnsurePermissionsAndAssignToUserAsync(superAdmin.Id, permsForSuperAdmin);
+
+            // امنحه جميع صلاحيات CRUD العامة بدون BranchManager
+            var publicCrudPermsForSuperAdmin = publicPermsOnly
+                .Where(p => !string.Equals(p.Name, "BranchManager", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+
+            await EnsurePermissionsAndAssignToUserAsync(superAdmin.Id, publicCrudPermsForSuperAdmin);
+
 
         }
     }
