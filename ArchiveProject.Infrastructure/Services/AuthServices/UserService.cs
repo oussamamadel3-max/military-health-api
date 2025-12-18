@@ -626,8 +626,7 @@ public class UserService : IUserService
     #endregion
 
     #region  جلب الكل 
-    public async Task<Result<PaginatedList<UserListItemDto>>> GetUsersListAsync(
-        int pageNumber, int pageSize, string? q = null, bool? isActive = null)
+    public async Task<Result<PaginatedList<UserListItemDto>>> GetUsersListAsync(int pageNumber, int pageSize, string? q = null, bool? isActive = null)
     {
         if (pageNumber < 1) pageNumber = 1;
         if (pageSize < 1) pageSize = 10;
@@ -669,6 +668,7 @@ public class UserService : IUserService
                 baseQuery = baseQuery.Where(u => u.Id == currentUserId);
             }
         }
+        baseQuery = baseQuery.Where(u => u.Id != currentUserId);
 
         // 🔎 بحث موحّد: الاسم (FullName إن وجد، وإلا UserName) أو الإيميل
         if (!string.IsNullOrWhiteSpace(q))

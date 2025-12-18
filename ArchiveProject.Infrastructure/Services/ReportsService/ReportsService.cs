@@ -368,15 +368,15 @@ namespace ArchiveProject.Infrastructure.Services.Reports
                 }
 
                 var rows = new List<DashboardExportRow>
-        {
-            new() { Name = "عدد الوثائق", Value = dto.DocumentsCount.ToString() },
-            new() { Name = "عدد المجموعات", Value = dto.GroupsCount.ToString() },
-            new() { Name = "إجمالي التخزين", Value = dto.StorageUsage?.TotalReadable ?? "0 B" },
+                {
+                    new() { Name = "عدد الوثائق", Value = dto.DocumentsCount.ToString() },
+                    new() { Name = "عدد المجموعات", Value = dto.GroupsCount.ToString() },
+                    new() { Name = "إجمالي التخزين", Value = dto.StorageUsage?.TotalReadable ?? "0 B" },
 
-            // فاصل/عنوان قسم
-            new() { Name = "", Value = "" },
-            new() { Name = "أكثر أنواع الوثائق استخداماً", Value = "" },
-        };
+                    // فاصل/عنوان قسم
+                    new() { Name = "", Value = "" },
+                    new() { Name = "أكثر أنواع الوثائق استخداماً", Value = "" },
+                };
 
                 // Top Document Types (مثلاً أعلى 5)
                 if (dto.TopDocumentTypes != null && dto.TopDocumentTypes.Count > 0)
