@@ -4,6 +4,7 @@ using ArchiveProject.Application.Dtos.AuthDtos;
 using ArchiveProject.Domain.Entities.Auth;
 using ArchiveProject.Infrastructure.Data;
 using ArchiveProject.Infrastructure.Persistence;
+using DocumentFormat.OpenXml.Spreadsheet;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using System.Linq.Expressions;
@@ -699,6 +700,10 @@ public class UserService : IUserService
                 u.Email,
                 u.PhoneNumber,
                 u.IsActive,
+                u.BranchId,
+                BranchName = u.Branch != null ? u.Branch.BranchName : null,
+                u.DepartmentId,
+                DepartmentName = u.Department != null ? u.Department.DepartmentName : null,
                 u.CreationDate
             })
             .ToListAsync();
@@ -772,6 +777,10 @@ public class UserService : IUserService
                 email = u.Email ?? string.Empty,
                 phone = u.PhoneNumber,
                 isActive = u.IsActive,
+                BranchId = u.BranchId,
+                BranchName = u.BranchName,
+                DepartmentId = u.DepartmentId,
+                DepartmentName = u.DepartmentName,
                 createdAt = u.CreationDate,
                 rolesCount = userRoles.Count,
                 permissionsCount = permMap.Count,
@@ -788,88 +797,6 @@ public class UserService : IUserService
     #endregion
 
     #region     جلب حسب المعرف 
-    //public async Task<Result<UserListItemDto>> GetUserAsync(string id)
-    //{
-    //    // فلترة الوصول حسب الفرع إذا ما عنده CrossBranch.Read
-    //    IQueryable<User> q = _context.Users.AsNoTracking();
-
-    //    var user = await q
-    //        .Select(u => new
-    //        {
-    //            u.Id,
-    //            u.UserName,
-    //            u.Email,
-    //            u.PhoneNumber,
-    //            u.IsActive,
-    //            u.CreationDate,
-    //        })
-    //        .FirstOrDefaultAsync(u => u.Id == id);
-
-    //    if (user == null)
-    //        return Result<UserListItemDto>.Failure(new[] { "المستخدم غير موجود" }, null);
-
-    //    // أدوار المستخدم
-    //    var roles = await _context.UserRoleAssociations
-    //        .AsNoTracking()
-    //        .Where(ura => ura.UserId == user.Id)
-    //        .Select(ura => new RoleLiteDto(
-    //            ura.RoleId,
-    //            (ura.Role != null && !string.IsNullOrWhiteSpace(ura.Role.Name)) ? ura.Role.Name : string.Empty
-    //        ))
-    //        .ToListAsync();
-
-    //    var roleIds = roles.Select(r => r.RoleId).ToList();
-
-    //    // صلاحيات الأدوار
-    //    var rolePermissions = await _context.RolePermissions
-    //        .AsNoTracking()
-    //        .Where(rp => roleIds.Contains(rp.RoleId))
-    //        .Select(rp => new { rp.PermissionId, rp.Permission.Name })
-    //        .ToListAsync();
-
-    //    // صلاحيات المستخدم المباشرة
-    //    var directPermissions = await _context.UserPermissions
-    //        .AsNoTracking()
-    //        .Where(up => up.UserId == user.Id)
-    //        .Select(up => new { up.PermissionId, up.Permission.Name })
-    //        .ToListAsync();
-
-    //    var permissionPairs = directPermissions
-    //        .Where(p => p.PermissionId.HasValue && !string.IsNullOrWhiteSpace(p.Name))
-    //        .Select(p => new { Id = p.PermissionId!.Value, Name = p.Name! })
-    //        .Concat(
-    //            rolePermissions
-    //                .Where(p => p.PermissionId != Guid.Empty && !string.IsNullOrWhiteSpace(p.Name))
-    //                .Select(p => new { Id = p.PermissionId, Name = p.Name! })
-    //        );
-
-    //    var permissionMap = permissionPairs
-    //        .GroupBy(p => p.Id)
-    //        .ToDictionary(g => g.Key, g => g.First().Name, EqualityComparer<Guid>.Default);
-
-    //    var permissionsLite = permissionMap
-    //        .OrderBy(kvp => kvp.Value, StringComparer.OrdinalIgnoreCase)
-    //        .Select(kvp => new PermissionLiteDto(kvp.Key.ToString(), kvp.Value))
-    //        .ToList();
-
-    //    var dto = new UserListItemDto
-    //    {
-    //        userId = user.Id,
-    //        fullName = user.UserName, // بدّلها لو عندك FullName
-    //        username = user.UserName ?? string.Empty,
-    //        email = user.Email ?? string.Empty,
-    //        phone = user.PhoneNumber,
-    //        isActive = user.IsActive,
-    //        createdAt = user.CreationDate,
-    //        roles = roles,
-    //        rolesCount = roles.Count,
-    //        permissionsCount = permissionsLite.Count,
-    //        Permissions = permissionsLite
-    //    };
-
-    //    return Result<UserListItemDto>.Success(dto);
-    //}
-
     public async Task<Result<UserListItemDto>> GetUserAsync(string id)
     {
         var (actor, actorBranchId, actorIsSuperAdmin) = await GetActorAsync();
@@ -893,6 +820,10 @@ public class UserService : IUserService
                 u.Email,
                 u.PhoneNumber,
                 u.IsActive,
+                u.BranchId,
+                BranchName = u.Branch != null ? u.Branch.BranchName : null,
+                u.DepartmentId,
+                DepartmentName = u.Department != null ? u.Department.DepartmentName : null,
                 u.CreationDate,
                 FullName = u.FullName
             })
@@ -949,6 +880,10 @@ public class UserService : IUserService
             email = user.Email ?? string.Empty,
             phone = user.PhoneNumber,
             isActive = user.IsActive,
+            BranchId = user.BranchId,
+            BranchName = user.BranchName,
+            DepartmentId = user.DepartmentId,
+            DepartmentName = user.DepartmentName,
             createdAt = user.CreationDate,
             roles = roles,
             rolesCount = roles.Count,
