@@ -67,8 +67,8 @@ namespace ArchiveProject.Application.ModelsDto.AuditLogDtos
     public class AuditLogFilter
     {
         public string? searchUserName { get; set; }
-        public DateTime? From { get; set; }
-        public DateTime? To { get; set; }
+        public DateTimeOffset? From { get; set; }
+        public DateTimeOffset? To { get; set; }
         public string? userName { get; set; }     
         public AuditActionType? actionType { get; set; }
         public List<string>? tableNames { get; set; }  

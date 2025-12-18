@@ -187,14 +187,14 @@ namespace ArchiveProject.Infrastructure.Services
                         h.Item().Row(row =>
                         {
                             // يسار: اللوغو
-                            row.ConstantItem(55).AlignLeft().Element(e =>
+                            row.ConstantItem(45).AlignLeft().Element(e =>
                             {
                                 if (options.IncludeLogo)
                                     TryDrawLogo(e);
                             });
 
                             // وسط: العنوان
-                            row.RelativeItem().PaddingLeft(70).AlignCenter()
+                            row.RelativeItem().PaddingLeft(80).AlignCenter()
                                 .Text(titleText)
                                 .FontSize(22)
                                 .SemiBold()
@@ -887,6 +887,11 @@ namespace ArchiveProject.Infrastructure.Services
         {
             if (value == null) return "";
 
+            // ✅ DateTimeOffset (مثل AuditLog.Timestamp)
+            if (value is DateTimeOffset dto)
+                return dto.ToString(opt.DateFormat ?? "yyyy/MM/dd");
+
+            // ✅ DateTime
             if (value is DateTime dt)
                 return dt.ToString(opt.DateFormat ?? "yyyy/MM/dd");
 
@@ -940,8 +945,8 @@ namespace ArchiveProject.Infrastructure.Services
                     _logger?.LogWarning("Logo stream is null: {ResId}", logoResId);
                     return;
                 }
-
-                container.Height(55).Width(55).Image(s);
+                s.Position = 0;
+                container.Height(45).Width(45).Image(s);
             }
             catch (Exception ex)
             {

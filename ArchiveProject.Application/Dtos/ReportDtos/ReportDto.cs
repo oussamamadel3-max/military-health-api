@@ -14,7 +14,7 @@
 
     public class AuditLogReportRowDto
     {
-        public DateTime Timestamp { get; set; }
+        public DateTimeOffset Timestamp { get; set; }
         public string UserName { get; set; } = "";
         public string ActionType { get; set; } = "";
         public string TableName { get; set; } = "";

@@ -131,31 +131,25 @@ namespace FinanceProject.Infrastructure.Services
 
 
         // ===== Helper: Date Range (local) =====
-        private static void ApplyDateRange(ref IQueryable<AuditLog> q, DateTime? from, DateTime? to)
+        private static void ApplyDateRange(ref IQueryable<AuditLog> q, DateTimeOffset? from, DateTimeOffset? to)
         {
             if (!from.HasValue && !to.HasValue) return;
-
-            // نفس سلوكك السابق
-            var tz = TimeZoneInfo.FindSystemTimeZoneById("Europe/Istanbul");
 
             DateTimeOffset? start = null;
             DateTimeOffset? endExclusive = null;
 
             if (from.HasValue)
             {
-                var f = DateTime.SpecifyKind(from.Value, DateTimeKind.Unspecified);
-                // إذا داخل بوقت = 00:00 غالباً قصدك تاريخ فقط
-                var localStart = (f.TimeOfDay == TimeSpan.Zero) ? f.Date : f;
-                start = new DateTimeOffset(localStart, tz.GetUtcOffset(localStart));
+                var f = from.Value;
+                start = (f.TimeOfDay == TimeSpan.Zero) ? new DateTimeOffset(f.Date, f.Offset) : f;
             }
 
             if (to.HasValue)
             {
-                var t = DateTime.SpecifyKind(to.Value, DateTimeKind.Unspecified);
-
-                // إذا وقت = 00:00 اعتبره تاريخ فقط وخليه inclusive لليوم (endExclusive = next day)
-                var localEndEx = (t.TimeOfDay == TimeSpan.Zero) ? t.Date.AddDays(1) : t;
-                endExclusive = new DateTimeOffset(localEndEx, tz.GetUtcOffset(localEndEx));
+                var t = to.Value;
+                endExclusive = (t.TimeOfDay == TimeSpan.Zero)
+                    ? new DateTimeOffset(t.Date.AddDays(1), t.Offset)
+                    : t;
             }
 
             if (start.HasValue) q = q.Where(a => a.Timestamp >= start.Value);

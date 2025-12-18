@@ -142,6 +142,8 @@ namespace ArchiveProject.Infrastructure.Services.Reports
                     BranchName = branchName,
                     DepartmentName = deptName,
                     PeriodText = periodText,
+                    IncludeLogo = true,   // ✅ أضفها
+                    IncludeFooter = true, // (إذا بدك)
                     ColumnMappings = new Dictionary<string, string>
                     {
                         ["DocumentNumber"] = "رقم الوثيقة",
@@ -237,7 +239,7 @@ namespace ArchiveProject.Infrastructure.Services.Reports
 
                 var rows = await q.Select(a => new AuditLogReportRowDto
                 {
-                    Timestamp = a.Timestamp.UtcDateTime,
+                    Timestamp = a.Timestamp,
                     UserName = a.UserName ?? "",
                     ActionType = a.ActionType ?? "",
                     TableName = a.TableName ?? "",
@@ -250,6 +252,8 @@ namespace ArchiveProject.Infrastructure.Services.Reports
                     SheetName = "AuditLogs",
                     CustomTitle = "تقرير سجل التدقيق",
                     PeriodText = periodText,
+                    IncludeLogo = true,   // ✅ أضفها
+                    IncludeFooter = true, // (إذا بدك)
                     ColumnMappings = new Dictionary<string, string>
                     {
                         ["Timestamp"] = "التاريخ",
@@ -273,38 +277,36 @@ namespace ArchiveProject.Infrastructure.Services.Reports
         }
 
         // ===== Helper: Date Range + PeriodText =====
-        private static void ApplyDateRangeForExport(ref IQueryable<AuditLog> q, DateTime? from, DateTime? to, out string? periodText)
+        private static void ApplyDateRangeForExport(ref IQueryable<AuditLog> q,DateTimeOffset? from,DateTimeOffset? to,out string? periodText)
         {
             periodText = null;
             if (!from.HasValue && !to.HasValue) return;
 
-            var tz = TimeZoneInfo.FindSystemTimeZoneById("Europe/Istanbul");
-
+            // إذا بدك تعتبر "to" شامل لنهاية اليوم عند إدخال تاريخ بدون وقت:
             DateTimeOffset? start = null;
             DateTimeOffset? endExclusive = null;
 
             if (from.HasValue)
             {
-                var f = DateTime.SpecifyKind(from.Value, DateTimeKind.Unspecified);
-                var localStart = (f.TimeOfDay == TimeSpan.Zero) ? f.Date : f;
-                start = new DateTimeOffset(localStart, tz.GetUtcOffset(localStart));
+                start = from.Value;
             }
 
             if (to.HasValue)
             {
-                var t = DateTime.SpecifyKind(to.Value, DateTimeKind.Unspecified);
-                var localEndEx = (t.TimeOfDay == TimeSpan.Zero) ? t.Date.AddDays(1) : t;
-                endExclusive = new DateTimeOffset(localEndEx, tz.GetUtcOffset(localEndEx));
+                var t = to.Value;
+
+                // إذا الوقت 00:00:00 اعتبره تاريخ فقط => نهاية اليوم (exclusive) = +1 day
+                endExclusive = (t.TimeOfDay == TimeSpan.Zero) ? t.AddDays(1) : t;
             }
 
             if (start.HasValue) q = q.Where(a => a.Timestamp >= start.Value);
             if (endExclusive.HasValue) q = q.Where(a => a.Timestamp < endExclusive.Value);
 
-            // period text للعنوان
-            var fromText = from.HasValue ? from.Value.Date.ToString("yyyy/MM/dd") : "—";
-            var toText = to.HasValue ? to.Value.Date.ToString("yyyy/MM/dd") : "—";
+            var fromText = from.HasValue ? from.Value.ToString("yyyy/MM/dd") : "—";
+            var toText = to.HasValue ? to.Value.ToString("yyyy/MM/dd") : "—";
             periodText = $"{fromText} → {toText}";
         }
+
         #endregion
 
         #region Export Dashboard
