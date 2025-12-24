@@ -355,6 +355,7 @@ namespace ArchiveProject.Infrastructure.Data
                 // (اختياري قوي) فهرس فريد للصورة الشخصية لكل مالك/نوع
                 entity.HasIndex(a => new { a.OwnerType, a.OwnerId, a.IsProfilePhoto })
                       .HasFilter("\"IsProfilePhoto\" = true")
+                      //.HasFilter("[IsProfilePhoto] = 1")
                       .IsUnique();
             });
             #endregion
