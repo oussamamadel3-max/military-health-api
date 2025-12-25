@@ -206,15 +206,19 @@ namespace ArchiveProject.Infrastructure.Data
 
 
             #region === Core Domain Entities ===  (ArchiveProject)
+
             // ===== Branch =====
             modelBuilder.Entity<Branch>(entity =>
             {
                 entity.HasKey(b => b.BranchId);
                 entity.Property(b => b.Code).IsRequired().HasMaxLength(50);
                 entity.Property(b => b.BranchName).IsRequired().HasMaxLength(250);
-                entity.HasIndex(b => b.Code).IsUnique(); // كود الفرع فريد
 
-                // 🔵 علاقة عكسية مع مستخدمي الفرع (يستعملها User.Branch)
+                // ✅ مفقود عندك
+                entity.Property(b => b.Description).HasMaxLength(1000);
+
+                entity.HasIndex(b => b.Code).IsUnique();
+
                 entity.HasMany(b => b.Users)
                       .WithOne(u => u.Branch)
                       .HasForeignKey(u => u.BranchId)
@@ -226,15 +230,18 @@ namespace ArchiveProject.Infrastructure.Data
             {
                 entity.HasKey(d => d.DepartmentId);
                 entity.Property(d => d.DepartmentName).IsRequired().HasMaxLength(250);
-                entity.Property(d => d.Code).HasMaxLength(50); // توحيد طول الكود
+                entity.Property(d => d.Code).HasMaxLength(50);
+
+                // ✅ مفقود عندك
+                entity.Property(d => d.Description).HasMaxLength(1000);
 
                 entity.HasIndex(d => d.BranchId);
+
                 entity.HasOne(d => d.Branch)
                       .WithMany(b => b.Departments)
                       .HasForeignKey(d => d.BranchId)
                       .OnDelete(DeleteBehavior.Restrict);
 
-                // 🔵 مستخدمو القسم (يستعملها User.Department)
                 entity.HasMany(d => d.Users)
                       .WithOne(u => u.Department)
                       .HasForeignKey(u => u.DepartmentId)
@@ -248,8 +255,13 @@ namespace ArchiveProject.Infrastructure.Data
             modelBuilder.Entity<DocumentType>(entity =>
             {
                 entity.HasKey(t => t.DocumentTypeId);
-                entity.Property(t => t.DocumentTypeName).IsRequired().HasMaxLength(250);
+
+                // ✅ خليها نفس DTO (أنا بنصح تبقى 250 متل عندك)
+                entity.Property(t => t.DocumentTypeName).IsRequired().HasMaxLength(150);
+
+                // ✅ خلي DTO ما يتجاوز 512
                 entity.Property(t => t.AllowedExtensions).HasMaxLength(512);
+
                 entity.HasIndex(t => t.DocumentTypeName);
             });
 
@@ -259,7 +271,6 @@ namespace ArchiveProject.Infrastructure.Data
                 entity.HasKey(g => g.ArchiveGroupId);
                 entity.Property(g => g.Title).IsRequired().HasMaxLength(250);
 
-                // فهرس فريد يضمن تفرد رقم المجموعة داخل القسم
                 entity.HasIndex(d => new { d.DepartmentId, d.ArchiveGroupNumber }).IsUnique();
 
                 entity.HasIndex(g => g.DepartmentId);
@@ -282,7 +293,14 @@ namespace ArchiveProject.Infrastructure.Data
                 entity.HasKey(d => d.DocumentId);
 
                 entity.Property(d => d.Title).IsRequired().HasMaxLength(250);
-                // فهرس فريد يضمن تفرد رقم الوثيقة داخل القسم
+
+                // ✅ مفقود عندك (DTO عندك Description)
+                entity.Property(d => d.Description).HasMaxLength(2000);
+
+                // ✅ (اختياري بس مفيد) أعمدة التدقيق إذا موجودة بالـ Entity
+                // entity.Property(d => d.CreatedBy).HasMaxLength(100);
+                // entity.Property(d => d.UpdatedBy).HasMaxLength(100);
+
                 entity.HasIndex(d => new { d.DepartmentId, d.DocumentNumber }).IsUnique();
 
                 entity.HasIndex(d => d.DepartmentId);
@@ -308,7 +326,7 @@ namespace ArchiveProject.Infrastructure.Data
                 entity.HasOne(d => d.ArchiveGroup)
                       .WithMany(g => g.Documents)
                       .HasForeignKey(d => d.ArchiveGroupId)
-                      .OnDelete(DeleteBehavior.SetNull); // المجموعة اختيارية، حذفها لا يحذف الوثائق
+                      .OnDelete(DeleteBehavior.SetNull);
             });
 
             // ===== Attachment =====
@@ -316,49 +334,34 @@ namespace ArchiveProject.Infrastructure.Data
             {
                 entity.HasKey(a => a.AttachmentId);
 
-                entity.Property(a => a.OwnerType)
-                      .IsRequired()
-                      .HasMaxLength(100);
+                entity.Property(a => a.OwnerType).IsRequired().HasMaxLength(100);
+                entity.Property(a => a.OwnerId).IsRequired();
 
-                entity.Property(a => a.OwnerId)
-                      .IsRequired();
+                entity.Property(a => a.FileName).IsRequired().HasMaxLength(260);
+                entity.Property(a => a.FileExtension).HasMaxLength(20);
 
-                entity.Property(a => a.FileName)
-                      .IsRequired()
-                      .HasMaxLength(260);
+                entity.Property(a => a.FilePath).IsRequired().HasMaxLength(1024);
+                entity.Property(a => a.ContentType).HasMaxLength(150);
+                entity.Property(a => a.Description).HasMaxLength(1000);
 
-                entity.Property(a => a.FileExtension)
-                      .HasMaxLength(20);
+                entity.Property(a => a.FileSize).IsRequired();
+                entity.Property(a => a.IsProfilePhoto).HasDefaultValue(false);
+                entity.Property(a => a.UploadedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 
-                entity.Property(a => a.FilePath)
-                      .IsRequired()
-                      .HasMaxLength(1024);
-
-                entity.Property(a => a.ContentType)
-                      .HasMaxLength(150);
-
-                entity.Property(a => a.Description)
-                      .HasMaxLength(1000);
-
-                entity.Property(a => a.FileSize)
-                      .IsRequired();
-
-                entity.Property(a => a.IsProfilePhoto)
-                      .HasDefaultValue(false);
-
-                entity.Property(a => a.UploadedAt)
-                      .HasDefaultValueSql("CURRENT_TIMESTAMP");
-
-                // فهارس
                 entity.HasIndex(a => new { a.OwnerType, a.OwnerId });
 
-                // (اختياري قوي) فهرس فريد للصورة الشخصية لكل مالك/نوع
+                // postgresql 
                 entity.HasIndex(a => new { a.OwnerType, a.OwnerId, a.IsProfilePhoto })
                       .HasFilter("\"IsProfilePhoto\" = true")
-                      //.HasFilter("[IsProfilePhoto] = 1")
                       .IsUnique();
+
+                //// SqlServer
+                //entity.HasIndex(a => new { a.OwnerType, a.OwnerId, a.IsProfilePhoto });
+
             });
+
             #endregion
+
 
 
             // === (اختياري) استدعاء Seed

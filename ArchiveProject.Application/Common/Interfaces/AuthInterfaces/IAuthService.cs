@@ -4,7 +4,9 @@ namespace ArchiveProject.Application.Common.Interfaces.AuthInterfaces
 {
     public interface IAuthService
     {
+        //Task<Result<LoginResponseDto>> LoginAsync(RequestToken requestToken);
         Task<Result<LoginResponseDto>> LoginAsync(RequestToken requestToken);
+        Task<Result<MeResponseDto>> GetMeAsync(string userId);
     }
 }
 
