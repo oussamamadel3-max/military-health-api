@@ -1,6 +1,7 @@
 ﻿using ArchiveProject.API.Extensions;
 using ArchiveProject.API.Middleware;
 using ArchiveProject.Infrastructure.Persistence;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -37,13 +38,39 @@ builder.Services
     .AddSwaggerDocumentation()
 
     // 🌐 إعداد سياسة CORS للسماح بتواصل الواجهة الأمامية (Angular أو غيره)
-    .AddFrontendCors();
+    .AddFrontendCors(builder.Configuration);
 
 #endregion
 
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddPolicy("login", context =>
+    {
+        // الحصول على IP
+        var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+        return RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: ip,
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 5,                 // عدد المحاولات
+                Window = TimeSpan.FromMinutes(1), // خلال دقيقة
+                QueueLimit = 0,
+                AutoReplenishment = true
+            });
+    });
+});
+builder.Services.AddCookieSecurity();
+builder.Services.AddApiValidationBehavior();
+
 
 var app = builder.Build();
+// 🔐 Security Headers (Clickjacking protection)
+app.UseSecurityHeaders();
+
 app.UseStaticFiles(); // يقدّم كل ما في wwwroot على /
+app.UseRateLimiter();
+
 
 
 // في السطر 82 قم باضافة الصلاحيات الخاصة بك في ملف DbInitializer
@@ -81,6 +108,9 @@ app.UseFrontendCors();
 
 // 🔒 تفعيل التحويل التلقائي إلى HTTPS
 app.UseHttpsRedirection();
+
+// 🍪 تفعيل إعدادات أمان الكوكيز
+app.UseCookieSecurity();
 
 // 🔑 تفعيل نظام المصادقة (Authentication) للتحقق من هوية المستخدمين
 app.UseAuthentication();

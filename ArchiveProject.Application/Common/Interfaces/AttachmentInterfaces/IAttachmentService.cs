@@ -1,5 +1,4 @@
-﻿using ArchiveProject.Application.Common.Results;
-using ArchiveProject.Application.Dtos;
+﻿using ArchiveProject.Application.Dtos;
 using Microsoft.AspNetCore.Http;
 
 namespace ArchiveProject.Application.Common.Interfaces.AttachmentInterfaces

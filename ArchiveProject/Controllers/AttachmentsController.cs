@@ -1,11 +1,13 @@
 ﻿using ArchiveProject.Application.Common.Interfaces.AttachmentInterfaces;
 using ArchiveProject.Application.Dtos;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ArchiveProject.API.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [Authorize]
     public class AttachmentsController : ControllerBase
     {
         private readonly IAttachmentService _service;

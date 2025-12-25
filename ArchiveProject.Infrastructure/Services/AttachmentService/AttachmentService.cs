@@ -241,9 +241,24 @@ namespace ArchiveProject.Infrastructure.Services.AttachmentService
             var dto = _mapper.Map<AttachmentReadDto>(attachment);
 
             dto.FileSizeFormatted = FormatFileSize(attachment.FileSize);
-            dto.FileUrl = BuildFileUrl(attachment.FilePath);
+
+            // ✅ لا تكشف المسار الداخلي
+            dto.FilePath = null;
+
+            // ✅ رابط تحميل محمي عبر API
+            dto.FileUrl = BuildProtectedDownloadUrl(attachment.AttachmentId);
+
             return dto;
         }
+        private string BuildProtectedDownloadUrl(Guid id)
+        {
+            var request = _httpContextAccessor.HttpContext?.Request;
+            if (request == null)
+                return $"/api/attachments/download/{id}";
+
+            return $"{request.Scheme}://{request.Host}/api/attachments/download/{id}";
+        }
+
 
         // ⬆ FORMAT FILE SIZE
         private string FormatFileSize(long bytes)

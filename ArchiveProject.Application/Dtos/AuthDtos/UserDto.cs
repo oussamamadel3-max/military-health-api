@@ -1,3 +1,5 @@
+﻿using System.ComponentModel.DataAnnotations;
+
 namespace ArchiveProject.Application.Dtos.AuthDtos;
 public class UserDto
 {
@@ -18,7 +20,14 @@ public class UserDto
 
 public class UpdateUserDto
 {
+    [Required]
+    [StringLength(50, MinimumLength = 3)]
+    [RegularExpression(@"^[a-zA-Z0-9._-]+$", ErrorMessage = "اسم المستخدم يحوي محارف غير مسموحة")]
     public string? UserName { get; set; }
+
+    [Required]
+    [EmailAddress]
+    [StringLength(254)]
     public string? Email { get; set; }
     public long? BranchId { get; set; }
     public long? DepartmentId { get; set; }
@@ -26,9 +35,22 @@ public class UpdateUserDto
 }
 public class UpdateUserPatchRequest
 {
+    [Required]
+    [StringLength(100, MinimumLength = 3)]
     public string? fullName { get; set; }
+
+    [Required]
+    [StringLength(50, MinimumLength = 3)]
+    [RegularExpression(@"^[a-zA-Z0-9._-]+$", ErrorMessage = "اسم المستخدم يحوي محارف غير مسموحة")]
     public string? username { get; set; }
+
+    [Required]
+    [EmailAddress]
+    [StringLength(254)]
     public string? email { get; set; }
+
+    [StringLength(20)]
+    [RegularExpression(@"^[0-9+ -]*$", ErrorMessage = "رقم الهاتف غير صالح")]
     public string? phone { get; set; }
     public long? BranchId { get; set; }
     public long? DepartmentId { get; set; }
@@ -43,11 +65,27 @@ public class UpdateUserStatusRequest
 
 public class CreateUserDto
 {
-    public string fullName { get; set; } = string.Empty;
-    public string username { get; set; } = string.Empty;
-    public string email { get; set; } = string.Empty;
+    [Required]
+    [StringLength(100, MinimumLength = 3)]
+    public string fullName { get; set; } = "";
+
+    [Required]
+    [StringLength(50, MinimumLength = 3)]
+    [RegularExpression(@"^[a-zA-Z0-9._-]+$", ErrorMessage = "اسم المستخدم يحوي محارف غير مسموحة")]
+    public string username { get; set; } = "";
+
+    [Required]
+    [EmailAddress]
+    [StringLength(254)]
+    public string email { get; set; } = "";
+
+    [StringLength(20)]
+    [RegularExpression(@"^[0-9+ -]*$", ErrorMessage = "رقم الهاتف غير صالح")]
     public string? phone { get; set; }
-    public string password { get; set; } = string.Empty;
+
+    [Required]
+    [StringLength(128, MinimumLength = 8)]
+    public string password { get; set; } = "";
     public bool isActive { get; set; } = true;
     public long? BranchId { get; set; }
     public long? DepartmentId { get; set; }

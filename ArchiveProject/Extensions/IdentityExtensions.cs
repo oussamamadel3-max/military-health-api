@@ -1,8 +1,10 @@
-using ArchiveProject.Application.Common.Interfaces.AuthInterfaces;
+﻿using ArchiveProject.Application.Common.Interfaces.AuthInterfaces;
 using ArchiveProject.Domain.Entities.Auth;
 using ArchiveProject.Infrastructure.Data;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using System.Threading.RateLimiting;
+
 
 namespace ArchiveProject.API.Extensions
 {
@@ -26,6 +28,11 @@ namespace ArchiveProject.API.Extensions
                 options.Password.RequireUppercase = false;
                 options.Password.RequireNonAlphanumeric = false;
                 options.Password.RequiredLength = 6;
+
+                // ✅ Lockout
+                options.Lockout.AllowedForNewUsers = true;
+                options.Lockout.MaxFailedAccessAttempts = 5;                
+                options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
             })
             .AddEntityFrameworkStores<MainDbContext>()
             .AddDefaultTokenProviders();
