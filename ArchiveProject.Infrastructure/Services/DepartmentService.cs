@@ -143,6 +143,7 @@ namespace ArchiveProject.Infrastructure.Services
                 // 5) الإنشاء
                 var entity = _mapper.Map<Department>(dto);
                 entity.BranchId = effectiveBranchId; // تأكيد الربط النهائي
+                entity.Description ??= string.Empty;
 
                 _context.Departments.Add(entity);
                 await _context.SaveChangesAsync();
@@ -193,6 +194,8 @@ namespace ArchiveProject.Infrastructure.Services
                 if (exists) return Result<string>.Failure(new[] { "رمز القسم مستخدم ضمن هذا الفرع." });
 
                 _mapper.Map(dto, entity);
+
+                entity.Description ??= string.Empty;
 
                 _context.Departments.Update(entity);
                 await _context.SaveChangesAsync();

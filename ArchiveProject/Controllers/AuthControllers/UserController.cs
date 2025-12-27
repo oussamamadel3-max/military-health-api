@@ -160,19 +160,6 @@ namespace ArchiveProject.API.Controllers.AuthControllers
             return Result<string>.Success(result.Value);
         }
 
-        //[HttpPost("[action]")]
-        //[AuthorizePermission("UserManagement.Edit")]
-        //public async Task<Result<string>> RemoveRoleFromUser([FromBody] RemoveRoleDto dto)
-        //{
-        //    var result = await _userService.RemoveRoleFromUserAsync(dto);
-
-        //    if (result.Value == null || !result.Succeeded)
-        //    {
-        //        return Result<string>.Failure(result.Errors, null);
-        //    }
-        //    return Result<string>.Success(result.Value);
-        //}
-
         [HttpPost("[action]")]
         [AuthorizePermission("UserManagement.Edit")]
         public async Task<Result<string>> TogglePermissionsForUserAsync([FromBody] AssignPermissionToUserDto dto)
@@ -186,20 +173,6 @@ namespace ArchiveProject.API.Controllers.AuthControllers
 
             return Result<string>.Success(result.Value);
         }
-
-        //[HttpPost("[action]")]
-        //[AuthorizePermission("UserManagement.Edit")]
-        //public async Task<Result<string>> RemovePermissionsFromUser([FromBody] RemovePermissionsDto dto)
-        //{
-        //    var result = await _userService.RemovePermissionsFromUserAsync(dto);
-
-        //    if (result.Value == null || !result.Succeeded)
-        //    {
-        //        return Result<string>.Failure(result.Errors, null);
-        //    }
-
-        //    return Result<string>.Success(result.Value);
-        //}
 
         [HttpPost("[action]")]
         [AuthorizePermission("UserManagement.Edit")]

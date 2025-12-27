@@ -13,9 +13,7 @@ namespace ArchiveProject.Application.Common.Interfaces.AuthInterfaces
         Task<Result<string>> ChangeOwnPasswordAsync(ChangePasswordRequest request);
         Task<Result<string>> ResetUserPasswordAsync(AdminChangePasswordRequest request);
         Task<Result<string>> ToggleRolesForUserAsync(AssignRolesDto dto);
-        //Task<Result<string>> RemoveRoleFromUserAsync(RemoveRoleDto dto);
         Task<Result<string>> TogglePermissionsForUserAsync(AssignPermissionToUserDto dto);
-        //Task<Result<string>> RemovePermissionsFromUserAsync(RemovePermissionsDto dto);
         Task<Result<string>> RemoveFieldPermissionsFromUserAsync(RemoveFieldPermissionsDto dto);
         Task<Result<UserListItemDto>> UpdateUserAsync(string id, UpdateUserPatchRequest dto);
         Task<Result<UpdateUserStatusRequest>> UpdateUserStatusAsync(string id, UpdateUserStatusRequest request);
