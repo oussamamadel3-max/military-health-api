@@ -109,6 +109,7 @@ namespace ArchiveProject.API.Controllers
 
         // تنزيل ملف واحد
         [HttpGet("download/{id:guid}")]
+        [Authorize]
         public async Task<IActionResult> Download(Guid id)
         {
             var res = await _service.DownloadAsync(id);
@@ -121,6 +122,7 @@ namespace ArchiveProject.API.Controllers
 
         // تنزيل كل المرفقات كـ Zip لوثيقة
         [HttpGet("download-zip/{entityType}/{entityId:long}")]
+        [Authorize]
         public async Task<IActionResult> DownloadZip(string entityType, long entityId)
         {
             var res = await _service.DownloadZipForEntityAsync(entityId, entityType);

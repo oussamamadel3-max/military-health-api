@@ -596,73 +596,6 @@ namespace ArchiveProject.Infrastructure.Services
         #endregion
 
         #region GetById Document (مع فلترة الوصول بحسب الدور)
-        //public async Task<Result<DocumentDto>> GetByIdAsync(long documentId)
-        //{
-        //    try
-        //    {
-        //        var userId = CurrentUserId;
-        //        var roleIds = CurrentRoleIds;
-        //        var jwt = JwtFieldPerms;
-
-        //        var actorRoleNorms = await _context.UserRoleAssociations
-        //            .Where(ura => ura.UserId == userId)
-        //            .Join(_context.Roles, ura => ura.RoleId, r => r.Id, (ura, r) => r.NormalizedName)
-        //            .ToListAsync();
-
-        //        bool isSuperAdmin = actorRoleNorms.Any(n => n == "SUPERADMIN");
-        //        bool isBranchManager = actorRoleNorms.Any(n => n == "BRANCHMANAGER");
-
-        //        var actor = await _context.Users.AsNoTracking()
-        //            .Where(u => u.Id == userId)
-        //            .Select(u => new { u.BranchId, u.DepartmentId })
-        //            .FirstOrDefaultAsync();
-
-        //        if (actor == null)
-        //            return Result<DocumentDto>.Failure(new[] { "المستخدم الحالي غير موجود." });
-
-        //        var baseQuery = _context.Documents.AsNoTracking()
-        //            .Where(d => d.DocumentId == documentId)
-        //            .Join(_context.Departments,
-        //                  d => d.DepartmentId,
-        //                  dep => dep.DepartmentId,
-        //                  (d, dep) => new { d, dep.BranchId });
-
-        //        if (isSuperAdmin)
-        //        {
-        //            // يرى الكل
-        //        }
-        //        else if (isBranchManager)
-        //        {
-        //            if (!actor.BranchId.HasValue)
-        //                return Result<DocumentDto>.Failure(new[] { "لا يمكن تحديد فرع المستخدم الحالي." });
-
-        //            baseQuery = baseQuery.Where(x => x.BranchId == actor.BranchId.Value);
-        //        }
-        //        else
-        //        {
-        //            if (!actor.DepartmentId.HasValue)
-        //                return Result<DocumentDto>.Failure(new[] { "لا يمكن تحديد قسم المستخدم الحالي." });
-
-        //            baseQuery = baseQuery.Where(x => x.d.DepartmentId == actor.DepartmentId.Value);
-        //        }
-
-        //        var dto = await baseQuery
-        //            .Select(x => x.d)
-        //            .ProjectTo<DocumentDto>(_mapper.ConfigurationProvider)
-        //            .FirstOrDefaultAsync();
-
-        //        if (dto == null)
-        //            return Result<DocumentDto>.Failure(new[] { "الوثيقة غير موجودة أو خارج نطاق وصولك." });
-
-        //        dto = await _fieldPerms.ApplyFieldPermissionsAsync(dto, userId, roleIds, "Document", jwt);
-        //        return Result<DocumentDto>.Success(dto);
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        return Result<DocumentDto>.Failure(new[] { $"حدث خطأ أثناء الجلب: {ex.Message}" });
-        //    }
-        //}
-        #region GetById Document (مع فلترة الوصول + إرجاع المرفقات)
         public async Task<Result<DocumentDto>> GetByIdAsync(long documentId)
         {
             try
@@ -731,11 +664,12 @@ namespace ArchiveProject.Infrastructure.Services
                     .OrderByDescending(a => a.UploadedAt)
                     .ToListAsync(); // <- هُنا نأتي بالبيانات للذاكرة أولاً
 
-                // حوّل إلى DTO محلي باستخدام BuildFileUrl (لا مشكلة لأنها الآن عملية على الذاكرة)
+                // حوّل إلى DTO محلي باستخدام  (لا مشكلة لأنها الآن عملية على الذاكرة)
                 var attachments = attachmentsEntities.Select(a => new AttachmentLinkDto
                 {
                     Id = a.AttachmentId,
-                    FileUrl = BuildFileUrl(a.FilePath ?? string.Empty)
+                    FileUrl = BuildProtectedDownloadUrl(a.AttachmentId),
+                    FileName = a.FileName ?? $"{a.AttachmentId}"
                 }).ToList();
 
                 dto.Attachments = attachments;
@@ -747,7 +681,6 @@ namespace ArchiveProject.Infrastructure.Services
                 return Result<DocumentDto>.Failure(new[] { $"حدث خطأ أثناء الجلب: {ex.Message}" });
             }
         }
-        #endregion
 
         #endregion
 
@@ -827,7 +760,7 @@ namespace ArchiveProject.Infrastructure.Services
                         {
                             a.OwnerId,
                             a.AttachmentId,
-                            a.FilePath
+                            a.FileName
                         })
                         .ToListAsync();
 
@@ -838,7 +771,8 @@ namespace ArchiveProject.Infrastructure.Services
                             g => g.Select(x => new AttachmentLinkDto
                             {
                                 Id = x.AttachmentId,
-                                FileUrl = BuildFileUrl(x.FilePath ?? string.Empty)
+                                FileUrl = BuildProtectedDownloadUrl(x.AttachmentId), // ✅
+                                FileName = x.FileName ?? $"{x.AttachmentId}"         // ✅ fallback
                             }).ToList()
                         );
 
@@ -1163,20 +1097,15 @@ namespace ArchiveProject.Infrastructure.Services
         }
         #endregion
 
-        private string BuildFileUrl(string relativePath)
-        {
-            try
-            {
-                var request = _httpContextAccessor.HttpContext?.Request;
-                if (request == null)
-                    return relativePath;
 
-                return $"{request.Scheme}://{request.Host}/{relativePath}";
-            }
-            catch
-            {
-                return relativePath;
-            }
+        private string BuildProtectedDownloadUrl(Guid id)
+        {
+            var request = _httpContextAccessor.HttpContext?.Request;
+            if (request == null)
+                return $"/api/attachments/download/{id}";
+
+            return $"{request.Scheme}://{request.Host}/api/attachments/download/{id}";
         }
+
     }
 }

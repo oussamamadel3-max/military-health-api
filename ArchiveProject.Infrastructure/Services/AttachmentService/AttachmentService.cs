@@ -54,7 +54,7 @@ namespace ArchiveProject.Infrastructure.Services.AttachmentService
                     AttachmentId = Guid.NewGuid(),
                     OwnerId = entityId,
                     OwnerType = entityType,
-                    FileName = file.FileName,
+                    FileName = SanitizeDisplayFileName(file.FileName),
                     FileExtension = Path.GetExtension(file.FileName)?.ToLower() ?? "",
                     FilePath = path,
                     FileSize = size,
@@ -234,6 +234,7 @@ namespace ArchiveProject.Infrastructure.Services.AttachmentService
         #endregion
 
 
+        #region Helpers
 
         // ⬆ MAP TO DTO
         private AttachmentReadDto MapToDto(Attachment attachment)
@@ -276,23 +277,6 @@ namespace ArchiveProject.Infrastructure.Services.AttachmentService
             return $"{len:0.##} {sizes[order]}";
         }
 
-        // ⬆ BUILD FILE URL
-        private string BuildFileUrl(string relativePath)
-        {
-            try
-            {
-                var request = _httpContextAccessor.HttpContext?.Request;
-                if (request == null)
-                    return relativePath;
-
-                return $"{request.Scheme}://{request.Host}/{relativePath}";
-            }
-            catch
-            {
-                return relativePath;
-            }
-        }
-
         private static string SanitizeFileName(string name)
         {
             foreach (var c in Path.GetInvalidFileNameChars())
@@ -301,5 +285,18 @@ namespace ArchiveProject.Infrastructure.Services.AttachmentService
             return name.Trim();
         }
 
+        private static string SanitizeDisplayFileName(string name)
+        {
+            name = Path.GetFileName(name ?? string.Empty); // يشيل أي مسار مزروع
+            name = name.Trim();
+
+            // منع أسماء فارغة/طويلة
+            if (string.IsNullOrWhiteSpace(name)) return "file";
+            if (name.Length > 200) name = name[..200];
+
+            return name;
+        }
+
+        #endregion
     }
 }
