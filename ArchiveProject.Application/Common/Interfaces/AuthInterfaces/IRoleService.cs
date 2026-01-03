@@ -10,7 +10,8 @@ public interface IRoleService
     Task<Result<RoleDto>> GetById(string id);
     Task<Result<PaginatedList<RoleDetailsDto>>> GetRolesWithDetailsAsync(int pageNumber, int pageSize, string? name = null, bool? isActive = null);
     Task<Result<string>> AssignUserToRole(string userId, List<string> roleIds);
-    Task<Result<string>> AssignPermissionsToRole(AssignPermissionsDto assingDto);
+    //Task<Result<string>> TogglePermissionsForRoleAsync(AssignPermissionsDto dto);
+    Task<Result<string>> SyncPermissionsForRoleAsync(AssignPermissionsDto dto);
     Task<Result<RoleDetailsDto>> CreateRoleWithPermissionsAsync(CreateRoleWithPermissionsDto dto);
     Task<Result<List<DropdownRoleDto>>> GetDropdownRolesAsync();
     Task<Result<string>> GetActiveRolesCount();

@@ -78,15 +78,15 @@ namespace ArchiveProject.Application.Dtos.BranchDtos
         public long BranchId { get; set; }
 
         [FieldPermission("Code", DisplayName = "رمز الفرع")]
-        [StringLength(50)]
+        [StringLength(50, MinimumLength = 2)]
         public string? Code { get; set; }
 
         [FieldPermission("BranchName", DisplayName = "اسم الفرع")]
-        [StringLength(250)]
+        [StringLength(50, MinimumLength = 2)]
         public string? BranchName { get; set; }
 
         [FieldPermission("Description", DisplayName = "الوصف")]
-        [StringLength(1000)]
+        [StringLength(200, MinimumLength = 2)]
         public string? Description { get; set; }
 
         // معلومات التدقيق
@@ -113,11 +113,11 @@ namespace ArchiveProject.Application.Dtos.BranchDtos
         public string Code { get; set; } = string.Empty;
 
         [Required(ErrorMessage = "اسم الفرع مطلوب")]
-        [StringLength(250, MinimumLength = 2)]
+        [StringLength(50, MinimumLength = 2)]
         [FieldPermission("BranchName", DisplayName = "اسم الفرع")]
         public string BranchName { get; set; } = string.Empty;
 
-        [StringLength(1000)]
+        [StringLength(200, MinimumLength = 2)]
         [FieldPermission("Description", Required = false, DisplayName = "الوصف")]
         public string? Description { get; set; }
     }
@@ -128,27 +128,27 @@ namespace ArchiveProject.Application.Dtos.BranchDtos
         [FieldPermission("Code", DisplayName = "رمز الفرع")]
         public string? Code { get; set; }
 
-        [StringLength(250, MinimumLength = 2)]
+        [StringLength(50, MinimumLength = 2)]
         [FieldPermission("BranchName", DisplayName = "اسم الفرع")]
         public string? BranchName { get; set; }
 
-        [StringLength(1000)]
+        [StringLength(200, MinimumLength = 2)]
         [FieldPermission("Description", DisplayName = "الوصف")]
         public string? Description { get; set; }
     }
 
     public class BranchSearchCriteria
     {
-        [StringLength(50)]
+        [StringLength(50, MinimumLength = 2)]
         public string? Code { get; set; }
 
-        [StringLength(250)]
+        [StringLength(50, MinimumLength = 2)]
         public string? BranchName { get; set; }
 
-        [StringLength(1000)]
+        [StringLength(200, MinimumLength = 2)]
         public string? Description { get; set; }
 
-        [StringLength(30)]
+        [StringLength(20)]
         public string? SortBy { get; set; }
 
         public bool SortDescending { get; set; } = false;

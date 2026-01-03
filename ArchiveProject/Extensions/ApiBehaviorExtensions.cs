@@ -20,7 +20,7 @@ namespace ArchiveProject.API.Extensions
                         message = "بيانات غير صالحة",
                         errors
                     });
-                };
+                }; 
             });
 
             return services;

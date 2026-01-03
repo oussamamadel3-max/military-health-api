@@ -98,15 +98,15 @@ namespace ArchiveProject.Application.Dtos.DepartmentDtos
         public long DepartmentId { get; set; }
 
         [FieldPermission("DepartmentName", DisplayName = "اسم القسم")]
-        [StringLength(250)]
+        [StringLength(50, MinimumLength = 2)]
         public string? DepartmentName { get; set; }
 
         [FieldPermission("Description", DisplayName = "الوصف")]
-        [StringLength(1000)]
+        [StringLength(200, MinimumLength = 2)]
         public string? Description { get; set; }
 
         [FieldPermission("Code", DisplayName = "رمز القسم")]
-        [StringLength(50)]
+        [StringLength(50, MinimumLength = 2)]
         public string? Code { get; set; }
 
         [FieldPermission("IsActive", DisplayName = "الحالة")]
@@ -134,11 +134,11 @@ namespace ArchiveProject.Application.Dtos.DepartmentDtos
     public class CreateDepartmentDto
     {
         [Required(ErrorMessage = "اسم القسم مطلوب")]
-        [StringLength(250, MinimumLength = 2)]
+        [StringLength(50, MinimumLength = 2)]
         [FieldPermission("DepartmentName", DisplayName = "اسم القسم")]
         public string DepartmentName { get; set; } = string.Empty;
 
-        [StringLength(1000)]
+        [StringLength(200, MinimumLength = 2)]
         [FieldPermission("Description", Required = false, DisplayName = "الوصف")]
         public string? Description { get; set; }
 
@@ -150,19 +150,19 @@ namespace ArchiveProject.Application.Dtos.DepartmentDtos
         [FieldPermission("IsActive", DisplayName = "الحالة")]
         public bool IsActive { get; set; } = true;
 
-        [Required(ErrorMessage = "الفرع مطلوب")]
+        // ✅ ما عاد Required لأن BranchManager رح يكون تلقائي
         [Range(1, long.MaxValue, ErrorMessage = "الفرع غير صالح")]
         [FieldPermission("BranchId", DisplayName = "الفرع")]
-        public long BranchId { get; set; }
+        public long? BranchId { get; set; }
     }
 
     public class UpdateDepartmentDto
     {
-        [StringLength(250, MinimumLength = 2)]
+        [StringLength(50, MinimumLength = 2)]
         [FieldPermission("DepartmentName", DisplayName = "اسم القسم")]
         public string? DepartmentName { get; set; }
 
-        [StringLength(1000)]
+        [StringLength(200, MinimumLength = 2)]
         [FieldPermission("Description", DisplayName = "الوصف")]
         public string? Description { get; set; }
 
@@ -180,16 +180,16 @@ namespace ArchiveProject.Application.Dtos.DepartmentDtos
 
     public class DepartmentSearchCriteria
     {
-        [StringLength(250)]
+        [StringLength(50, MinimumLength = 2)]
         public string? DepartmentName { get; set; }
 
-        [StringLength(50)]
+        [StringLength(50, MinimumLength = 2)]
         public string? Code { get; set; }
 
         public bool? IsActive { get; set; }
         public long? BranchId { get; set; }
 
-        [StringLength(30)]
+        [StringLength(20)]
         public string? SortBy { get; set; }
 
         public bool SortDescending { get; set; } = false;

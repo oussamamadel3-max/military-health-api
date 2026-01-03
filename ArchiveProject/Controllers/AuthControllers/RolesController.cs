@@ -84,20 +84,26 @@ namespace ArchiveProject.API.Controllers.AuthControllers
             return Result<PaginatedList<RoleDetailsDto>>.Success(rolesResult.Value);
         }
 
+        //[HttpPost("[action]")]
+        //[AuthorizePermission("UserManagement.Create")]
+        //public async Task<Result<string>> TogglePermissionsForRole([FromBody] AssignPermissionsDto dto)
+        //{
+        //    var res = await _roleService.TogglePermissionsForRoleAsync(dto);
+
+        //    if (res == null || !res.Succeeded || res.Value == null)
+        //        return Result<string>.Failure(res.Errors, null);
+
+        //    return Result<string>.Success(res.Value);
+        //}
         [HttpPost("[action]")]
         [AuthorizePermission("UserManagement.Create")]
-        public async Task<Result<string>> AssignPermissionToRole(AssignPermissionsDto assingDto)
+        public async Task<Result<string>> SyncPermissionsForRole([FromBody] AssignPermissionsDto dto)
         {
-            var res = _roleService.AssignPermissionsToRole(assingDto).Result;
-
-            if (res == null || !res.Succeeded || res.Value == null)
-            {
-                await Task.Delay(1);
-                return Result<string>.Failure(res.Errors, null);
-            }
-
+            var res = await _roleService.SyncPermissionsForRoleAsync(dto);
+            if (!res.Succeeded) return Result<string>.Failure(res.Errors, null);
             return Result<string>.Success(res.Value);
         }
+
 
         [HttpPost("[action]")]
         [AuthorizePermission("UserManagement.Create")]

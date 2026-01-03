@@ -18,6 +18,8 @@ namespace ArchiveProject.Infrastructure.Persistence
             // 1) تأكد من وجود القاعدة ومحدّثة
             await context.Database.MigrateAsync();
 
+
+
             // ============================
             // Helpers
             // ============================
@@ -242,6 +244,9 @@ namespace ArchiveProject.Infrastructure.Persistence
             // امنحه جميع صلاحيات CRUD العامة بدون BranchManager
             var publicCrudPermsForSuperAdmin = publicPermsOnly
                 .Where(p => !string.Equals(p.Name, "BranchManager", StringComparison.OrdinalIgnoreCase))
+                .Where(p => !string.Equals(p.Name, "ArchiveGroup.Create", StringComparison.OrdinalIgnoreCase))
+                .Where(p => !string.Equals(p.Name, "ArchiveGroup.Edit", StringComparison.OrdinalIgnoreCase))
+                .Where(p => !string.Equals(p.Name, "ArchiveGroup.Delete", StringComparison.OrdinalIgnoreCase))
                 .ToArray();
 
             await EnsurePermissionsAndAssignToUserAsync(superAdmin.Id, publicCrudPermsForSuperAdmin);

@@ -355,7 +355,7 @@ namespace ArchiveProject.Infrastructure.Data
                       .HasFilter("\"IsProfilePhoto\" = true")
                       .IsUnique();
 
-                //// SqlServer
+                // SqlServer
                 //entity.HasIndex(a => new { a.OwnerType, a.OwnerId, a.IsProfilePhoto });
 
             });

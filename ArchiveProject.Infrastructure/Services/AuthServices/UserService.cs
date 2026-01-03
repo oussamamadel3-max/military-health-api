@@ -1,10 +1,10 @@
 ﻿using ArchiveProject.Application.Common.Interfaces.AuthInterfaces;
+using ArchiveProject.Application.Common.Localization;
 using ArchiveProject.Application.Common.Results;
 using ArchiveProject.Application.Dtos.AuthDtos;
 using ArchiveProject.Domain.Entities.Auth;
 using ArchiveProject.Infrastructure.Data;
 using ArchiveProject.Infrastructure.Persistence;
-using DocumentFormat.OpenXml.Spreadsheet;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using System.Linq.Expressions;
@@ -30,190 +30,6 @@ public class UserService : IUserService
 
 
     #region الانشاء 
-    //public async Task<Result<CreateUserDto>> Create(CreateUserDto createdUser)
-    //{
-    //    var errors = new List<string>();
-
-    //    // 0) المُنشئ الحالي (مدير الفرع أو SuperAdmin)
-    //    var actorUserId = _currentUserService.UserId ?? string.Empty;
-
-    //    // 1) تحقّقات أساسية
-    //    if (string.IsNullOrWhiteSpace(createdUser.username)) errors.Add("اسم المستخدم مطلوب.");
-    //    if (string.IsNullOrWhiteSpace(createdUser.email)) errors.Add("البريد الإلكتروني مطلوب.");
-    //    if (string.IsNullOrWhiteSpace(createdUser.password)) errors.Add("كلمة المرور مطلوبة.");
-    //    if (errors.Count > 0) return Result<CreateUserDto>.Failure(errors, null);
-
-    //    // 2) منع التكرار
-    //    if (await _userManager.FindByNameAsync(createdUser.username) is not null)
-    //        return Result<CreateUserDto>.Failure(new[] { "اسم المستخدم موجود مسبقاً." }, null);
-
-    //    if (await _userManager.FindByEmailAsync(createdUser.email) is not null)
-    //        return Result<CreateUserDto>.Failure(new[] { "البريد الإلكتروني موجود مسبقاً." }, null);
-
-    //    // 3) تجهيز الأدوار المدخلة (Id أو Name) - إزالة الفارغ وتوحيد الحالة
-    //    var rawRoles = createdUser.roles
-    //        .Where(s => !string.IsNullOrWhiteSpace(s))
-    //        .Select(s => s.Trim())
-    //        .Distinct(StringComparer.OrdinalIgnoreCase)
-    //        .ToList();
-
-    //    var rawUpper = new HashSet<string>(rawRoles.Select(x => x.ToUpperInvariant()));
-
-    //    // 4) جلب الأدوار الفعّالة من القاعدة (Id أو Name)
-    //    var rolesFromDb = await _context.Roles
-    //        .Where(r =>
-    //            (r.Id != null && rawUpper.Contains(r.Id.ToUpper())) ||
-    //            (r.Name != null && rawUpper.Contains(r.Name.ToUpper()))
-    //        )
-    //        .Where(r => r.IsActive)
-    //        .Select(r => new { r.Id, r.Name })
-    //        .ToListAsync();
-
-    //    // 5) التحقق من أدوار مفقودة/غير فعّالة
-    //    var foundUpper = rolesFromDb
-    //        .SelectMany(r => new[]
-    //        {
-    //        (r.Id   ?? string.Empty).ToUpperInvariant(),
-    //        (r.Name ?? string.Empty).ToUpperInvariant(),
-    //        })
-    //        .ToHashSet();
-
-    //    var missing = rawRoles.Where(x => !foundUpper.Contains(x.ToUpperInvariant())).ToList();
-    //    if (missing.Any())
-    //        return Result<CreateUserDto>.Failure(new[] { $"أدوار غير موجودة أو غير نشطة: {string.Join(", ", missing)}" }, null);
-
-    //    // 6) صلاحيات المُنشئ: فقط SuperAdmin أو BranchManager يمكنه الإنشاء
-    //    var actorRoleNames = await _context.UserRoleAssociations
-    //        .Where(ura => ura.UserId == actorUserId)
-    //        .Join(_context.Roles, ura => ura.RoleId, r => r.Id, (ura, r) => r.Name!)
-    //        .ToListAsync();
-
-    //    bool actorIsSuperAdmin = actorRoleNames.Any(n => n.Equals("SuperAdmin", StringComparison.OrdinalIgnoreCase));
-    //    bool actorIsBranchManager = actorRoleNames.Any(n => n.Equals("BranchManager", StringComparison.OrdinalIgnoreCase));
-
-    //    if (!actorIsSuperAdmin && !actorIsBranchManager)
-    //        return Result<CreateUserDto>.Failure(new[] { "غير مسموح بإنشاء المستخدمين." }, null);
-
-    //    // جلب بيانات المُنشئ لمعرفة فرعه
-    //    var actor = await _userManager.FindByIdAsync(actorUserId);
-    //    long? actorBranchId = (actor as User)?.BranchId;
-
-    //    // 7) منطق الفرع/القسم للمستخدم الجديد
-    //    long? newBranchId = createdUser.BranchId;
-    //    long? newDepartmentId = createdUser.DepartmentId;
-
-    //    if (newDepartmentId.HasValue)
-    //    {
-    //        // عند تمرير قسم: نتحقق منه، ونعيّن الفرع تلقائيًا من القسم
-    //        var dept = await _context.Departments
-    //            .AsNoTracking()
-    //            .FirstOrDefaultAsync(d => d.DepartmentId == newDepartmentId.Value && d.IsActive);
-
-    //        if (dept is null)
-    //            return Result<CreateUserDto>.Failure(new[] { "القسم غير موجود أو غير فعّال." }, null);
-
-    //        newBranchId = dept.BranchId; // 🔥 الفرع يُضبط تلقائيًا من القسم
-
-    //        if (!actorIsSuperAdmin)
-    //        {
-    //            if (!actorBranchId.HasValue || actorBranchId.Value != dept.BranchId)
-    //                return Result<CreateUserDto>.Failure(new[] { "لا يمكنك إنشاء مستخدم لهذا القسم لأنه لا يتبع فرعك." }, null);
-    //        }
-    //    }
-    //    else if (newBranchId.HasValue)
-    //    {
-    //        // إنشاء مستخدم على مستوى الفرع
-    //        var branchExists = await _context.Branchs
-    //            .AsNoTracking()
-    //            .AnyAsync(b => b.BranchId == newBranchId.Value);
-
-    //        if (!branchExists)
-    //            return Result<CreateUserDto>.Failure(new[] { "الفرع غير موجود." }, null);
-
-    //        if (!actorIsSuperAdmin)
-    //        {
-    //            if (!actorBranchId.HasValue || actorBranchId.Value != newBranchId.Value)
-    //                return Result<CreateUserDto>.Failure(new[] { "لا يمكنك إنشاء مستخدم لفرع آخر." }, null);
-    //        }
-    //    }
-    //    else
-    //    {
-    //        // لا قسم ولا فرع: مسموح فقط لـ SuperAdmin
-    //        if (!actorIsSuperAdmin)
-    //            return Result<CreateUserDto>.Failure(new[] { "يجب تحديد قسم أو فرع للمستخدم الجديد." }, null);
-    //    }
-
-    //    // 8) بدء معاملة (Transaction)
-    //    using var transaction = await _context.Database.BeginTransactionAsync();
-    //    try
-    //    {
-    //        // 9) إنشاء المستخدم
-    //        var user = new User
-    //        {
-    //            UserName = createdUser.username,
-    //            Email = createdUser.email,
-    //            PhoneNumber = createdUser.phone,
-    //            IsActive = createdUser.isActive,
-    //            CreationDate = DateTime.Now,
-    //            FullName = createdUser.fullName,
-
-    //            BranchId = newBranchId,       // مستخدم فرع أو مستنتج من القسم
-    //            DepartmentId = newDepartmentId    // موظف قسم إذا موجود
-    //        };
-
-    //        var createRes = await _userManager.CreateAsync(user, createdUser.password);
-    //        if (!createRes.Succeeded)
-    //            return Result<CreateUserDto>.Failure(createRes.Errors.Select(e => e.Description), null);
-
-    //        // 10) ربط الأدوار بالمستخدم (جدول الجمعيات)
-    //        var associations = rolesFromDb.Select(r => new UserRoleAssociation
-    //        {
-    //            UserId = user.Id,
-    //            RoleId = r.Id
-    //        }).ToList();
-    //        _context.UserRoleAssociations.AddRange(associations);
-
-    //        // 11) منح صلاحيات الدور للمستخدم (Permissions النشطة فقط)
-    //        var roleIds = rolesFromDb.Select(r => r.Id).ToList();
-
-    //        var rolePermissions = await _context.RolePermissions
-    //            .Where(rp => roleIds.Contains(rp.RoleId))
-    //            .Include(rp => rp.Permission)
-    //            .Where(rp => rp.Permission != null && rp.Permission.IsActive)
-    //            .Select(rp => rp.PermissionId)
-    //            .Distinct()
-    //            .ToListAsync();
-
-    //        var existingUserPermissions = await _context.UserPermissions
-    //            .Where(up => up.UserId == user.Id)
-    //            .Select(up => up.PermissionId)
-    //            .ToListAsync();
-
-    //        var newPermissions = rolePermissions
-    //            .Where(p => !existingUserPermissions.Contains(p))
-    //            .Select(p => new UserPermission { UserId = user.Id, PermissionId = p })
-    //            .ToList();
-
-    //        if (newPermissions.Any())
-    //            _context.UserPermissions.AddRange(newPermissions);
-
-    //        // 12) حفظ المعاملة
-    //        await _context.SaveChangesAsync();
-    //        await transaction.CommitAsync();
-
-    //        // 13) إعادة القيم النهائية للفرع/القسم في الـ DTO
-    //        createdUser.BranchId = newBranchId;
-    //        createdUser.DepartmentId = newDepartmentId;
-
-    //        return Result<CreateUserDto>.Success(createdUser);
-    //    }
-    //    catch
-    //    {
-    //        await transaction.RollbackAsync();
-    //        throw;
-    //    }
-    //}
-
     public async Task<Result<CreateUserDto>> Create(CreateUserDto createdUser)
     {
         var errors = new List<string>();
@@ -725,7 +541,7 @@ public class UserService : IUserService
             .GroupBy(x => x.UserId)
             .ToDictionary(
                 g => g.Key,
-                g => g.Select(x => new RoleLiteDto(x.RoleId, x.RoleName ?? string.Empty)).ToList()
+                g => g.Select(x => new RoleLiteDto(x.RoleId, AuthDisplayNames.RoleAr(x.RoleName ?? string.Empty))).ToList()
             );
 
         var roleIdsOnPage = rolesByUser.Select(x => x.RoleId).Distinct().ToList();
@@ -739,7 +555,7 @@ public class UserService : IUserService
             .ToDictionaryAsync(
                 g => g.Key,
                 g => g.Where(x => x.PermissionName != null)
-                      .Select(x => new PermissionLiteDto(x.PermissionId.ToString(), x.PermissionName!))
+                      .Select(x => new PermissionLiteDto(x.PermissionId.ToString(), AuthDisplayNames.PermissionAr(x.PermissionName!)))
                       .ToList()
             );
 
@@ -752,7 +568,7 @@ public class UserService : IUserService
             .ToDictionaryAsync(
                 g => g.Key,
                 g => g.Where(x => x.PermissionId.HasValue && x.PermissionName != null)
-                      .Select(x => new PermissionLiteDto(x.PermissionId!.Value.ToString(), x.PermissionName!))
+                      .Select(x => new PermissionLiteDto(x.PermissionId!.Value.ToString(), AuthDisplayNames.PermissionAr(x.PermissionName!)))
                       .ToList()
             );
 
@@ -1459,9 +1275,13 @@ public class UserService : IUserService
         var currentSet = new HashSet<string>(currentRoleIds, StringComparer.OrdinalIgnoreCase);
         var finalSet = new HashSet<string>(activeIncomingIds, StringComparer.OrdinalIgnoreCase); // الحالة النهائية القادمة من الواجهة
 
+
         // 6) احسب الفرق: ما يجب إضافته/إزالته
         var toAdd = finalSet.Except(currentSet, StringComparer.OrdinalIgnoreCase).ToList();
         var toRemove = currentSet.Except(finalSet, StringComparer.OrdinalIgnoreCase).ToList();
+        //var toRemove = finalSet.Intersect(currentSet, StringComparer.OrdinalIgnoreCase).ToList(); // موجودة => احذف
+        //var toAdd = finalSet.Except(currentSet, StringComparer.OrdinalIgnoreCase).ToList();    // غير موجودة => أضف
+
 
         // حماية إضافية: لو المستخدم عنده SuperAdmin حاليًا، لا تسمح لغير السوبر بحذفه
         if (!isSuperAdmin && !string.IsNullOrWhiteSpace(superAdminRoleId))
@@ -1581,6 +1401,9 @@ public class UserService : IUserService
     public async Task<Result<string>> TogglePermissionsForUserAsync(AssignPermissionToUserDto dto)
     {
         // 0) تحقق إدخال
+        if (string.IsNullOrWhiteSpace(dto.UserId))
+            return Result<string>.Failure(new[] { "UserId مطلوب." }, null);
+
         if (dto.PermissionId == null || dto.PermissionId.Count == 0)
             return Result<string>.Failure(new[] { "لم يتم تحديد أي صلاحيات." }, null);
 
@@ -1589,7 +1412,7 @@ public class UserService : IUserService
         if (user == null)
             return Result<string>.Failure(new[] { "المستخدم غير موجود." }, null);
 
-        // 2) الممثل (المنفّذ الحالي) وتحقق الصلاحية/نطاق الفرع
+        // 2) المنفّذ وصلاحيته/نطاقه
         var actorId = _currentUserService.UserId ?? string.Empty;
 
         var isSuperAdmin = await _context.UserRoleAssociations
@@ -1597,7 +1420,9 @@ public class UserService : IUserService
             .Join(_context.Roles, ura => ura.RoleId, r => r.Id, (ura, r) => r.NormalizedName)
             .AnyAsync(n => n == "SUPERADMIN");
 
-        var actor = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == actorId) as User;
+        var actor = await _context.Users.AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Id == actorId) as User;
+
         if (actor is null)
             return Result<string>.Failure(new[] { "المستخدم الحالي غير موجود." }, null);
 
@@ -1622,67 +1447,80 @@ public class UserService : IUserService
                 return Result<string>.Failure(new[] { "لا يمكنك تعديل صلاحيات مستخدم خارج فرعك." }, null);
         }
 
-        // 3) فعالية الصلاحيات المرسلة
-        var incoming = new HashSet<Guid>(dto.PermissionId);
-        var activePermIds = await _context.Permissions
-            .Where(p => incoming.Contains(p.Id) && p.IsActive)
+        // 3) حلّ القائمة المرسلة (تنظيف + Distinct) + تحقق نشاط الصلاحيات
+        var incomingIds = dto.PermissionId
+            .Where(x => x != Guid.Empty)
+            .Distinct()
+            .ToList();
+
+        if (incomingIds.Count == 0)
+            return Result<string>.Failure(new[] { "لم يتم تمرير أي صلاحية صالحة." }, null);
+
+        var activeIncomingIds = await _context.Permissions
+            .Where(p => incomingIds.Contains(p.Id) && p.IsActive)
             .Select(p => p.Id)
             .ToListAsync();
 
-        var missingOrInactive = incoming.Except(activePermIds).ToList();
+        var missingOrInactive = incomingIds.Except(activeIncomingIds).ToList();
         if (missingOrInactive.Any())
             return Result<string>.Failure(new[] { $"صلاحيات غير موجودة أو غير نشطة: {string.Join(", ", missingOrInactive)}" }, null);
 
-        // 4) الصلاحيات المباشرة الحالية للمستخدم (فقط المباشرة)
+        // 4) الصلاحيات المباشرة الحالية للمستخدم (Direct فقط)
         var currentDirectIds = await _context.UserPermissions
             .Where(up => up.UserId == user.Id && up.PermissionId != null)
             .Select(up => up.PermissionId!.Value)
             .ToListAsync();
 
         var currentSet = new HashSet<Guid>(currentDirectIds);
-        var finalSet = new HashSet<Guid>(activePermIds); // الحالة النهائية المرغوبة
+        var finalSet = new HashSet<Guid>(activeIncomingIds); // نفس أسلوب ToggleRoles (Set للمدخلات)
 
-        // 5) احسب الفرق وفق "حالة نهائية"
-        var toAdd = finalSet.Except(currentSet).ToList(); //新增 فقط
-        var toRemove = currentSet.Except(finalSet).ToList(); //احذف فقط اللي مو موجود بالقائمة الجديدة
+        // 5) Toggle على "المحدد فقط" (بدون المساس بالباقي)
+        // الموجود ضمن direct && ضمن المحدد => احذفه
+        var toRemoveIds = finalSet.Where(pid => currentSet.Contains(pid)).ToList();
+        // غير الموجود ضمن direct && ضمن المحدد => أضفه
+        var toAddIds = finalSet.Where(pid => !currentSet.Contains(pid)).ToList();
 
-        if (toAdd.Count == 0 && toRemove.Count == 0)
+        if (toAddIds.Count == 0 && toRemoveIds.Count == 0)
             return Result<string>.Success("لا توجد تغييرات.");
 
         using var tx = await _context.Database.BeginTransactionAsync();
         try
         {
-            // إزالة الصلاحيات المباشرة غير المطلوبة
-            if (toRemove.Any())
+            // 6) إزالة المحدد فقط
+            if (toRemoveIds.Any())
             {
-                var rows = await _context.UserPermissions
+                var removeRows = await _context.UserPermissions
                     .Where(up => up.UserId == user.Id &&
                                  up.PermissionId != null &&
-                                 toRemove.Contains(up.PermissionId!.Value))
+                                 toRemoveIds.Contains(up.PermissionId!.Value))
                     .ToListAsync();
 
-                _context.UserPermissions.RemoveRange(rows);
+                if (removeRows.Any())
+                    _context.UserPermissions.RemoveRange(removeRows);
+
                 await _context.SaveChangesAsync();
             }
 
-            // إضافة الصلاحيات المباشرة الناقصة
-            if (toAdd.Any())
+            // 7) إضافة المحدد فقط
+            if (toAddIds.Any())
             {
-                var addRows = toAdd.Select(pid => new UserPermission
+                var addRows = toAddIds.Select(pid => new UserPermission
                 {
                     UserId = user.Id,
                     PermissionId = pid
                 });
+
                 await _context.UserPermissions.AddRangeAsync(addRows);
                 await _context.SaveChangesAsync();
             }
 
-            // تحديث SecurityStamp لتطبيق التغييرات فورًا
+            // 8) تطبيق التغييرات الأمنية
             await SecurityStampHelper.InvalidateUserTokensAsync(_context, _userManager, user.Id);
 
             await tx.CommitAsync();
 
-            return Result<string>.Success($"تم تعديل الصلاحيات بنجاح. (إضافة: {toAdd.Count} | إزالة: {toRemove.Count})");
+            return Result<string>.Success(
+                $"تم تعديل الصلاحيات بنجاح. (إضافة: {toAddIds.Count} | إزالة: {toRemoveIds.Count})");
         }
         catch
         {
@@ -1690,8 +1528,8 @@ public class UserService : IUserService
             throw;
         }
     }
-    #endregion
 
+    #endregion
 
     #region         إزالة صلاحيات الحقول من مستخدم
     public async Task<Result<string>> RemoveFieldPermissionsFromUserAsync(RemoveFieldPermissionsDto dto)

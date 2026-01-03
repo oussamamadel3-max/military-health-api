@@ -11,7 +11,7 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
         public long? DepartmentId { get; set; }
 
         [FieldPermission("UserId", DisplayName = "المستخدم")]
-        [StringLength(450)]
+        [StringLength(200)]
         public string? UserId { get; set; }
 
         [FieldPermission("DocumentTypeId", DisplayName = "نوع الوثيقة")]
@@ -24,11 +24,11 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
         public long? DocumentNumber { get; set; }
 
         [FieldPermission("Title", DisplayName = "العنوان")]
-        [StringLength(250)]
+        [StringLength(50, MinimumLength = 2)]
         public string? Title { get; set; }
 
         [FieldPermission("Description", DisplayName = "الوصف")]
-        [StringLength(2000)]
+        [StringLength(200, MinimumLength = 2)]
         public string? Description { get; set; }
 
         public List<AttachmentLinkDto> Attachments { get; set; } = new();
@@ -53,7 +53,7 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
     {
         public Guid Id { get; set; }
 
-        [StringLength(2048)]
+        [StringLength(1000)]
         public string FileUrl { get; set; } = string.Empty;
         public string FileName { get; set; } = string.Empty;
     }
@@ -61,7 +61,7 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
     public class CreateDocumentDto
     {
         [Required(ErrorMessage = "القسم مطلوب")]
-        [Range(1, long.MaxValue, ErrorMessage = "القسم غير صالح")]
+        [Range(1, long.MaxValue, ErrorMessage = "القسم غير موجود")]
         [FieldPermission("DepartmentId", DisplayName = "القسم")]
         public long DepartmentId { get; set; }
 
@@ -72,11 +72,11 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
         public long? ArchiveGroupId { get; set; }
 
         [Required(ErrorMessage = "العنوان مطلوب")]
-        [StringLength(250, MinimumLength = 2)]
+        [StringLength(50, MinimumLength = 2)]
         [FieldPermission("Title", DisplayName = "العنوان")]
         public string Title { get; set; } = string.Empty;
 
-        [StringLength(2000)]
+        [StringLength(200, MinimumLength = 2)]
         [FieldPermission("Description", Required = false, DisplayName = "الوصف")]
         public string? Description { get; set; }
 
@@ -88,23 +88,23 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
     public class UpdateDocumentDto
     {
         [FieldPermission("DepartmentId", DisplayName = "القسم")]
-        [Range(1, long.MaxValue, ErrorMessage = "القسم غير صالح")]
+        [Range(1, long.MaxValue, ErrorMessage = "القسم غير موجود")]
         public long? DepartmentId { get; set; }
 
         [FieldPermission("DocumentTypeId", DisplayName = "نوع الوثيقة")]
-        [Range(1, long.MaxValue, ErrorMessage = "نوع الوثيقة غير صالح")]
+        [Range(1, long.MaxValue, ErrorMessage = "نوع الوثيقة غير موجود")]
         public long? DocumentTypeId { get; set; }
 
         [FieldPermission("ArchiveGroupId", DisplayName = "مجموعة الأرشفة")]
-        [Range(1, long.MaxValue, ErrorMessage = "مجموعة الأرشفة غير صالحة")]
+        [Range(1, long.MaxValue, ErrorMessage = "مجموعة الأرشفة غير موجودة")]
         public long? ArchiveGroupId { get; set; }
 
         [FieldPermission("Title", DisplayName = "العنوان")]
-        [StringLength(250, MinimumLength = 2)]
+        [StringLength(50, MinimumLength = 2)]
         public string? Title { get; set; }
 
         [FieldPermission("Description", DisplayName = "الوصف")]
-        [StringLength(2000)]
+        [StringLength(200, MinimumLength = 2)]
         public string? Description { get; set; }
 
         [FieldPermission("AttachmentIds", Required = false, DisplayName = "المرفقات")]
@@ -123,25 +123,25 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
     public class CreateDocumentManyDto
     {
         [Required(ErrorMessage = "عنوان الوثيقة مطلوب")]
-        [StringLength(250, MinimumLength = 2)]
+        [StringLength(50, MinimumLength = 2)]
         [FieldPermission("Title", DisplayName = "عنوان الوثيقة")]
         public string Title { get; set; } = string.Empty;
 
-        [StringLength(2000)]
+        [StringLength(200, MinimumLength = 2)]
         [FieldPermission("Description", Required = false, DisplayName = "الوصف")]
         public string? Description { get; set; }
 
         [Required(ErrorMessage = "القسم مطلوب")]
-        [Range(1, long.MaxValue, ErrorMessage = "القسم غير صالح")]
+        [Range(1, long.MaxValue, ErrorMessage = "القسم غير موجود")]
         [FieldPermission("DepartmentId", DisplayName = "القسم")]
         public long DepartmentId { get; set; }
 
         [FieldPermission("DocumentTypeId", DisplayName = "نوع الوثيقة")]
-        [Range(1, long.MaxValue, ErrorMessage = "نوع الوثيقة غير صالح")]
+        [Range(1, long.MaxValue, ErrorMessage = "نوع الوثيقة غير موجود")]
         public long? DocumentTypeId { get; set; }
 
         [FieldPermission("ArchiveGroupId", Required = false, DisplayName = "مجموعة الأرشفة")]
-        [Range(1, long.MaxValue, ErrorMessage = "مجموعة الأرشفة غير صالحة")]
+        [Range(1, long.MaxValue, ErrorMessage = "مجموعة الأرشفة غير موجودة")]
         public long? ArchiveGroupId { get; set; }
 
         [FieldPermission("AttachmentIds", Required = false, DisplayName = "المرفقات")]
@@ -155,15 +155,15 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
         public long? DocumentTypeId { get; set; }
         public long? ArchiveGroupId { get; set; }
 
-        [StringLength(30)]
+        [StringLength(20)]
         public string? SortBy { get; set; }
 
         public bool SortDescending { get; set; } = true;
 
-        [StringLength(250)]
+        [StringLength(50, MinimumLength = 2)]
         public string? Title { get; set; }
 
-        [StringLength(2000)]
+        [StringLength(200, MinimumLength = 2)]
         public string? Description { get; set; }
 
         public DateTime? CreatedFrom { get; set; }

@@ -7,6 +7,7 @@ using ArchiveProject.Infrastructure.Data;
 using ArchiveProject.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using ArchiveProject.Application.Common.Localization;
 
 namespace ArchiveProject.Infrastructure.Services.AuthServices
 {
@@ -133,27 +134,22 @@ namespace ArchiveProject.Infrastructure.Services.AuthServices
         #region          جلب الصلاحيات مع تفاصيلها 
         public async Task<Result<PaginatedList<RoleDetailsDto>>> GetRolesWithDetailsAsync(int pageNumber, int pageSize, string? name = null, bool? isActive = null)
         {
-            var errorList = new List<string>();
-
             if (pageNumber < 1) pageNumber = 1;
             if (pageSize < 1) pageSize = 10;
 
-            // الاستعلام الأساسي
             var rolesQuery = _roleManager.Roles.AsQueryable();
 
-            // 🔎 بحث بالاسم (جزئي)
             if (!string.IsNullOrWhiteSpace(name))
             {
                 var s = name.Trim();
                 rolesQuery = rolesQuery.Where(r => EF.Functions.Like(r.Name!, $"%{s}%"));
             }
 
-            // 🟢 فلترة بالحالة
             if (isActive.HasValue)
-            {
-                // بافتراض أن كيان الدور يملك خاصية IsActive (كما تُستخدم في بقية أجزاء مشروعك)
                 rolesQuery = rolesQuery.Where(r => r.IsActive == isActive.Value);
-            }
+
+            // 🚫 استبعاد دور SuperAdmin
+            rolesQuery = rolesQuery.Where(r => r.NormalizedName != "SUPERADMIN");
 
             rolesQuery = rolesQuery.OrderBy(r => r.Name);
 
@@ -166,18 +162,24 @@ namespace ArchiveProject.Infrastructure.Services.AuthServices
 
             if (roles.Count == 0)
             {
-                // نعيد صفحة فارغة كنجاح (متسق مع بقية خدماتك)
                 var empty = new PaginatedList<RoleDetailsDto>(new List<RoleDetailsDto>(), totalRecords, pageNumber, pageSize);
                 return Result<PaginatedList<RoleDetailsDto>>.Success(empty);
             }
 
-            // جلب الصلاحيات وعدد المستخدمين لكل رول
             var roleIds = roles.Select(r => r.Id).ToList();
 
             var permissionsDict = await (from rp in _context.RolePermissions
                                          join p in _context.Permissions on rp.PermissionId equals p.Id
-                                         where roleIds.Contains(rp.RoleId) && p.IsActive // فقط الصلاحيات النشطة
-                                         select new { rp.RoleId, Permission = new PermissionInfoDto { Id = p.Id, Name = p.Name ?? string.Empty } })
+                                         where roleIds.Contains(rp.RoleId) && p.IsActive
+                                         select new
+                                         {
+                                             rp.RoleId,
+                                             Permission = new PermissionInfoDto
+                                             {
+                                                 Id = p.Id,
+                                                 Name = AuthDisplayNames.PermissionAr(p.Name)
+                                             }
+                                         })
                                          .GroupBy(x => x.RoleId)
                                          .ToDictionaryAsync(g => g.Key, g => g.Select(x => x.Permission).ToList());
 
@@ -186,7 +188,6 @@ namespace ArchiveProject.Infrastructure.Services.AuthServices
                 .GroupBy(ur => ur.RoleId)
                 .ToDictionaryAsync(g => g.Key, g => g.Count());
 
-            // أسماء من أنشأ/عدّل
             var userIds = roles
                 .SelectMany(r => new[] { r.CreatedBy, r.UpdatedBy })
                 .Where(id => !string.IsNullOrEmpty(id))
@@ -197,10 +198,11 @@ namespace ArchiveProject.Infrastructure.Services.AuthServices
                 .Where(u => userIds.Contains(u.Id))
                 .ToDictionaryAsync(u => u.Id, u => u.FullName ?? u.UserName);
 
-            // المابينغ
             var roleDtos = roles.Select(role =>
             {
                 var dto = _mapper.Map<RoleDetailsDto>(role);
+
+                dto.Name = AuthDisplayNames.RoleAr(role.Name);
 
                 permissionsDict.TryGetValue(role.Id, out var perms);
                 assignedUsersDict.TryGetValue(role.Id, out var assignedCount);
@@ -278,69 +280,161 @@ namespace ArchiveProject.Infrastructure.Services.AuthServices
 
 
         #region         اسناد صلاحية الى دور 
-        public async Task<Result<string>> AssignPermissionsToRole(AssignPermissionsDto dto)
+        //public async Task<Result<string>> TogglePermissionsForRoleAsync(AssignPermissionsDto dto)
+        //{
+        //    var errors = new List<string>();
+
+        //    if (string.IsNullOrWhiteSpace(dto.RoleId))
+        //        return Result<string>.Failure(new[] { "RoleId مطلوب." }, null);
+
+        //    // 1) الدور
+        //    var role = await _roleManager.FindByIdAsync(dto.RoleId);
+        //    if (role == null)
+        //        return Result<string>.Failure(new[] { "الدور غير موجود." }, null);
+
+        //    // 2) تحديث يدوي لأن RoleManager لا يمر على interceptor
+        //    role.UpdatedAt = DateTime.Now;
+        //    role.UpdatedBy = _currentUserService.UserId;
+
+        //    // 3) ids الواردة
+        //    var requestedIds = dto.PermissionsIds?.Where(x => x != Guid.Empty).Distinct().ToList()
+        //                       ?? new List<Guid>();
+
+        //    if (!requestedIds.Any())
+        //        return Result<string>.Success("لا توجد صلاحيات للتعديل.");
+
+        //    // 4) تأكيد الصلاحيات موجودة ونشطة
+        //    var activeValidIds = await _context.Permissions
+        //        .Where(p => requestedIds.Contains(p.Id) && p.IsActive)
+        //        .Select(p => p.Id)
+        //        .ToListAsync();
+
+        //    var missingOrInactive = requestedIds.Except(activeValidIds).ToList();
+        //    if (missingOrInactive.Any())
+        //        return Result<string>.Failure(
+        //            new[] { $"صلاحيات غير موجودة أو غير نشطة: {string.Join(", ", missingOrInactive)}" }, null);
+
+        //    // 5) الصلاحيات الحالية للدور (فقط التي ضمن المطلوب)
+        //    var existingRows = await _context.RolePermissions
+        //        .Where(rp => rp.RoleId == dto.RoleId && activeValidIds.Contains(rp.PermissionId))
+        //        .ToListAsync();
+
+        //    var existingIds = existingRows.Select(rp => rp.PermissionId).ToHashSet();
+
+        //    // 6) Toggle
+        //    var toRemove = existingRows; // الموجودة => نحذفها
+        //    var toAddIds = activeValidIds.Where(pid => !existingIds.Contains(pid)).ToList(); // غير الموجودة => نضيفها
+
+        //    using var tx = await _context.Database.BeginTransactionAsync();
+        //    try
+        //    {
+        //        if (toRemove.Any())
+        //            _context.RolePermissions.RemoveRange(toRemove);
+
+        //        if (toAddIds.Any())
+        //        {
+        //            var addRows = toAddIds.Select(pid => new RolePermission
+        //            {
+        //                RoleId = dto.RoleId,
+        //                PermissionId = pid
+        //            });
+
+        //            await _context.RolePermissions.AddRangeAsync(addRows);
+        //        }
+
+        //        await _context.SaveChangesAsync();
+
+        //        // 7) إبطال توكنات المستخدمين الذين لديهم هذا الدور ليطبق التغيير
+        //        await SecurityStampHelper.InvalidateUsersWithRoleAsync(_context, _userManager, dto.RoleId);
+
+        //        await tx.CommitAsync();
+
+        //        return Result<string>.Success(
+        //            $"تم تحديث صلاحيات الدور بنجاح. (إضافة: {toAddIds.Count} | إزالة: {toRemove.Count})");
+        //    }
+        //    catch
+        //    {
+        //        await tx.RollbackAsync();
+        //        throw;
+        //    }
+        //}
+        public async Task<Result<string>> SyncPermissionsForRoleAsync(AssignPermissionsDto dto)
         {
-            var errors = new List<string>();
+            if (string.IsNullOrWhiteSpace(dto.RoleId))
+                return Result<string>.Failure(new[] { "RoleId مطلوب." }, null);
 
             var role = await _roleManager.FindByIdAsync(dto.RoleId);
             if (role == null)
-            {
-                errors.Add("الدور غير موجود.");
-                return Result<string>.Failure(errors, null);
-            }
+                return Result<string>.Failure(new[] { "الدور غير موجود." }, null);
 
-            // تحديث الحقول يدوياً لأن الـ Interceptor لا يعمل مع RoleManager
             role.UpdatedAt = DateTime.Now;
             role.UpdatedBy = _currentUserService.UserId;
 
-            // ids الواردة (منزوعة التكرار)
-            var requestedIds = dto.PermissionsIds?.Distinct().ToList() ?? new List<Guid>();
-            if (!requestedIds.Any())
-                return Result<string>.Success("لا توجد صلاحيات لإسنادها.");
+            // القائمة النهائية القادمة من الواجهة (الشيكات الحالية)
+            var requestedIds = (dto.PermissionsIds ?? new List<Guid>())
+                .Where(x => x != Guid.Empty)
+                .Distinct()
+                .ToList();
 
-            // تأكيد أن الصلاحيات موجودة فعلاً في قاعدة البيانات - فقط الصلاحيات النشطة
-            var validIds = await _context.Permissions
-                .Where(p => requestedIds.Contains(p.Id) && p.IsActive) // فقط الصلاحيات النشطة
+            // ✅ فقط النشطة
+            var activeValidIds = await _context.Permissions
+                .Where(p => requestedIds.Contains(p.Id) && p.IsActive)
                 .Select(p => p.Id)
                 .ToListAsync();
 
-            // التحقق من الصلاحيات غير النشطة
-            var inactiveIds = requestedIds.Except(validIds).ToList();
-            if (inactiveIds.Any())
-            {
+            var missingOrInactive = requestedIds.Except(activeValidIds).ToList();
+            if (missingOrInactive.Any())
                 return Result<string>.Failure(
-                    new[] { $"الصلاحيات التالية غير نشطة: {string.Join(", ", inactiveIds)}" }, null);
-            }
+                    new[] { $"صلاحيات غير موجودة أو غير نشطة: {string.Join(", ", missingOrInactive)}" }, null);
 
-            // الموجود مسبقاً لهذا الدور
-            var existingIds = await _context.RolePermissions
+            // صلاحيات الدور الحالية
+            var existingRolePerms = await _context.RolePermissions
                 .Where(rp => rp.RoleId == dto.RoleId)
-                .Select(rp => rp.PermissionId)
                 .ToListAsync();
 
-            // المطلوب إضافته فقط (غير الموجود)
-            var toAdd = validIds.Except(existingIds).ToList();
+            var existingIds = existingRolePerms
+                .Select(rp => rp.PermissionId)
+                .ToHashSet();
 
-            if (toAdd.Count > 0)
+            // ✅ إضافة فقط الجديد
+            var toAdd = activeValidIds
+                .Where(id => !existingIds.Contains(id))
+                .ToList();
+
+            // ✅ حذف فقط اللي انشال من الشيكات (موجود سابقاً وصار غير موجود)
+            var toRemove = existingRolePerms
+                .Where(rp => !activeValidIds.Contains(rp.PermissionId))
+                .ToList();
+
+            using var tx = await _context.Database.BeginTransactionAsync();
+            try
             {
-                var newRolePermissions = toAdd.Select(pid => new RolePermission
+                if (toRemove.Any())
+                    _context.RolePermissions.RemoveRange(toRemove);
+
+                if (toAdd.Any())
                 {
-                    RoleId = dto.RoleId,
-                    PermissionId = pid
-                });
+                    var addRows = toAdd.Select(pid => new RolePermission
+                    {
+                        RoleId = dto.RoleId,
+                        PermissionId = pid
+                    });
+                    await _context.RolePermissions.AddRangeAsync(addRows);
+                }
 
-                await _context.RolePermissions.AddRangeAsync(newRolePermissions);
+                await _context.SaveChangesAsync();
+
+                await SecurityStampHelper.InvalidateUsersWithRoleAsync(_context, _userManager, dto.RoleId);
+
+                await tx.CommitAsync();
+
+                return Result<string>.Success($"تم تحديث الصلاحيات بنجاح. (إضافة: {toAdd.Count} | حذف: {toRemove.Count})");
             }
-
-            await _context.SaveChangesAsync();
-
-            // تحديث SecurityStamp لجميع المستخدمين الذين لديهم هذا الدور
-            await SecurityStampHelper.InvalidateUsersWithRoleAsync(_context, _userManager, dto.RoleId);
-
-            var added = toAdd.Count;
-            var skipped = requestedIds.Count - added;
-            return Result<string>.Success(
-                $"تمت إضافة {added} صلاحية. وتم تخطي {skipped} لأنها موجودة مسبقاً أو غير صالحة.");
+            catch
+            {
+                await tx.RollbackAsync();
+                throw;
+            }
         }
 
         #endregion
@@ -485,7 +579,7 @@ namespace ArchiveProject.Infrastructure.Services.AuthServices
                 .Select(r => new DropdownRoleDto
                 {
                     roleId = r.Id,
-                    name = r.Name ?? string.Empty
+                    name = AuthDisplayNames.RoleAr(r.Name ?? string.Empty)
                 })
                 .ToListAsync();
 
