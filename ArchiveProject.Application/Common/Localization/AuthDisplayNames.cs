@@ -12,8 +12,8 @@
                 ["BranchManager"] = "مدير الفرع",
                 ["BRANCHMANAGER"] = "مدير الفرع",
 
-                ["DepartmentUser"] = "موظف قسم",
-                ["DEPARTMENTUSER"] = "موظف قسم",
+                ["DepartmentUser"] = "مستخدم",
+                ["DEPARTMENTUSER"] = "مستخدم",
             };
 
         // ✅ ترجمة أسماء الصلاحيات حسب Permission.Name (الإنكليزي)
@@ -34,12 +34,6 @@
                 ["ReportsDocuments.Export"] = "تصدير تقرير الوثائق",
                 ["ReportsAuditLogs.Export"] = "تصدير تقرير السجل",
                 ["ReportsDashboard.Export"] = "تصدير تقرير لوحة التحكم",
-
-                // Department CRUD
-                ["Department.Read"] = "قراءة بيانات الأقسام",
-                ["Department.Create"] = "إنشاء أقسام جديدة",
-                ["Department.Edit"] = "تعديل بيانات الأقسام",
-                ["Department.Delete"] = "حذف الأقسام",
 
                 // DocumentType CRUD
                 ["DocumentType.Read"] = "قراءة أنواع الوثائق",

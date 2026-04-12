@@ -4,7 +4,6 @@
     {
         public long DocumentNumber { get; set; }
         public string Title { get; set; } = "";
-        public string DepartmentName { get; set; } = "";
         public string DocumentTypeName { get; set; } = "";
         public DateTime CreatedAt { get; set; }
         public string CreatedBy { get; set; } = "";

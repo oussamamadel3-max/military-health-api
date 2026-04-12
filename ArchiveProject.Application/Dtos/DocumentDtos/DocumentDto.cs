@@ -7,9 +7,6 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
     {
         public long DocumentId { get; set; }
 
-        [FieldPermission("DepartmentId", DisplayName = "القسم")]
-        public long? DepartmentId { get; set; }
-
         [FieldPermission("UserId", DisplayName = "المستخدم")]
         [StringLength(200)]
         public string? UserId { get; set; }
@@ -57,11 +54,6 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
 
     public class CreateDocumentDto
     {
-        [Required(ErrorMessage = "القسم مطلوب")]
-        [Range(1, long.MaxValue, ErrorMessage = "القسم غير موجود")]
-        [FieldPermission("DepartmentId", DisplayName = "القسم")]
-        public long DepartmentId { get; set; }
-
         [FieldPermission("DocumentTypeId", Required = false, DisplayName = "نوع الوثيقة")]
         public long? DocumentTypeId { get; set; }
 
@@ -81,10 +73,6 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
 
     public class UpdateDocumentDto
     {
-        [FieldPermission("DepartmentId", DisplayName = "القسم")]
-        [Range(1, long.MaxValue, ErrorMessage = "القسم غير موجود")]
-        public long? DepartmentId { get; set; }
-
         [FieldPermission("DocumentTypeId", DisplayName = "نوع الوثيقة")]
         [Range(1, long.MaxValue, ErrorMessage = "نوع الوثيقة غير موجود")]
         public long? DocumentTypeId { get; set; }
@@ -121,11 +109,6 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
         [FieldPermission("Description", Required = false, DisplayName = "الوصف")]
         public string? Description { get; set; }
 
-        [Required(ErrorMessage = "القسم مطلوب")]
-        [Range(1, long.MaxValue, ErrorMessage = "القسم غير موجود")]
-        [FieldPermission("DepartmentId", DisplayName = "القسم")]
-        public long DepartmentId { get; set; }
-
         [FieldPermission("DocumentTypeId", DisplayName = "نوع الوثيقة")]
         [Range(1, long.MaxValue, ErrorMessage = "نوع الوثيقة غير موجود")]
         public long? DocumentTypeId { get; set; }
@@ -137,7 +120,6 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
 
     public class DocumentSearchCriteria
     {
-        public long? DepartmentId { get; set; }
         public long? DocumentTypeId { get; set; }
 
         [StringLength(20)]

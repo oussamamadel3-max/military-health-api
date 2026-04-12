@@ -40,8 +40,6 @@ namespace ArchiveProject.Infrastructure.Data
         #endregion
 
 
-        // For Testing Purposes
-        public DbSet<Department> Departments { get; set; }
         public DbSet<DocumentType> DocumentTypes { get; set; }
         public DbSet<Document> Documents { get; set; }
         public DbSet<Attachment> Attachments { get; set; }
@@ -116,14 +114,6 @@ namespace ArchiveProject.Infrastructure.Data
                       .HasForeignKey(up => up.UserId);
 
                 entity.Property(u => u.FullName).HasMaxLength(250);
-
-                // Department (optional)
-                entity.HasOne(u => u.Department)
-                      .WithMany(d => d.Users)
-                      .HasForeignKey(u => u.DepartmentId)
-                      .OnDelete(DeleteBehavior.Restrict);
-
-                entity.HasIndex(u => u.DepartmentId);
             });
 
             // ===== UserRoleAssociation =====
@@ -194,23 +184,6 @@ namespace ArchiveProject.Infrastructure.Data
 
             #region === Core Domain Entities ===  (ArchiveProject)
 
-            // ===== Department =====
-            modelBuilder.Entity<Department>(entity =>
-            {
-                entity.HasKey(d => d.DepartmentId);
-                entity.Property(d => d.DepartmentName).IsRequired().HasMaxLength(250);
-                entity.Property(d => d.Code).HasMaxLength(50);
-
-                entity.Property(d => d.Description).HasMaxLength(1000);
-
-                entity.HasMany(d => d.Users)
-                      .WithOne(u => u.Department)
-                      .HasForeignKey(u => u.DepartmentId)
-                      .OnDelete(DeleteBehavior.Restrict);
-
-                entity.HasIndex(d => d.Code);
-            });
-
             // ===== DocumentType =====
             modelBuilder.Entity<DocumentType>(entity =>
             {
@@ -232,16 +205,10 @@ namespace ArchiveProject.Infrastructure.Data
 
                 entity.Property(d => d.Description).HasMaxLength(2000);
 
-                entity.HasIndex(d => new { d.DepartmentId, d.DocumentNumber }).IsUnique();
+                entity.HasIndex(d => d.DocumentNumber).IsUnique();
 
-                entity.HasIndex(d => d.DepartmentId);
                 entity.HasIndex(d => d.UserId);
                 entity.HasIndex(d => d.DocumentTypeId);
-
-                entity.HasOne(d => d.Department)
-                      .WithMany()
-                      .HasForeignKey(d => d.DepartmentId)
-                      .OnDelete(DeleteBehavior.Restrict);
 
                 entity.HasOne(d => d.User)
                       .WithMany(u => u.Documents)

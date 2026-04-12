@@ -64,16 +64,6 @@ namespace ArchiveProject.API.Controllers
             => Pipe(await _service.GetDocumentsDropdownAsync());
 
 
-        // GET: api/Documents/ungrouped/by-department/5?pageNumber=1&pageSize=20
-        [HttpGet("ungrouped/by-department/{departmentId:long}")]
-        [AuthorizePermission("Document.Read")]
-        public async Task<Result<PaginatedList<DocumentDto>>> GetUngrouped(
-            long departmentId,
-            [FromQuery] int pageNumber = 1,
-            [FromQuery] int pageSize = 10)
-            => Pipe(await _service.GetUngroupedByDepartmentPagedAsync(departmentId, pageNumber, pageSize));
-
-
         // GET: api/Documents/GetAllDocuments?pageNumber=1&pageSize=10&title=
         [HttpGet("GetAllDocuments")]
         [AuthorizePermission("Document.Read")]

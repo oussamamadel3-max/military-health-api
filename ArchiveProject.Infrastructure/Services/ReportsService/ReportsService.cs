@@ -28,7 +28,7 @@ namespace ArchiveProject.Infrastructure.Services.Reports
             _dashboard = dashboard;
         }
 
-        private sealed record Scope(bool IsSuper, bool IsBranchMgr, long? DepartmentId, string UserId);
+        private sealed record Scope(bool IsSuper, bool IsBranchMgr, string UserId);
 
         private async Task<Scope> GetScopeAsync()
         {
@@ -42,21 +42,12 @@ namespace ArchiveProject.Infrastructure.Services.Reports
             bool isSuper = roles.Any(r => r == "SUPERADMIN");
             bool isMgr = roles.Any(r => r == "BRANCHMANAGER");
 
-            var actor = await _context.Users.AsNoTracking()
-                .Where(u => u.Id == userId)
-                .Select(u => new { u.DepartmentId })
-                .FirstOrDefaultAsync();
-
-            return new Scope(isSuper, isMgr, actor?.DepartmentId, userId);
+            return new Scope(isSuper, isMgr, userId);
         }
 
         private IQueryable<Domain.Entities.Document> ApplyScopeDocs(IQueryable<Domain.Entities.Document> q, Scope s)
         {
             if (s.IsSuper || s.IsBranchMgr) return q;
-
-            if (s.DepartmentId.HasValue)
-                return q.Where(d => d.DepartmentId == s.DepartmentId.Value);
-
             return q.Where(d => d.UserId == s.UserId);
         }
 
@@ -70,11 +61,9 @@ namespace ArchiveProject.Infrastructure.Services.Reports
                 var q = ApplyScopeDocs(_context.Documents.AsNoTracking(), s);
 
                 // Filters
-                if (c.DepartmentId.HasValue) q = q.Where(d => d.DepartmentId == c.DepartmentId.Value);
                 if (c.DocumentTypeId.HasValue) q = q.Where(d => d.DocumentTypeId == c.DocumentTypeId.Value);
                 if (!string.IsNullOrWhiteSpace(c.Title)) q = q.Where(d => d.Title.Contains(c.Title));
                 if (!string.IsNullOrWhiteSpace(c.Description)) q = q.Where(d => d.Description.Contains(c.Description));
-                if (c.CreatedFrom.HasValue) q = q.Where(d => d.CreatedAt >= c.CreatedFrom.Value);
                 if (c.CreatedFrom.HasValue)
                 {
                     var from = c.CreatedFrom.Value.Date;
@@ -92,22 +81,16 @@ namespace ArchiveProject.Infrastructure.Services.Reports
 
                 // Projection (مع أسماء الفرع/القسم/النوع)
                 var rows = await (from d in q
-                                  join dep in _context.Departments.AsNoTracking() on d.DepartmentId equals dep.DepartmentId
                                   join dt in _context.DocumentTypes.AsNoTracking() on d.DocumentTypeId equals dt.DocumentTypeId into dtt
                                   from dt in dtt.DefaultIfEmpty()
                                   select new DocumentReportRowDto
                                   {
                                       DocumentNumber = d.DocumentNumber,
                                       Title = d.Title ?? "",
-                                      DepartmentName = dep.DepartmentName ?? "",
                                       DocumentTypeName = dt != null ? dt.DocumentTypeName : "",
                                       CreatedAt = d.CreatedAt,
                                       CreatedBy = d.User.UserName ?? ""
                                   }).ToListAsync();
-
-                var deptName = c.DepartmentId.HasValue
-                    ? await _context.Departments.Where(x => x.DepartmentId == c.DepartmentId.Value).Select(x => x.DepartmentName).FirstOrDefaultAsync()
-                    : null;
 
                 string? periodText = null;
                 if (c.CreatedFrom.HasValue || c.CreatedTo.HasValue)
@@ -122,7 +105,6 @@ namespace ArchiveProject.Infrastructure.Services.Reports
                     ReportName = "Documents_Report",
                     SheetName = "Documents",
                     CustomTitle = "تقرير الوثائق",
-                    DepartmentName = deptName,
                     PeriodText = periodText,
                     IncludeLogo = true,   // ✅ أضفها
                     IncludeFooter = true, // (إذا بدك)
@@ -130,7 +112,6 @@ namespace ArchiveProject.Infrastructure.Services.Reports
                     {
                         ["DocumentNumber"] = "رقم الوثيقة",
                         ["Title"] = "العنوان",
-                        ["DepartmentName"] = "القسم",
                         ["DocumentTypeName"] = "نوع الوثيقة",
                         ["CreatedAt"] = "تاريخ الإنشاء",
                         ["CreatedBy"] = "أنشئ بواسطة",
@@ -163,17 +144,7 @@ namespace ArchiveProject.Infrastructure.Services.Reports
 
                 // ====== Apply Scope ======
                 if (!s.IsSuper && !s.IsBranchMgr)
-                {
-                    var joined = from a in q
-                                 join u in _context.Users.AsNoTracking() on a.UserId equals u.Id into uu
-                                 from u in uu.DefaultIfEmpty()
-                                 select new { a, u };
-
-                    if (s.DepartmentId.HasValue)
-                        q = joined.Where(x => x.u != null && x.u.DepartmentId == s.DepartmentId.Value).Select(x => x.a);
-                    else
-                        q = joined.Where(x => x.a.UserId == s.UserId).Select(x => x.a);
-                }
+                    q = q.Where(a => a.UserId == s.UserId);
 
                 // ====== Filters (نفس GetAllFiltered) ======
 
@@ -288,46 +259,6 @@ namespace ArchiveProject.Infrastructure.Services.Reports
         #endregion
 
         #region Export Dashboard
-        //public async Task<Result<ExportFileDto>> ExportDashboardAsync(DashboardFilter filter, string format)
-        //{
-        //    try
-        //    {
-        //        var res = await _dashboard.GetAsync(filter);
-        //        if (!res.Succeeded || res.Value == null)
-        //            return Result<ExportFileDto>.Failure(res.Errors);
-
-        //        // نحول الـ DashboardStatsDto لصفوف بسيطة للتصدير (أو أكثر من شيت لاحقًا)
-        //        var rows = new List<DashboardExportRow>
-        //        {
-        //            new() { Name = "عدد الوثائق", Value = (res.Value.DocumentsCount).ToString() },
-        //            new() { Name = "عدد المجموعات", Value = (res.Value.GroupsCount).ToString() },
-        //            new() { Name = "إجمالي التخزين", Value = res.Value.StorageUsage?.TotalReadable ?? "0 B" },
-        //            new() { Name = "عدد الأنشطة الأخيرة", Value = (res.Value.RecentActivities?.Count ?? 0).ToString() }
-        //        };
-
-        //        var opt = new ExportOptions
-        //        {
-        //            ReportName = "Dashboard_Report",
-        //            SheetName = "Dashboard",
-        //            CustomTitle = "تقرير لوحة التحكم",
-        //            ColumnMappings = new Dictionary<string, string>
-        //            {
-        //                ["Name"] = "البند",
-        //                ["Value"] = "القيمة"
-        //            }
-        //        };
-
-        //        ExportFileDto file = format.ToLower() == "pdf"
-        //            ? await _export.ExportToPdfAsync(rows, opt)
-        //            : await _export.ExportToExcelAsync(rows, opt);
-
-        //        return Result<ExportFileDto>.Success(file);
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        return Result<ExportFileDto>.Failure(new[] { $"خطأ بتصدير تقرير الداشبورد: {ex.Message}" });
-        //    }
-        //}
         public async Task<Result<ExportFileDto>> ExportDashboardAsync(DashboardFilter filter, string format)
         {
             try
@@ -432,6 +363,5 @@ namespace ArchiveProject.Infrastructure.Services.Reports
             return $"{val:0.##} {units[i]}";
         }
         #endregion
-
     }
 }

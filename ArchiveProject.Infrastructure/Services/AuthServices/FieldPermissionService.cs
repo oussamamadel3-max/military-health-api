@@ -1,7 +1,7 @@
 ﻿using ArchiveProject.Application.Attributes;
 using ArchiveProject.Application.Common.Results;
 using ArchiveProject.Application.Dtos.AuthDtos;
-using ArchiveProject.Application.Dtos.DepartmentDtos;
+using ArchiveProject.Application.Dtos.DocumentDtos;
 using ArchiveProject.Domain.Entities;
 using ArchiveProject.Domain.Entities.Auth;
 using ArchiveProject.Domain.Enums;
@@ -14,8 +14,8 @@ using FieldPermissionEntityAttribute = ArchiveProject.Domain.Attributes.FieldPer
 
 public class FieldPermissionService : IFieldPermissionService
 {
-    private static readonly Assembly DomainEntitiesAssembly = typeof(Department).Assembly;
-    private static readonly Assembly ApplicationDtosAssembly = typeof(DepartmentDto).Assembly;
+    private static readonly Assembly DomainEntitiesAssembly = typeof(Document).Assembly;
+    private static readonly Assembly ApplicationDtosAssembly = typeof(DocumentDto).Assembly;
     private static Dictionary<string, string>? _dtoFieldDisplayCache;
 
     // Cache للعلاقات بين الكيانات والـ DTOs (لتحسين الأداء)

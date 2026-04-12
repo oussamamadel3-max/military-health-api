@@ -6,7 +6,6 @@ namespace ArchiveProject.Application.Common.Interfaces.DashboardInterfaces
     {
         public DateTime? From { get; set; }      // لفلاتر growth أو recent
         public DateTime? To { get; set; }
-        public long? DepartmentId { get; set; }  // فلترة أقوى
         public int RecentCount { get; set; } = 10;
         public int TopUsersCount { get; set; } = 5;
         public int GrowthMonths { get; set; } = 6; // آخر N أشهر

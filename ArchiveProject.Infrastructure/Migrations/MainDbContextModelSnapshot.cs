@@ -298,9 +298,6 @@ namespace ArchiveProject.Infrastructure.Migrations
                     b.Property<DateTime>("CreationDate")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<long?>("DepartmentId")
-                        .HasColumnType("bigint");
-
                     b.Property<string>("Email")
                         .HasColumnType("text");
 
@@ -345,8 +342,6 @@ namespace ArchiveProject.Infrastructure.Migrations
                         .HasColumnType("text");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("DepartmentId");
 
                     b.ToTable("Users");
                 });
@@ -447,51 +442,6 @@ namespace ArchiveProject.Infrastructure.Migrations
                     b.ToTable("UserRoleAssociations");
                 });
 
-            modelBuilder.Entity("ArchiveProject.Domain.Entities.Department", b =>
-                {
-                    b.Property<long>("DepartmentId")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("DepartmentId"));
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("text");
-
-                    b.Property<string>("DepartmentName")
-                        .IsRequired()
-                        .HasMaxLength(250)
-                        .HasColumnType("character varying(250)");
-
-                    b.Property<string>("Description")
-                        .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("text");
-
-                    b.HasKey("DepartmentId");
-
-                    b.HasIndex("Code");
-
-                    b.ToTable("Departments");
-                });
-
             modelBuilder.Entity("ArchiveProject.Domain.Entities.Document", b =>
                 {
                     b.Property<long>("DocumentId")
@@ -505,9 +455,6 @@ namespace ArchiveProject.Infrastructure.Migrations
 
                     b.Property<string>("CreatedBy")
                         .HasColumnType("text");
-
-                    b.Property<long>("DepartmentId")
-                        .HasColumnType("bigint");
 
                     b.Property<string>("Description")
                         .IsRequired()
@@ -537,14 +484,12 @@ namespace ArchiveProject.Infrastructure.Migrations
 
                     b.HasKey("DocumentId");
 
-                    b.HasIndex("DepartmentId");
+                    b.HasIndex("DocumentNumber")
+                        .IsUnique();
 
                     b.HasIndex("DocumentTypeId");
 
                     b.HasIndex("UserId");
-
-                    b.HasIndex("DepartmentId", "DocumentNumber")
-                        .IsUnique();
 
                     b.ToTable("Documents");
                 });
@@ -624,16 +569,6 @@ namespace ArchiveProject.Infrastructure.Migrations
                     b.Navigation("Role");
                 });
 
-            modelBuilder.Entity("ArchiveProject.Domain.Entities.Auth.User", b =>
-                {
-                    b.HasOne("ArchiveProject.Domain.Entities.Department", "Department")
-                        .WithMany("Users")
-                        .HasForeignKey("DepartmentId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("Department");
-                });
-
             modelBuilder.Entity("ArchiveProject.Domain.Entities.Auth.UserFieldPermission", b =>
                 {
                     b.HasOne("ArchiveProject.Domain.Entities.Auth.FieldPermission", "FieldPermission")
@@ -701,12 +636,6 @@ namespace ArchiveProject.Infrastructure.Migrations
 
             modelBuilder.Entity("ArchiveProject.Domain.Entities.Document", b =>
                 {
-                    b.HasOne("ArchiveProject.Domain.Entities.Department", "Department")
-                        .WithMany()
-                        .HasForeignKey("DepartmentId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
                     b.HasOne("ArchiveProject.Domain.Entities.DocumentType", "DocumentType")
                         .WithMany("Documents")
                         .HasForeignKey("DocumentTypeId")
@@ -718,8 +647,6 @@ namespace ArchiveProject.Infrastructure.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-
-                    b.Navigation("Department");
 
                     b.Navigation("DocumentType");
 
@@ -758,11 +685,6 @@ namespace ArchiveProject.Infrastructure.Migrations
                     b.Navigation("UserPermissions");
 
                     b.Navigation("UserRoleAssociations");
-                });
-
-            modelBuilder.Entity("ArchiveProject.Domain.Entities.Department", b =>
-                {
-                    b.Navigation("Users");
                 });
 
             modelBuilder.Entity("ArchiveProject.Domain.Entities.DocumentType", b =>

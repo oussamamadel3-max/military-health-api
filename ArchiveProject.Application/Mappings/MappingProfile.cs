@@ -1,6 +1,5 @@
 ﻿using ArchiveProject.Application.Dtos;
 using ArchiveProject.Application.Dtos.AuthDtos;
-using ArchiveProject.Application.Dtos.DepartmentDtos;
 using ArchiveProject.Application.Dtos.DocumentDtos;
 using ArchiveProject.Application.Dtos.DocumentTypeDtos;
 using ArchiveProject.Application.Dtos.ReportDtos;
@@ -17,12 +16,6 @@ namespace ArchiveProject.Application.Mappings
         {
 
             #region === Authorization Mappings ===
-            // User
-            CreateMap<User, UserListItemDto>()
-                .ForMember(dest => dest.DepartmentId, opt => opt.MapFrom(src => src.Department != null ? (long?)src.Department.DepartmentId : null))
-                .ForMember(dest => dest.DepartmentName, opt => opt.MapFrom(src => src.Department != null ? src.Department.DepartmentName : null))
-                .ReverseMap();
-
             // Role
             CreateMap<Role, RoleDto>().ReverseMap();
             CreateMap<Role, RoleDetailsDto>().ReverseMap();
@@ -77,11 +70,6 @@ namespace ArchiveProject.Application.Mappings
 
             #region Additional mappings can be added here
 
-            //      Department
-            CreateMap<Department, DepartmentDto>();
-            CreateMap<CreateDepartmentDto, Department>();
-            CreateMap<UpdateDepartmentDto, Department>();
-
             //     DocumentType
             CreateMap<DocumentType, DocumentTypeDto>();
             CreateMap<CreateDocumentTypeDto, DocumentType>();
@@ -106,4 +94,3 @@ namespace ArchiveProject.Application.Mappings
         }
     }
 }
-

@@ -24,9 +24,9 @@ namespace FinanceProject.Infrastructure.Services
         #region استرجاع سجل حسب المعرف (يستخدم AuditLogDetailsDto)
         public async Task<Result<AuditLogDetailsDto>> GetByIdAsync(long id)
         {
-            var (isSuper, isMgr, depId, userId) = await GetActorScopeAsync();
+            var (isSuper, isMgr, userId) = await GetActorScopeAsync();
 
-            var scoped = ApplyScope(_context.AuditLogs.AsNoTracking(), isSuper, isMgr, depId, userId)
+            var scoped = ApplyScope(_context.AuditLogs.AsNoTracking(), isSuper, isMgr, userId)
                          .Where(a => a.LogId == id);
 
             var entity = await scoped.FirstOrDefaultAsync();
@@ -44,9 +44,9 @@ namespace FinanceProject.Infrastructure.Services
             if (pageNumber < 1) pageNumber = 1;
             if (pageSize < 1) pageSize = 10;
 
-            var (isSuper, isMgr, depId, userId) = await GetActorScopeAsync();
+            var (isSuper, isMgr, userId) = await GetActorScopeAsync();
 
-            var scoped = ApplyScope(_context.AuditLogs.AsNoTracking(), isSuper, isMgr, depId, userId)
+            var scoped = ApplyScope(_context.AuditLogs.AsNoTracking(), isSuper, isMgr, userId)
                          .OrderByDescending(a => a.Timestamp);
 
             var total = await scoped.CountAsync();
@@ -70,9 +70,9 @@ namespace FinanceProject.Infrastructure.Services
 
             auditLogFilter ??= new AuditLogFilter();
 
-            var (isSuper, isMgr, depId, userId) = await GetActorScopeAsync();
+            var (isSuper, isMgr, userId) = await GetActorScopeAsync();
 
-            var scoped = ApplyScope(_context.AuditLogs.AsNoTracking(), isSuper, isMgr, depId, userId);
+            var scoped = ApplyScope(_context.AuditLogs.AsNoTracking(), isSuper, isMgr, userId);
 
             // ========= searchUserName (بحث بالاسم فقط) =========
             if (!string.IsNullOrWhiteSpace(auditLogFilter.searchUserName))
@@ -161,9 +161,9 @@ namespace FinanceProject.Infrastructure.Services
         #region   جلب ملخص إحصائي للسجلات
         public async Task<Result<AuditLogSummaryDto>> GetSummaryAsync()
         {
-            var (isSuper, isMgr, depId, userId) = await GetActorScopeAsync();
+            var (isSuper, isMgr, userId) = await GetActorScopeAsync();
 
-            var scoped = ApplyScope(_context.AuditLogs.AsNoTracking(), isSuper, isMgr, depId, userId);
+            var scoped = ApplyScope(_context.AuditLogs.AsNoTracking(), isSuper, isMgr, userId);
 
             var grouped = await scoped
                 .GroupBy(a => a.ActionType)
@@ -190,12 +190,11 @@ namespace FinanceProject.Infrastructure.Services
 
 
         /// <summary>
-        /// يطبّق نطاق الوصول على استعلام السجلات بالربط مع المستخدم صاحب السجل.
-        /// - SuperAdmin: بلا فلترة
-        /// - BranchManager: نفس الفرع
-        /// - موظف قسم: نفس القسم OR سجلاته الشخصية
+        /// يطبّق نطاق الوصول على استعلام السجلات.
+        /// - SuperAdmin و BranchManager: بلا فلترة
+        /// - غير ذلك: سجلات المستخدم الحالي فقط
         /// </summary>
-        private async Task<(bool IsSuperAdmin, bool IsBranchManager, long? ActorDepartmentId, string UserId)> GetActorScopeAsync()
+        private async Task<(bool IsSuperAdmin, bool IsBranchManager, string UserId)> GetActorScopeAsync()
         {
             var userId = _currentUser.UserId ?? string.Empty;
 
@@ -208,29 +207,13 @@ namespace FinanceProject.Infrastructure.Services
             bool isSuperAdmin = roles.Any(n => n == "SUPERADMIN");
             bool isBranchManager = roles.Any(n => n == "BRANCHMANAGER");
 
-            var actor = await _context.Users.AsNoTracking()
-                .Where(u => u.Id == userId)
-                .Select(u => new { u.DepartmentId })
-                .FirstOrDefaultAsync();
-
-            return (isSuperAdmin, isBranchManager, actor?.DepartmentId, userId);
+            return (isSuperAdmin, isBranchManager, userId);
         }
 
-        private IQueryable<AuditLog> ApplyScope(IQueryable<AuditLog> baseQuery, bool isSuperAdmin, bool isBranchManager, long? departmentId, string userId)
+        private IQueryable<AuditLog> ApplyScope(IQueryable<AuditLog> baseQuery, bool isSuperAdmin, bool isBranchManager, string userId)
         {
             if (isSuperAdmin || isBranchManager) return baseQuery;
-
-            var scoped = from a in baseQuery
-                         join u in _context.Users.AsNoTracking() on a.UserId equals u.Id into uu
-                         from u in uu.DefaultIfEmpty()
-                         select new { a, u.DepartmentId };
-
-            // موظف قسم: نفس القسم أو السجلات الشخصية
-            if (departmentId.HasValue)
-                return scoped.Where(x => x.DepartmentId == departmentId.Value || x.a.UserId == userId).Select(x => x.a);
-
-            // احتياط: إن ما كان له قسم، أظهر سجلاته فقط
-            return scoped.Where(x => x.a.UserId == userId).Select(x => x.a);
+            return baseQuery.Where(a => a.UserId == userId);
         }
     }
 }

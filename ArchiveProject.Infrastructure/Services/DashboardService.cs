@@ -21,7 +21,6 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
         private sealed record Scope(
             bool IsSuperAdmin,
             bool IsBranchManager,
-            long? DepartmentId,
             string UserId);
 
         private async Task<Scope> GetScopeAsync()
@@ -36,12 +35,7 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
             bool isSuper = roles.Any(r => r == "SUPERADMIN");
             bool isMgr = roles.Any(r => r == "BRANCHMANAGER");
 
-            var actor = await _context.Users.AsNoTracking()
-                .Where(u => u.Id == userId)
-                .Select(u => new { u.DepartmentId })
-                .FirstOrDefaultAsync();
-
-            return new Scope(isSuper, isMgr, actor?.DepartmentId, userId);
+            return new Scope(isSuper, isMgr, userId);
         }
 
         // ======== Date Range Helper (Europe/Istanbul -> UTC DateTimeOffset) ========
@@ -129,13 +123,6 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
         private IQueryable<Document> ApplyScopeDocs(IQueryable<Document> q, Scope s)
         {
             if (s.IsSuperAdmin || s.IsBranchManager) return q;
-
-            if (s.DepartmentId.HasValue)
-            {
-                var did = s.DepartmentId.Value;
-                return q.Where(d => d.DepartmentId == did || d.UserId == s.UserId);
-            }
-
             return q.Where(d => d.UserId == s.UserId);
         }
 
@@ -143,21 +130,7 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
         private IQueryable<AuditLog> ApplyScopeAudit(IQueryable<AuditLog> q, Scope s)
         {
             if (s.IsSuperAdmin || s.IsBranchManager) return q;
-
-            var joined = from a in q
-                         join u in _context.Users.AsNoTracking() on a.UserId equals u.Id into uu
-                         from u in uu.DefaultIfEmpty()
-                         select new
-                         {
-                             Log = a,
-                             DepartmentId = (long?)(u == null ? null : u.DepartmentId)
-                         };
-
-            if (s.DepartmentId.HasValue)
-                return joined.Where(x => x.DepartmentId == s.DepartmentId.Value || x.Log.UserId == s.UserId)
-                             .Select(x => x.Log);
-
-            return joined.Where(x => x.Log.UserId == s.UserId).Select(x => x.Log);
+            return q.Where(a => a.UserId == s.UserId);
         }
 
         public async Task<Result<DashboardStatsDto>> GetAsync(DashboardFilter f)
@@ -171,10 +144,6 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
 
                 // ====== Base Docs Query (scoped) ======
                 var docsQ = ApplyScopeDocs(_context.Documents.AsNoTracking(), s);
-
-                // filters (within scope)
-                if (f.DepartmentId.HasValue)
-                    docsQ = docsQ.Where(d => d.DepartmentId == f.DepartmentId.Value);
 
                 // apply date range on documents if provided (CreatedAt is DateTime)
                 if (start.HasValue || endEx.HasValue)
@@ -257,33 +226,6 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
                     ActionsCount = x.ActionsCount,
                     LastActivityAt = x.LastActivity.UtcDateTime.ToString("o")
                 }).ToList();
-
-                // ====== Departments Stats ======
-                var departmentsVisibleQ = _context.Departments.AsNoTracking().AsQueryable();
-
-                if (!s.IsSuperAdmin)
-                {
-                    if (s.IsBranchManager) { /*يرى كل الأقسام */ }
-                    else if (s.DepartmentId.HasValue)
-                        departmentsVisibleQ = departmentsVisibleQ.Where(d => d.DepartmentId == s.DepartmentId.Value);
-                    else
-                        departmentsVisibleQ = departmentsVisibleQ.Where(d => false);
-                }
-
-                if (f.DepartmentId.HasValue)
-                    departmentsVisibleQ = departmentsVisibleQ.Where(d => d.DepartmentId == f.DepartmentId.Value);
-
-                var departmentsStats = await (
-                    from dep in departmentsVisibleQ
-                    join d in docsQ on dep.DepartmentId equals d.DepartmentId into dg
-                    select new DepartmentStatsDto
-                    {
-                        DepartmentId = dep.DepartmentId,
-                        DepartmentName = dep.DepartmentName,
-                        DocumentsCount = dg.LongCount()
-                    })
-                    .OrderByDescending(x => x.DocumentsCount)
-                    .ToListAsync();
 
                 // ====== Growth (إذا ما في range بنستخدم GrowthMonths كـ default) ======
                 // إذا المستخدم ما حدد from/to: منطبق GrowthMonths فقط على الـ growth chart وليس على باقي الإحصائيات.
@@ -378,7 +320,6 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
                     DocumentsCount = documentsCount,
                     RecentActivities = recent,
                     MostActiveUsers = topUsers,
-                    DepartmentsStats = departmentsStats,
                     DocumentGrowth = growth,
                     StorageUsage = storage,
                     TopDocumentTypes = topTypes

@@ -13,10 +13,6 @@ namespace ArchiveProject.Domain.Entities
         public long DocumentId { get; set; }
 
         [Required]
-        public long DepartmentId { get; set; }
-        public Department Department { get; set; } = null!;
-
-        [Required]
         public string UserId { get; set; } = string.Empty;
         public User User { get; set; } = null!;
 
@@ -25,7 +21,7 @@ namespace ArchiveProject.Domain.Entities
         public DocumentType? DocumentType { get; set; } = null!;
 
         /// <summary>
-        /// رقم الوثيقة ضمن القسم (توليد تلقائي لكل قسم)
+        /// رقم الوثيقة فريد على مستوى النظام (توليد تلقائي)
         /// </summary>
         [Required]
         public long DocumentNumber { get; set; }

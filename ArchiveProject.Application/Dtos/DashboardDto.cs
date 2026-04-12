@@ -19,15 +19,6 @@
         public string LastActivityAt { get; set; } = "";
     }
 
-    public class DepartmentStatsDto
-    {
-        public long DepartmentId { get; set; }
-        public string DepartmentName { get; set; } = "";
-        public long DocumentsCount { get; set; }
-    }
-
-
-
     public class DocumentGrowthPointDto
     {
         public string Period { get; set; } = ""; // yyyy-MM
@@ -64,7 +55,6 @@
 
         public List<RecentActivityDto> RecentActivities { get; set; } = new();
         public List<ActiveUserStatsDto> MostActiveUsers { get; set; } = new();
-        public List<DepartmentStatsDto> DepartmentsStats { get; set; } = new();
         public List<DocumentGrowthPointDto> DocumentGrowth { get; set; } = new();
         public StorageUsageDto StorageUsage { get; set; } = new();
         public List<TopDocumentTypeDto> TopDocumentTypes { get; set; } = new();

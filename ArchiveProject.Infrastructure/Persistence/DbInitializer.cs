@@ -49,7 +49,7 @@ namespace ArchiveProject.Infrastructure.Persistence
                 return role;
             }
 
-            async Task<User> EnsureUserAsync(string userName, string email, string password,string fullName, long? departmentId = null,IEnumerable<Role>? attachRoles = null)
+            async Task<User> EnsureUserAsync(string userName, string email, string password,string fullName,IEnumerable<Role>? attachRoles = null)
             {
                 var u = await userManager.Users.FirstOrDefaultAsync(x => x.UserName == userName);
                 if (u == null)
@@ -65,18 +65,11 @@ namespace ArchiveProject.Infrastructure.Persistence
                         IsActive = true,
                         CreationDate = DateTime.Now,
                         SecurityStamp = Guid.NewGuid().ToString(),
-                        FullName = fullName,
-                        DepartmentId = departmentId
+                        FullName = fullName
                     };
                     var res = await userManager.CreateAsync(u, password);
                     if (!res.Succeeded)
                         throw new Exception($"تعذر إنشاء المستخدم {userName}: " + string.Join(", ", res.Errors.Select(e => e.Description)));
-                }
-                else
-                {
-                    bool changed = false;
-                    if (u.DepartmentId != departmentId) { u.DepartmentId = departmentId; changed = true; }
-                    if (changed) await userManager.UpdateAsync(u);
                 }
 
                 if (attachRoles != null)
@@ -155,7 +148,7 @@ namespace ArchiveProject.Infrastructure.Persistence
             // ============================
             var roleSuperAdmin = await EnsureRoleAsync("SuperAdmin", "SUPERADMIN");
             var roleBranchManager = await EnsureRoleAsync("BranchManager", "BRANCHMANAGER");
-            var roleDepartmentUser = await EnsureRoleAsync("DepartmentUser", "DEPARTMENTUSER");
+            _ = await EnsureRoleAsync("DepartmentUser", "DEPARTMENTUSER");
 
             // ============================
             // 3) الصلاحيات
@@ -184,12 +177,6 @@ namespace ArchiveProject.Infrastructure.Persistence
             // 3.2) صلاحيات عامة: تُنشأ فقط
             var publicPermsOnly = new (string Name, string? Desc)[]
             {
-                // ========== Department CRUD ===============
-                ("Department.Read",   "قراءة بيانات الأقسام"),
-                ("Department.Create", "إنشاء أقسام جديدة"),
-                ("Department.Edit",   "تعديل بيانات الأقسام"),
-                ("Department.Delete", "حذف الأقسام"),
-
                 // ========== DocumentType CRUD =============
                 ("DocumentType.Read",   "قراءة أنواع الوثائق"),
                 ("DocumentType.Create", "إنشاء أنواع وثائق جديدة"),
@@ -219,7 +206,6 @@ namespace ArchiveProject.Infrastructure.Persistence
                 email: "superAdmin@gmail.com",
                 password: "Admin@123",
                 fullName: "Super Administrator",
-                departmentId: null,
                 attachRoles: new[] { roleSuperAdmin }
             );
 

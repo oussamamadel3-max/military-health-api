@@ -66,17 +66,6 @@ public class UserService : IUserService
         if (!actorIsSuperAdmin && !actorIsBranchManager)
             return Result<CreateUserDto>.Failure(new[] { "غير مسموح بإنشاء المستخدمين." }, null);
 
-        long? newDepartmentId = createdUser.DepartmentId;
-
-        if (newDepartmentId.HasValue)
-        {
-            var dept = await _context.Departments.AsNoTracking()
-                .FirstOrDefaultAsync(d => d.DepartmentId == newDepartmentId.Value && d.IsActive);
-            if (dept is null) return Result<CreateUserDto>.Failure(new[] { "القسم غير موجود أو غير فعّال." }, null);
-        }
-        else if (!actorIsSuperAdmin)
-            return Result<CreateUserDto>.Failure(new[] { "يجب تحديد قسم للمستخدم الجديد." }, null);
-
         using var tx = await _context.Database.BeginTransactionAsync();
         try
         {
@@ -87,8 +76,7 @@ public class UserService : IUserService
                 PhoneNumber = createdUser.phone,
                 IsActive = createdUser.isActive,
                 CreationDate = DateTime.Now,
-                FullName = createdUser.fullName,
-                DepartmentId = newDepartmentId
+                FullName = createdUser.fullName
             };
 
             var createRes = await _userManager.CreateAsync(user, createdUser.password);
@@ -124,7 +112,6 @@ public class UserService : IUserService
             await _context.SaveChangesAsync();
             await tx.CommitAsync();
 
-            createdUser.DepartmentId = newDepartmentId;
             return Result<CreateUserDto>.Success(createdUser);
         }
         catch
@@ -285,24 +272,6 @@ public class UserService : IUserService
             if (!setUserName.Succeeded) return Result<string>.Failure(setUserName.Errors.Select(e => e.Description), null);
         }
 
-        long? newDepartmentId = updatedUser.DepartmentId;
-
-        if (newDepartmentId.HasValue)
-        {
-            var dept = await _context.Departments.AsNoTracking()
-                .FirstOrDefaultAsync(d => d.DepartmentId == newDepartmentId.Value && d.IsActive);
-            if (dept == null) return Result<string>.Failure(new[] { "القسم المطلوب غير موجود أو غير فعّال." }, null);
-
-            user.DepartmentId = newDepartmentId;
-        }
-        else
-        {
-            if (!actorIsSuperAdmin)
-                return Result<string>.Failure(new[] { "يجب تحديد القسم (مسموح الإلغاء فقط لحسابات SuperAdmin)." }, null);
-
-            user.DepartmentId = null;
-        }
-
         bool invalidateTokens = false;
         if (updatedUser.IsActive.HasValue && updatedUser.IsActive.Value != user.IsActive)
         {
@@ -383,31 +352,12 @@ public class UserService : IUserService
         bool isSuperAdmin = roleNorms.Any(r => r == "SUPERADMIN");
         bool isBranchManger = roleNorms.Any(r => r == "BRANCHMANAGER");
 
-        var actor = await _context.Users.AsNoTracking()
-            .Where(u => u.Id == currentUserId)
-            .Select(u => new { u.DepartmentId })
-            .FirstOrDefaultAsync();
-
         IQueryable<User> baseQuery = _context.Users.AsNoTracking();
 
         // 🧭 تطبيق النطاق
-        if (!isSuperAdmin)
-        {
-            if (isBranchManger)
-            {
-                // يرى كل المستخدمين
-            }
-            else if (actor?.DepartmentId != null)
-            {
-                var depId = actor.DepartmentId.Value;
-                baseQuery = baseQuery.Where(u => u.DepartmentId == depId || u.Id == currentUserId);
-            }
-            else
-            {
-                // إن لم يكن له قسم/فرع، يَرى نفسه فقط
-                baseQuery = baseQuery.Where(u => u.Id == currentUserId);
-            }
-        }
+        if (!isSuperAdmin && !isBranchManger)
+            baseQuery = baseQuery.Where(u => false);
+
         baseQuery = baseQuery.Where(u => u.Id != currentUserId);
 
         // 🔎 بحث موحّد: الاسم (FullName إن وجد، وإلا UserName) أو الإيميل
@@ -439,8 +389,6 @@ public class UserService : IUserService
                 u.Email,
                 u.PhoneNumber,
                 u.IsActive,
-                u.DepartmentId,
-                DepartmentName = u.Department != null ? u.Department.DepartmentName : null,
                 u.CreationDate
             })
             .ToListAsync();
@@ -514,8 +462,6 @@ public class UserService : IUserService
                 email = u.Email ?? string.Empty,
                 phone = u.PhoneNumber,
                 isActive = u.IsActive,
-                DepartmentId = u.DepartmentId,
-                DepartmentName = u.DepartmentName,
                 createdAt = u.CreationDate,
                 rolesCount = userRoles.Count,
                 permissionsCount = permMap.Count,
@@ -545,8 +491,6 @@ public class UserService : IUserService
                 u.Email,
                 u.PhoneNumber,
                 u.IsActive,
-                u.DepartmentId,
-                DepartmentName = u.Department != null ? u.Department.DepartmentName : null,
                 u.CreationDate,
                 FullName = u.FullName
             })
@@ -555,11 +499,8 @@ public class UserService : IUserService
         if (user == null)
             return Result<UserListItemDto>.Failure(new[] { "المستخدم غير موجود" }, null);
 
-        if (!actorIsSuperAdmin && !actorIsBranchManager)
-        {
-            if (actor.Id != user.Id && (actor.DepartmentId is null || actor.DepartmentId != user.DepartmentId))
-                return Result<UserListItemDto>.Failure(new[] { "غير مسموح بالوصول." }, null);
-        }
+        if (!actorIsSuperAdmin && !actorIsBranchManager && actor.Id != user.Id)
+            return Result<UserListItemDto>.Failure(new[] { "غير مسموح بالوصول." }, null);
 
         var roles = await _context.UserRoleAssociations
             .AsNoTracking()
@@ -609,8 +550,6 @@ public class UserService : IUserService
             email = user.Email ?? string.Empty,
             phone = user.PhoneNumber,
             isActive = user.IsActive,
-            DepartmentId = user.DepartmentId,
-            DepartmentName = user.DepartmentName,
             createdAt = user.CreationDate,
             roles = roles,
             rolesCount = roles.Count,

@@ -10,9 +10,6 @@ public class User : IdentityUser
     public bool IsActive { get; set; } = true;
     public string? FullName { get; set; }
 
-    public long? DepartmentId { get; set; }
-    public Department? Department { get; set; }
-
     public IList<Document> Documents { get; set; } = new List<Document>();
 
     public IList<UserRoleAssociation> UserRoleAssociations { get; set; } = new List<UserRoleAssociation>();
