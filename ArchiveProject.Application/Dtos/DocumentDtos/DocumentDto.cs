@@ -11,9 +11,6 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
         [StringLength(200)]
         public string? UserId { get; set; }
 
-        [FieldPermission("DocumentTypeId", DisplayName = "نوع الوثيقة")]
-        public long? DocumentTypeId { get; set; }
-
         [FieldPermission("DocumentNumber", DisplayName = "رقم الوثيقة")]
         public long? DocumentNumber { get; set; }
 
@@ -54,9 +51,6 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
 
     public class CreateDocumentDto
     {
-        [FieldPermission("DocumentTypeId", Required = false, DisplayName = "نوع الوثيقة")]
-        public long? DocumentTypeId { get; set; }
-
         [Required(ErrorMessage = "العنوان مطلوب")]
         [StringLength(50, MinimumLength = 2)]
         [FieldPermission("Title", DisplayName = "العنوان")]
@@ -73,10 +67,6 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
 
     public class UpdateDocumentDto
     {
-        [FieldPermission("DocumentTypeId", DisplayName = "نوع الوثيقة")]
-        [Range(1, long.MaxValue, ErrorMessage = "نوع الوثيقة غير موجود")]
-        public long? DocumentTypeId { get; set; }
-
         [FieldPermission("Title", DisplayName = "العنوان")]
         [StringLength(50, MinimumLength = 2)]
         public string? Title { get; set; }
@@ -109,10 +99,6 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
         [FieldPermission("Description", Required = false, DisplayName = "الوصف")]
         public string? Description { get; set; }
 
-        [FieldPermission("DocumentTypeId", DisplayName = "نوع الوثيقة")]
-        [Range(1, long.MaxValue, ErrorMessage = "نوع الوثيقة غير موجود")]
-        public long? DocumentTypeId { get; set; }
-
         [FieldPermission("AttachmentIds", Required = false, DisplayName = "المرفقات")]
         [MaxLength(200)]
         public List<Guid> AttachmentIds { get; set; } = new();
@@ -120,8 +106,6 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
 
     public class DocumentSearchCriteria
     {
-        public long? DocumentTypeId { get; set; }
-
         [StringLength(20)]
         public string? SortBy { get; set; }
 

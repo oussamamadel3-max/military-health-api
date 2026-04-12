@@ -35,12 +35,6 @@
                 ["ReportsAuditLogs.Export"] = "تصدير تقرير السجل",
                 ["ReportsDashboard.Export"] = "تصدير تقرير لوحة التحكم",
 
-                // DocumentType CRUD
-                ["DocumentType.Read"] = "قراءة أنواع الوثائق",
-                ["DocumentType.Create"] = "إنشاء أنواع وثائق جديدة",
-                ["DocumentType.Edit"] = "تعديل أنواع الوثائق",
-                ["DocumentType.Delete"] = "حذف أنواع الوثائق",
-
                 // Document CRUD
                 ["Document.Read"] = "قراءة الوثائق",
                 ["Document.Create"] = "إنشاء وثائق جديدة",

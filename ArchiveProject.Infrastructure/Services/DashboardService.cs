@@ -268,52 +268,15 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
                 var attScoped = from a in _context.Attachments.AsNoTracking()
                                 join d in docsQ on a.OwnerId equals d.DocumentId
                                 where a.OwnerType == "Document"
-                                select new { a, d.DocumentTypeId };
+                                select a;
 
-                var totalBytes = await attScoped.SumAsync(x => (long?)x.a.FileSize) ?? 0;
-
-                var byType = await (from x in attScoped
-                                    join t in _context.DocumentTypes.AsNoTracking()
-                                        on x.DocumentTypeId equals t.DocumentTypeId
-                                    group new { x, t } by new { t.DocumentTypeId, t.DocumentTypeName } into g
-                                    select new StorageUsageByTypeDto
-                                    {
-                                        DocumentTypeId = g.Key.DocumentTypeId,
-                                        DocumentTypeName = g.Key.DocumentTypeName,
-                                        SizeBytes = g.Sum(y => (long?)y.x.a.FileSize) ?? 0,
-                                        DocumentsCount = g.Select(y => y.x.a.OwnerId).Distinct().LongCount()
-                                    })
-                    .OrderByDescending(x => x.SizeBytes)
-                    .ToListAsync();
-
-                foreach (var bt in byType)
-                    bt.SizeReadable = FormatBytes(bt.SizeBytes);
+                var totalBytes = await attScoped.SumAsync(a => (long?)a.FileSize) ?? 0;
 
                 var storage = new StorageUsageDto
                 {
                     TotalBytes = totalBytes,
                     TotalReadable = FormatBytes(totalBytes),
-                    ByType = byType
                 };
-
-                // ====== Top Document Types (ضمن docsQ => ضمن الفترة) ======
-                var topTypes = await (from d in docsQ
-                                      join t in _context.DocumentTypes.AsNoTracking()
-                                          on d.DocumentTypeId equals t.DocumentTypeId
-                                      group new { d, t } by new { t.DocumentTypeId, t.DocumentTypeName } into g
-                                      select new TopDocumentTypeDto
-                                      {
-                                          DocumentTypeId = g.Key.DocumentTypeId,
-                                          DocumentTypeName = g.Key.DocumentTypeName,
-                                          DocumentsCount = g.LongCount()
-                                      })
-                    .OrderByDescending(x => x.DocumentsCount)
-                    .Take(10)
-                    .ToListAsync();
-
-                var sizeByType = byType.ToDictionary(x => x.DocumentTypeId, x => (long?)x.SizeBytes);
-                foreach (var t in topTypes)
-                    t.TotalSizeBytes = sizeByType.TryGetValue(t.DocumentTypeId, out var sz) ? sz : 0;
 
                 var dto = new DashboardStatsDto
                 {
@@ -322,7 +285,6 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
                     MostActiveUsers = topUsers,
                     DocumentGrowth = growth,
                     StorageUsage = storage,
-                    TopDocumentTypes = topTypes
                 };
 
                 // إذا بدك تعرض periodText بالـ API ممكن تضيفه للـ DTO أو تحطه warnings… تركته كما هو.

@@ -1,7 +1,6 @@
 ﻿using ArchiveProject.Application.Dtos;
 using ArchiveProject.Application.Dtos.AuthDtos;
 using ArchiveProject.Application.Dtos.DocumentDtos;
-using ArchiveProject.Application.Dtos.DocumentTypeDtos;
 using ArchiveProject.Application.Dtos.ReportDtos;
 using ArchiveProject.Application.ModelsDto.AuditLogDtos;
 using ArchiveProject.Domain.Entities;
@@ -69,11 +68,6 @@ namespace ArchiveProject.Application.Mappings
 
 
             #region Additional mappings can be added here
-
-            //     DocumentType
-            CreateMap<DocumentType, DocumentTypeDto>();
-            CreateMap<CreateDocumentTypeDto, DocumentType>();
-            CreateMap<UpdateDocumentTypeDto, DocumentType>();
 
             //        Document
             CreateMap<Document, DocumentDto>();

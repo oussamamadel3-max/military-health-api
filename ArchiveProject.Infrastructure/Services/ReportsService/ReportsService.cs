@@ -61,7 +61,6 @@ namespace ArchiveProject.Infrastructure.Services.Reports
                 var q = ApplyScopeDocs(_context.Documents.AsNoTracking(), s);
 
                 // Filters
-                if (c.DocumentTypeId.HasValue) q = q.Where(d => d.DocumentTypeId == c.DocumentTypeId.Value);
                 if (!string.IsNullOrWhiteSpace(c.Title)) q = q.Where(d => d.Title.Contains(c.Title));
                 if (!string.IsNullOrWhiteSpace(c.Description)) q = q.Where(d => d.Description.Contains(c.Description));
                 if (c.CreatedFrom.HasValue)
@@ -79,18 +78,13 @@ namespace ArchiveProject.Infrastructure.Services.Reports
                 // Order newest first
                 q = q.OrderByDescending(d => d.CreatedAt).ThenByDescending(d => d.DocumentId);
 
-                // Projection (مع أسماء الفرع/القسم/النوع)
-                var rows = await (from d in q
-                                  join dt in _context.DocumentTypes.AsNoTracking() on d.DocumentTypeId equals dt.DocumentTypeId into dtt
-                                  from dt in dtt.DefaultIfEmpty()
-                                  select new DocumentReportRowDto
-                                  {
-                                      DocumentNumber = d.DocumentNumber,
-                                      Title = d.Title ?? "",
-                                      DocumentTypeName = dt != null ? dt.DocumentTypeName : "",
-                                      CreatedAt = d.CreatedAt,
-                                      CreatedBy = d.User.UserName ?? ""
-                                  }).ToListAsync();
+                var rows = await q.Select(d => new DocumentReportRowDto
+                {
+                    DocumentNumber = d.DocumentNumber,
+                    Title = d.Title ?? "",
+                    CreatedAt = d.CreatedAt,
+                    CreatedBy = d.User.UserName ?? ""
+                }).ToListAsync();
 
                 string? periodText = null;
                 if (c.CreatedFrom.HasValue || c.CreatedTo.HasValue)
@@ -112,7 +106,6 @@ namespace ArchiveProject.Infrastructure.Services.Reports
                     {
                         ["DocumentNumber"] = "رقم الوثيقة",
                         ["Title"] = "العنوان",
-                        ["DocumentTypeName"] = "نوع الوثيقة",
                         ["CreatedAt"] = "تاريخ الإنشاء",
                         ["CreatedBy"] = "أنشئ بواسطة",
                     }
@@ -283,32 +276,9 @@ namespace ArchiveProject.Infrastructure.Services.Reports
                     new() { Name = "عدد الوثائق", Value = dto.DocumentsCount.ToString() },
                     new() { Name = "إجمالي التخزين", Value = dto.StorageUsage?.TotalReadable ?? "0 B" },
 
-                    // فاصل/عنوان قسم
                     new() { Name = "", Value = "" },
-                    new() { Name = "أكثر أنواع الوثائق استخداماً", Value = "" },
+                    new() { Name = "أكثر المستخدمين نشاطًا", Value = "" },
                 };
-
-                // Top Document Types (مثلاً أعلى 5)
-                if (dto.TopDocumentTypes != null && dto.TopDocumentTypes.Count > 0)
-                {
-                    foreach (var t in dto.TopDocumentTypes.Take(5))
-                    {
-                        var size = t.TotalSizeBytes.HasValue ? $" | الحجم: {FormatBytes(t.TotalSizeBytes.Value)}" : "";
-                        rows.Add(new DashboardExportRow
-                        {
-                            Name = t.DocumentTypeName,
-                            Value = $"{t.DocumentsCount} وثيقة{size}"
-                        });
-                    }
-                }
-                else
-                {
-                    rows.Add(new DashboardExportRow { Name = "لا يوجد بيانات", Value = "" });
-                }
-
-                // فاصل/عنوان قسم
-                rows.Add(new DashboardExportRow { Name = "", Value = "" });
-                rows.Add(new DashboardExportRow { Name = "أكثر المستخدمين نشاطًا", Value = "" });
 
                 // Most Active Users (مثلاً أعلى 5)
                 if (dto.MostActiveUsers != null && dto.MostActiveUsers.Count > 0)
@@ -351,16 +321,6 @@ namespace ArchiveProject.Infrastructure.Services.Reports
             {
                 return Result<ExportFileDto>.Failure(new[] { $"خطأ بتصدير تقرير الداشبورد: {ex.Message}" });
             }
-        }
-
-        // إذا عندك FormatBytes موجودة بدashboard service تقدر تنسخها هون، أو تعملها private داخل ReportsService:
-        private static string FormatBytes(long bytes)
-        {
-            string[] units = { "B", "KB", "MB", "GB", "TB" };
-            double val = bytes;
-            int i = 0;
-            while (val >= 1024 && i < units.Length - 1) { val /= 1024; i++; }
-            return $"{val:0.##} {units[i]}";
         }
         #endregion
     }

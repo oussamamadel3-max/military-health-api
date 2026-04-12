@@ -63,21 +63,12 @@ namespace ArchiveProject.Infrastructure.Services
                 if (fpErrors.Any())
                     return Result<List<DocumentDto>>.Failure(fpErrors.ToArray());
 
-                // تحقق DocumentType
-                if (!dto.DocumentTypeId.HasValue)
-                    return Result<List<DocumentDto>>.Failure(new[] { "نوع الوثيقة مطلوب." });
-
-                var docType = await _context.DocumentTypes.FindAsync(dto.DocumentTypeId.Value);
-                if (docType == null)
-                    return Result<List<DocumentDto>>.Failure(new[] { "نوع الوثيقة غير موجود." });
-
                 var currentMax = await _context.Documents
                     .Select(d => (long?)d.DocumentNumber)
                     .MaxAsync() ?? 0;
 
                 var entity = new Document
                 {
-                    DocumentTypeId = dto.DocumentTypeId,
                     Title = dto.Title,
                     Description = dto.Description ?? string.Empty,
                     UserId = userId,
@@ -303,16 +294,8 @@ namespace ArchiveProject.Infrastructure.Services
                     dto, jwt, "Document", _fieldPerms, userId, roleIds);
                 if (errors.Any()) return Result<string>.Failure(errors.ToArray());
 
-                // === تحقق المرجعيات ===
-                long? targetTypeId = dto.DocumentTypeId ?? entity.DocumentTypeId;
-                if (!targetTypeId.HasValue) return Result<string>.Failure(new[] { "نوع الوثيقة مطلوب." });
-
-                var docType = await _context.DocumentTypes.FindAsync(targetTypeId.Value);
-                if (docType == null) return Result<string>.Failure(new[] { "نوع الوثيقة غير موجود." });
-
                 // === تطبيق التغييرات الأساسية ===
                 _mapper.Map(dto, entity);
-                entity.DocumentTypeId = targetTypeId;
                 entity.Description ??= string.Empty;
 
                 using var tx = await _context.Database.BeginTransactionAsync();
@@ -670,10 +653,6 @@ namespace ArchiveProject.Infrastructure.Services
 
                 if (!isSuperAdmin && !isBranchManager)
                     q = q.Where(d => d.UserId == userId);
-
-                // ===== Filters =====
-                if (c.DocumentTypeId.HasValue)
-                    q = q.Where(d => d.DocumentTypeId == c.DocumentTypeId.Value);
 
                 // ===== Search (Title/Description) =====
                 if (!string.IsNullOrWhiteSpace(c.Title))

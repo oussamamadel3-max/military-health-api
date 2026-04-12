@@ -464,9 +464,6 @@ namespace ArchiveProject.Infrastructure.Migrations
                     b.Property<long>("DocumentNumber")
                         .HasColumnType("bigint");
 
-                    b.Property<long>("DocumentTypeId")
-                        .HasColumnType("bigint");
-
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(250)
@@ -487,48 +484,9 @@ namespace ArchiveProject.Infrastructure.Migrations
                     b.HasIndex("DocumentNumber")
                         .IsUnique();
 
-                    b.HasIndex("DocumentTypeId");
-
                     b.HasIndex("UserId");
 
                     b.ToTable("Documents");
-                });
-
-            modelBuilder.Entity("ArchiveProject.Domain.Entities.DocumentType", b =>
-                {
-                    b.Property<long>("DocumentTypeId")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("DocumentTypeId"));
-
-                    b.Property<string>("AllowedExtensions")
-                        .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("character varying(512)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("text");
-
-                    b.Property<string>("DocumentTypeName")
-                        .IsRequired()
-                        .HasMaxLength(150)
-                        .HasColumnType("character varying(150)");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("text");
-
-                    b.HasKey("DocumentTypeId");
-
-                    b.HasIndex("DocumentTypeName");
-
-                    b.ToTable("DocumentTypes");
                 });
 
             modelBuilder.Entity("ArchiveProject.Domain.Entities.Auth.RoleFieldPermission", b =>
@@ -636,19 +594,11 @@ namespace ArchiveProject.Infrastructure.Migrations
 
             modelBuilder.Entity("ArchiveProject.Domain.Entities.Document", b =>
                 {
-                    b.HasOne("ArchiveProject.Domain.Entities.DocumentType", "DocumentType")
-                        .WithMany("Documents")
-                        .HasForeignKey("DocumentTypeId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
                     b.HasOne("ArchiveProject.Domain.Entities.Auth.User", "User")
                         .WithMany("Documents")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-
-                    b.Navigation("DocumentType");
 
                     b.Navigation("User");
                 });
@@ -685,11 +635,6 @@ namespace ArchiveProject.Infrastructure.Migrations
                     b.Navigation("UserPermissions");
 
                     b.Navigation("UserRoleAssociations");
-                });
-
-            modelBuilder.Entity("ArchiveProject.Domain.Entities.DocumentType", b =>
-                {
-                    b.Navigation("Documents");
                 });
 #pragma warning restore 612, 618
         }

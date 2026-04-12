@@ -40,7 +40,6 @@ namespace ArchiveProject.Infrastructure.Data
         #endregion
 
 
-        public DbSet<DocumentType> DocumentTypes { get; set; }
         public DbSet<Document> Documents { get; set; }
         public DbSet<Attachment> Attachments { get; set; }
 
@@ -184,18 +183,6 @@ namespace ArchiveProject.Infrastructure.Data
 
             #region === Core Domain Entities ===  (ArchiveProject)
 
-            // ===== DocumentType =====
-            modelBuilder.Entity<DocumentType>(entity =>
-            {
-                entity.HasKey(t => t.DocumentTypeId);
-
-                entity.Property(t => t.DocumentTypeName).IsRequired().HasMaxLength(150);
-
-                entity.Property(t => t.AllowedExtensions).HasMaxLength(512);
-
-                entity.HasIndex(t => t.DocumentTypeName);
-            });
-
             // ===== Document =====
             modelBuilder.Entity<Document>(entity =>
             {
@@ -208,16 +195,10 @@ namespace ArchiveProject.Infrastructure.Data
                 entity.HasIndex(d => d.DocumentNumber).IsUnique();
 
                 entity.HasIndex(d => d.UserId);
-                entity.HasIndex(d => d.DocumentTypeId);
 
                 entity.HasOne(d => d.User)
                       .WithMany(u => u.Documents)
                       .HasForeignKey(d => d.UserId)
-                      .OnDelete(DeleteBehavior.Restrict);
-
-                entity.HasOne(d => d.DocumentType)
-                      .WithMany(t => t.Documents)
-                      .HasForeignKey(d => d.DocumentTypeId)
                       .OnDelete(DeleteBehavior.Restrict);
             });
 

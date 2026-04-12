@@ -25,28 +25,10 @@
         public long Count { get; set; }
     }
 
-    public class StorageUsageByTypeDto
-    {
-        public long DocumentTypeId { get; set; }
-        public string DocumentTypeName { get; set; } = "";
-        public long SizeBytes { get; set; }
-        public string? SizeReadable { get; set; }
-        public long? DocumentsCount { get; set; }
-    }
-
     public class StorageUsageDto
     {
         public long TotalBytes { get; set; }
         public string? TotalReadable { get; set; }
-        public List<StorageUsageByTypeDto>? ByType { get; set; }
-    }
-
-    public class TopDocumentTypeDto
-    {
-        public long DocumentTypeId { get; set; }
-        public string DocumentTypeName { get; set; } = "";
-        public long DocumentsCount { get; set; }
-        public long? TotalSizeBytes { get; set; }
     }
 
     public class DashboardStatsDto
@@ -57,7 +39,6 @@
         public List<ActiveUserStatsDto> MostActiveUsers { get; set; } = new();
         public List<DocumentGrowthPointDto> DocumentGrowth { get; set; } = new();
         public StorageUsageDto StorageUsage { get; set; } = new();
-        public List<TopDocumentTypeDto> TopDocumentTypes { get; set; } = new();
     }
 
     public class DashboardExportRow

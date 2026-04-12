@@ -43,7 +43,6 @@ namespace ArchiveProject.Infrastructure
 
             #region === يمكنك إضافة خدمات المشروع الأخرى هنا ===
             services.AddScoped<IDocumentService, DocumentService>();
-            services.AddScoped<IDocumentTypeService, DocumentTypeService>();
 
 
             services.AddScoped<IAttachmentService, AttachmentService>();

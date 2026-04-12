@@ -177,12 +177,6 @@ namespace ArchiveProject.Infrastructure.Persistence
             // 3.2) صلاحيات عامة: تُنشأ فقط
             var publicPermsOnly = new (string Name, string? Desc)[]
             {
-                // ========== DocumentType CRUD =============
-                ("DocumentType.Read",   "قراءة أنواع الوثائق"),
-                ("DocumentType.Create", "إنشاء أنواع وثائق جديدة"),
-                ("DocumentType.Edit",   "تعديل أنواع الوثائق"),
-                ("DocumentType.Delete", "حذف أنواع الوثائق"),
-
                 // ========== Document CRUD =================
                 ("Document.Read",   "قراءة الوثائق"),
                 ("Document.Create", "إنشاء وثائق جديدة"),

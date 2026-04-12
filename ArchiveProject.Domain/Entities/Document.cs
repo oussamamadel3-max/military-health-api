@@ -16,10 +16,6 @@ namespace ArchiveProject.Domain.Entities
         public string UserId { get; set; } = string.Empty;
         public User User { get; set; } = null!;
 
-        [Required]
-        public long? DocumentTypeId { get; set; }
-        public DocumentType? DocumentType { get; set; } = null!;
-
         /// <summary>
         /// رقم الوثيقة فريد على مستوى النظام (توليد تلقائي)
         /// </summary>
