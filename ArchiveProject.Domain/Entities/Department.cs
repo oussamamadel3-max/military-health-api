@@ -3,8 +3,6 @@ using ArchiveProject.Domain.Common;
 using ArchiveProject.Domain.Entities.Auth;
 using ArchiveProject.Domain.Interfaces;
 using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
-
 namespace ArchiveProject.Domain.Entities
 {
     [FieldPermissionEntity(DisplayName = "القسم")]
@@ -20,10 +18,6 @@ namespace ArchiveProject.Domain.Entities
         [Required, MaxLength(50)]
         public string Code { get; set; } = string.Empty;
         public bool IsActive { get; set; }
-
-        public long BranchId { get; set; }
-        [ForeignKey(nameof(BranchId))]
-        public Branch Branch { get; set; } = null!;
 
         public IList<User> Users { get; set; } = new List<User>();
 

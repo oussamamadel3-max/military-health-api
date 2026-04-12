@@ -28,7 +28,7 @@ namespace ArchiveProject.Infrastructure.Services.Reports
             _dashboard = dashboard;
         }
 
-        private sealed record Scope(bool IsSuper, bool IsBranchMgr, long? BranchId, long? DepartmentId, string UserId);
+        private sealed record Scope(bool IsSuper, bool IsBranchMgr, long? DepartmentId, string UserId);
 
         private async Task<Scope> GetScopeAsync()
         {
@@ -44,27 +44,20 @@ namespace ArchiveProject.Infrastructure.Services.Reports
 
             var actor = await _context.Users.AsNoTracking()
                 .Where(u => u.Id == userId)
-                .Select(u => new { u.BranchId, u.DepartmentId })
+                .Select(u => new { u.DepartmentId })
                 .FirstOrDefaultAsync();
 
-            return new Scope(isSuper, isMgr, actor?.BranchId, actor?.DepartmentId, userId);
+            return new Scope(isSuper, isMgr, actor?.DepartmentId, userId);
         }
 
         private IQueryable<Domain.Entities.Document> ApplyScopeDocs(IQueryable<Domain.Entities.Document> q, Scope s)
         {
-            if (s.IsSuper) return q;
-
-            var joined = from d in q
-                         join dep in _context.Departments.AsNoTracking() on d.DepartmentId equals dep.DepartmentId
-                         select new { d, dep.BranchId };
-
-            if (s.IsBranchMgr && s.BranchId.HasValue)
-                return joined.Where(x => x.BranchId == s.BranchId.Value).Select(x => x.d);
+            if (s.IsSuper || s.IsBranchMgr) return q;
 
             if (s.DepartmentId.HasValue)
-                return joined.Where(x => x.d.DepartmentId == s.DepartmentId.Value).Select(x => x.d);
+                return q.Where(d => d.DepartmentId == s.DepartmentId.Value);
 
-            return joined.Where(x => x.d.UserId == s.UserId).Select(x => x.d);
+            return q.Where(d => d.UserId == s.UserId);
         }
 
         #region Export Documents
@@ -100,14 +93,12 @@ namespace ArchiveProject.Infrastructure.Services.Reports
                 // Projection (مع أسماء الفرع/القسم/النوع)
                 var rows = await (from d in q
                                   join dep in _context.Departments.AsNoTracking() on d.DepartmentId equals dep.DepartmentId
-                                  join br in _context.Branchs.AsNoTracking() on dep.BranchId equals br.BranchId
                                   join dt in _context.DocumentTypes.AsNoTracking() on d.DocumentTypeId equals dt.DocumentTypeId into dtt
                                   from dt in dtt.DefaultIfEmpty()
                                   select new DocumentReportRowDto
                                   {
                                       DocumentNumber = d.DocumentNumber,
                                       Title = d.Title ?? "",
-                                      BranchName = br.BranchName ?? "",
                                       DepartmentName = dep.DepartmentName ?? "",
                                       DocumentTypeName = dt != null ? dt.DocumentTypeName : "",
                                       CreatedAt = d.CreatedAt,
@@ -116,10 +107,6 @@ namespace ArchiveProject.Infrastructure.Services.Reports
 
                 var deptName = c.DepartmentId.HasValue
                     ? await _context.Departments.Where(x => x.DepartmentId == c.DepartmentId.Value).Select(x => x.DepartmentName).FirstOrDefaultAsync()
-                    : null;
-
-                var branchName = (s.IsBranchMgr && s.BranchId.HasValue)
-                    ? await _context.Branchs.Where(x => x.BranchId == s.BranchId.Value).Select(x => x.BranchName).FirstOrDefaultAsync()
                     : null;
 
                 string? periodText = null;
@@ -135,7 +122,6 @@ namespace ArchiveProject.Infrastructure.Services.Reports
                     ReportName = "Documents_Report",
                     SheetName = "Documents",
                     CustomTitle = "تقرير الوثائق",
-                    BranchName = branchName,
                     DepartmentName = deptName,
                     PeriodText = periodText,
                     IncludeLogo = true,   // ✅ أضفها
@@ -144,7 +130,6 @@ namespace ArchiveProject.Infrastructure.Services.Reports
                     {
                         ["DocumentNumber"] = "رقم الوثيقة",
                         ["Title"] = "العنوان",
-                        ["BranchName"] = "الفرع",
                         ["DepartmentName"] = "القسم",
                         ["DocumentTypeName"] = "نوع الوثيقة",
                         ["CreatedAt"] = "تاريخ الإنشاء",
@@ -177,16 +162,14 @@ namespace ArchiveProject.Infrastructure.Services.Reports
                 var q = _context.AuditLogs.AsNoTracking().AsQueryable();
 
                 // ====== Apply Scope ======
-                if (!s.IsSuper)
+                if (!s.IsSuper && !s.IsBranchMgr)
                 {
                     var joined = from a in q
                                  join u in _context.Users.AsNoTracking() on a.UserId equals u.Id into uu
                                  from u in uu.DefaultIfEmpty()
                                  select new { a, u };
 
-                    if (s.IsBranchMgr && s.BranchId.HasValue)
-                        q = joined.Where(x => x.u != null && x.u.BranchId == s.BranchId.Value).Select(x => x.a);
-                    else if (s.DepartmentId.HasValue)
+                    if (s.DepartmentId.HasValue)
                         q = joined.Where(x => x.u != null && x.u.DepartmentId == s.DepartmentId.Value).Select(x => x.a);
                     else
                         q = joined.Where(x => x.a.UserId == s.UserId).Select(x => x.a);

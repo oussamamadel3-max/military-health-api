@@ -35,12 +35,6 @@
                 ["ReportsAuditLogs.Export"] = "تصدير تقرير السجل",
                 ["ReportsDashboard.Export"] = "تصدير تقرير لوحة التحكم",
 
-                // Branch CRUD
-                ["Branch.Read"] = "قراءة بيانات الفروع",
-                ["Branch.Create"] = "إنشاء فروع جديدة",
-                ["Branch.Edit"] = "تعديل بيانات الفروع",
-                ["Branch.Delete"] = "حذف الفروع",
-
                 // Department CRUD
                 ["Department.Read"] = "قراءة بيانات الأقسام",
                 ["Department.Create"] = "إنشاء أقسام جديدة",

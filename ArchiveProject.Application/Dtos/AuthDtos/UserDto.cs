@@ -29,7 +29,6 @@ public class UpdateUserDto
     [EmailAddress]
     [StringLength(254)]
     public string? Email { get; set; }
-    public long? BranchId { get; set; }
     public long? DepartmentId { get; set; }
     public bool? IsActive { get; set; }
 }
@@ -52,7 +51,6 @@ public class UpdateUserPatchRequest
     [StringLength(20)]
     [RegularExpression(@"^[0-9+ -]*$", ErrorMessage = "رقم الهاتف غير صالح")]
     public string? phone { get; set; }
-    public long? BranchId { get; set; }
     public long? DepartmentId { get; set; }
     public bool? isActive { get; set; }
     public List<RoleLiteDto>? roles { get; set; }
@@ -87,7 +85,6 @@ public class CreateUserDto
     [StringLength(128, MinimumLength = 8)]
     public string password { get; set; } = "";
     public bool isActive { get; set; } = true;
-    public long? BranchId { get; set; }
     public long? DepartmentId { get; set; }
     public List<string> roles { get; set; } = new();
 }
@@ -103,8 +100,6 @@ public class UserListItemDto
     public string email { get; set; } = string.Empty;
     public string? phone { get; set; }
     public bool isActive { get; set; }
-    public long? BranchId { get; set; }
-    public string? BranchName { get; set; }
     public long? DepartmentId { get; set; }
     public string? DepartmentName { get; set; }
     public DateTime createdAt { get; set; }

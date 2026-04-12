@@ -10,14 +10,8 @@ public class User : IdentityUser
     public bool IsActive { get; set; } = true;
     public string? FullName { get; set; }
 
-    // 🔥 اجعل DepartmentId اختياري
     public long? DepartmentId { get; set; }
     public Department? Department { get; set; }
-
-    // 🔥 اجعل BranchId اختياري لمستخدمي الفروع
-    public long? BranchId { get; set; }
-    public Branch? Branch { get; set; }
-
 
     public IList<Document> Documents { get; set; } = new List<Document>();
 
@@ -27,8 +21,4 @@ public class User : IdentityUser
     /// صلاحيات الحقول الخاصة بالمستخدم (جدول ربط مع FieldPermission)
     /// </summary>
     public IList<UserFieldPermission> UserFieldPermissions { get; set; } = new List<UserFieldPermission>();
-
-
-
 }
-

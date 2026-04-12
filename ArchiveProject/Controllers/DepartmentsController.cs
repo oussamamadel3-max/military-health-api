@@ -70,10 +70,9 @@ namespace ArchiveProject.API.Controllers
         public async Task<Result<PaginatedList<DepartmentDto>>> GetAll(
             [FromQuery] int pageNumber = 1,
             [FromQuery] int pageSize = 10,
-            [FromQuery] long? branchId = null,
             [FromQuery] string? name = null,
             [FromQuery] bool? isActive = null)
-            => Pipe(await _service.GetDepartmentsAsync(pageNumber, pageSize,branchId, name, isActive));
+            => Pipe(await _service.GetDepartmentsAsync(pageNumber, pageSize, name, isActive));
 
 
         //// POST: api/Departments/search?pageNumber=1&pageSize=10

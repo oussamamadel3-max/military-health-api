@@ -19,13 +19,6 @@
         public string LastActivityAt { get; set; } = "";
     }
 
-    public class BranchStatsDto
-    {
-        public long BranchId { get; set; }      // سنضع DepartmentId هنا حسب الواجهة الأمامية
-        public string BranchName { get; set; } = "";
-        public long DocumentsCount { get; set; }
-    }
-
     public class DepartmentStatsDto
     {
         public long DepartmentId { get; set; }
@@ -71,7 +64,6 @@
 
         public List<RecentActivityDto> RecentActivities { get; set; } = new();
         public List<ActiveUserStatsDto> MostActiveUsers { get; set; } = new();
-        public List<BranchStatsDto> BranchesStats { get; set; } = new();
         public List<DepartmentStatsDto> DepartmentsStats { get; set; } = new();
         public List<DocumentGrowthPointDto> DocumentGrowth { get; set; } = new();
         public StorageUsageDto StorageUsage { get; set; } = new();

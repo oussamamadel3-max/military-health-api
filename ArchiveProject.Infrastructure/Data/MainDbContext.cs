@@ -1,4 +1,4 @@
-﻿using FinanceProject.Infrastructure.Persistence;
+using FinanceProject.Infrastructure.Persistence;
 using ArchiveProject.Application.Common.Interfaces.AuthInterfaces;
 using ArchiveProject.Application.Dtos.AuthDtos;
 using ArchiveProject.Domain.Entities;
@@ -41,7 +41,6 @@ namespace ArchiveProject.Infrastructure.Data
 
 
         // For Testing Purposes
-        public DbSet<Branch> Branchs { get; set; }
         public DbSet<Department> Departments { get; set; }
         public DbSet<DocumentType> DocumentTypes { get; set; }
         public DbSet<Document> Documents { get; set; }
@@ -52,9 +51,7 @@ namespace ArchiveProject.Infrastructure.Data
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
 
-            // 💡 الحل: إجبار Npgsql على استخدام UTC لجميع التواريخ
             AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
-            // 💡 الحل: فرض نوع عمود "Timestamp" في كيان AuditLog ليتوافق مع PostgreSQL
             modelBuilder.Entity<AuditLog>()
                 .Property(a => a.Timestamp)
                 .HasColumnType("timestamp with time zone");
@@ -100,7 +97,7 @@ namespace ArchiveProject.Infrastructure.Data
             {
                 entity.HasKey(p => p.Id);
                 entity.Property(p => p.Name).IsRequired().HasMaxLength(200);
-                entity.HasIndex(p => p.Name).IsUnique(); // اسم الصلاحية فريد
+                entity.HasIndex(p => p.Name).IsUnique();
             });
 
             // ===== Role =====
@@ -114,28 +111,19 @@ namespace ArchiveProject.Infrastructure.Data
             // ===== User =====
             modelBuilder.Entity<User>(entity =>
             {
-                // IdentityUser.Id هو string
                 entity.HasMany(u => u.UserPermissions)
                       .WithOne(up => up.User)
                       .HasForeignKey(up => up.UserId);
 
                 entity.Property(u => u.FullName).HasMaxLength(250);
 
-                // 🔵 Department (اختياري) — موظف قسم
+                // Department (optional)
                 entity.HasOne(u => u.Department)
                       .WithMany(d => d.Users)
                       .HasForeignKey(u => u.DepartmentId)
                       .OnDelete(DeleteBehavior.Restrict);
 
                 entity.HasIndex(u => u.DepartmentId);
-
-                // 🔵 Branch (اختياري) — مستخدم على مستوى الفرع (مثل مدير الفرع)
-                entity.HasOne(u => u.Branch)
-                      .WithMany(b => b.Users)            
-                      .HasForeignKey(u => u.BranchId)
-                      .OnDelete(DeleteBehavior.Restrict);
-
-                entity.HasIndex(u => u.BranchId);
             });
 
             // ===== UserRoleAssociation =====
@@ -195,7 +183,7 @@ namespace ArchiveProject.Infrastructure.Data
                 entity.Property(e => e.ExpiryDate).IsRequired();
                 entity.Property(e => e.IsRevoked).HasDefaultValue(false);
 
-                entity.HasOne<User>() // علاقة اختيارية حسب تصميمك
+                entity.HasOne<User>()
                       .WithMany()
                       .HasForeignKey(e => e.UserId)
                       .OnDelete(DeleteBehavior.Cascade);
@@ -206,24 +194,6 @@ namespace ArchiveProject.Infrastructure.Data
 
             #region === Core Domain Entities ===  (ArchiveProject)
 
-            // ===== Branch =====
-            modelBuilder.Entity<Branch>(entity =>
-            {
-                entity.HasKey(b => b.BranchId);
-                entity.Property(b => b.Code).IsRequired().HasMaxLength(50);
-                entity.Property(b => b.BranchName).IsRequired().HasMaxLength(250);
-
-                // ✅ مفقود عندك
-                entity.Property(b => b.Description).HasMaxLength(1000);
-
-                entity.HasIndex(b => b.Code).IsUnique();
-
-                entity.HasMany(b => b.Users)
-                      .WithOne(u => u.Branch)
-                      .HasForeignKey(u => u.BranchId)
-                      .OnDelete(DeleteBehavior.Restrict);
-            });
-
             // ===== Department =====
             modelBuilder.Entity<Department>(entity =>
             {
@@ -231,23 +201,14 @@ namespace ArchiveProject.Infrastructure.Data
                 entity.Property(d => d.DepartmentName).IsRequired().HasMaxLength(250);
                 entity.Property(d => d.Code).HasMaxLength(50);
 
-                // ✅ مفقود عندك
                 entity.Property(d => d.Description).HasMaxLength(1000);
-
-                entity.HasIndex(d => d.BranchId);
-
-                entity.HasOne(d => d.Branch)
-                      .WithMany(b => b.Departments)
-                      .HasForeignKey(d => d.BranchId)
-                      .OnDelete(DeleteBehavior.Restrict);
 
                 entity.HasMany(d => d.Users)
                       .WithOne(u => u.Department)
                       .HasForeignKey(u => u.DepartmentId)
                       .OnDelete(DeleteBehavior.Restrict);
 
-                entity.HasIndex(d => new { d.BranchId, d.Code })
-                      .IsUnique();
+                entity.HasIndex(d => d.Code);
             });
 
             // ===== DocumentType =====
@@ -255,10 +216,8 @@ namespace ArchiveProject.Infrastructure.Data
             {
                 entity.HasKey(t => t.DocumentTypeId);
 
-                // ✅ خليها نفس DTO (أنا بنصح تبقى 250 متل عندك)
                 entity.Property(t => t.DocumentTypeName).IsRequired().HasMaxLength(150);
 
-                // ✅ خلي DTO ما يتجاوز 512
                 entity.Property(t => t.AllowedExtensions).HasMaxLength(512);
 
                 entity.HasIndex(t => t.DocumentTypeName);
@@ -271,12 +230,7 @@ namespace ArchiveProject.Infrastructure.Data
 
                 entity.Property(d => d.Title).IsRequired().HasMaxLength(250);
 
-                // ✅ مفقود عندك (DTO عندك Description)
                 entity.Property(d => d.Description).HasMaxLength(2000);
-
-                // ✅ (اختياري بس مفيد) أعمدة التدقيق إذا موجودة بالـ Entity
-                // entity.Property(d => d.CreatedBy).HasMaxLength(100);
-                // entity.Property(d => d.UpdatedBy).HasMaxLength(100);
 
                 entity.HasIndex(d => new { d.DepartmentId, d.DocumentNumber }).IsUnique();
 
@@ -335,14 +289,12 @@ namespace ArchiveProject.Infrastructure.Data
 
 
 
-            // === (اختياري) استدعاء Seed
             // SeedData.Seed(modelBuilder);
         }
 
 
         #region === Configuring AuditInterceptor And AuditLogging ===
 
-        // تكوين DbContext لاستخدام AuditInterceptor
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
             optionsBuilder.AddInterceptors(_auditInterceptor);
@@ -351,7 +303,6 @@ namespace ArchiveProject.Infrastructure.Data
 
         public override int SaveChanges()
         {
-            // لو عندك Audit متزامن، فعّله هنا (اختياري)
             // WriteAuditLogsSync();
             return base.SaveChanges();
         }
@@ -366,24 +317,19 @@ namespace ArchiveProject.Infrastructure.Data
                 IPAddress = _currentUser.IPAddress
             };
 
-            // 1) التقاط المُضافين قبل الحفظ لاستخراج الـID بعد الحفظ
             var entriesForPostSaveAudit = ChangeTracker.Entries()
                 .Where(e => e.Entity is IAuditableEntity && e.State == EntityState.Added)
                 .ToList();
 
-            // 2) المرحلة الأولى: تعديل/حذف (المفاتيح معروفة قبل الحفظ)
             AuditLogger.LogChanges(ChangeTracker, auditLogsToSave, currentUserDto, EntityState.Modified, EntityState.Deleted);
 
-            // 3) الحفظ الأولي لتوليد المفاتيح
             var result = await base.SaveChangesAsync(cancellationToken);
 
-            // 4) المرحلة الثانية: تسجيل المُضافين الآن بعد توفّر المفاتيح
             if (entriesForPostSaveAudit.Any())
             {
                 AuditLogger.LogEntriesList(entriesForPostSaveAudit, auditLogsToSave, currentUserDto, EntityState.Added);
             }
 
-            // 5) حفظ سجلات التدقيق (Fire-and-Forget)
             if (auditLogsToSave.Any())
             {
                 _ = Task.Run(() => SaveAuditLogsInBackground(auditLogsToSave));
@@ -392,8 +338,6 @@ namespace ArchiveProject.Infrastructure.Data
             return result;
         }
 
-        // دالة مساعدة لحفظ سجلات التدقيق في الخلفية.
-        // ملاحظة: غيّر MainDbContext إلى اسم DbContext الحقيقي لديك إن لزم.
         private async Task SaveAuditLogsInBackground(List<AuditLog> auditLogs)
         {
             using (var scope = _scopeFactory.CreateScope())
@@ -405,8 +349,6 @@ namespace ArchiveProject.Infrastructure.Data
         }
 
         #endregion
-
-
     }
 }
 

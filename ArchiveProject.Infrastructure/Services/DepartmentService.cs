@@ -54,80 +54,45 @@ namespace ArchiveProject.Infrastructure.Services
                 if (actor is null)
                     return Result<DepartmentDto>.Failure(new[] { "المستخدم الحالي غير موجود." });
 
-                // 1) تحديد الدور (مسموح فقط: SuperAdmin أو BranchManager)
+                // 1) تحديد الدور — SuperAdmin فقط
                 var actorRoles = await _context.UserRoleAssociations
                     .Where(ura => ura.UserId == userId)
                     .Join(_context.Roles, ura => ura.RoleId, r => r.Id, (ura, r) => r.NormalizedName)
                     .ToListAsync();
 
                 var isSuperAdmin = actorRoles.Any(n => n == "SUPERADMIN");
-                var isBranchManager = actorRoles.Any(n => n == "BRANCHMANAGER");
 
-                if (!isSuperAdmin && !isBranchManager)
+                if (!isSuperAdmin)
                     return Result<DepartmentDto>.Failure(new[] { "غير مسموح بإنشاء الأقسام." });
 
-                // 2) تحديد الفرع الفعّال
-                long effectiveBranchId;
-
-                if (isSuperAdmin)
-                {
-                    if (!dto.BranchId.HasValue || dto.BranchId.Value <= 0)
-                        return Result<DepartmentDto>.Failure(new[] { "يجب تحديد الفرع عند إنشاء قسم (Admin)." });
-
-                    var branchExists = await _context.Branchs
-                        .AsNoTracking()
-                        .AnyAsync(b => b.BranchId == dto.BranchId.Value);
-
-                    if (!branchExists)
-                        return Result<DepartmentDto>.Failure(new[] { "الفرع غير موجود." });
-
-                    effectiveBranchId = dto.BranchId.Value;
-                }
-                else
-                {
-                    // BranchManager: الفرع من حسابه فقط
-                    if (!actor.BranchId.HasValue)
-                        return Result<DepartmentDto>.Failure(new[] { "لا يمكن تحديد فرع مدير الفرع." });
-
-                    // إذا بدك تمنع مدير الفرع يكون تابع لقسم:
-                    if (actor.DepartmentId.HasValue)
-                        return Result<DepartmentDto>.Failure(new[] { "حساب مدير الفرع يجب ألا يكون مرتبطًا بقسم." });
-
-                    effectiveBranchId = actor.BranchId.Value;
-
-                    // تجاهل أي قيمة مرسلة من العميل
-                    dto.BranchId = effectiveBranchId;
-                }
-
-                // 3) صلاحيات الحقول
+                // 2) صلاحيات الحقول
                 var errors = await PermissionHelperUtilities.ValidateFieldPermissionsFromJwtAsync(
                     dto, jwtFieldPermissions, "Department", _fieldPermissionHelper, userId, roleIds);
 
                 if (errors.Any())
                     return Result<DepartmentDto>.Failure(errors.ToArray());
 
-                // 4) فريدية Code ضمن الفرع
+                // 3) فريدية رمز القسم
                 var code = (dto.Code ?? string.Empty).Trim();
 
                 if (!string.IsNullOrWhiteSpace(code))
                 {
                     var duplicate = await _context.Departments
                         .AsNoTracking()
-                        .AnyAsync(d => d.BranchId == effectiveBranchId && d.Code == code);
+                        .AnyAsync(d => d.Code == code);
 
                     if (duplicate)
-                        return Result<DepartmentDto>.Failure(new[] { "رمز القسم مستخدم ضمن هذا الفرع." });
+                        return Result<DepartmentDto>.Failure(new[] { "رمز القسم مستخدم مسبقاً." });
                 }
 
-                // 5) إنشاء
+                // 4) إنشاء
                 var entity = _mapper.Map<Department>(dto);
-                entity.BranchId = effectiveBranchId;
                 entity.Description ??= string.Empty;
 
                 _context.Departments.Add(entity);
                 await _context.SaveChangesAsync();
 
-                // 6) إخراج + صلاحيات الحقول
+                // 5) إخراج + صلاحيات الحقول
                 var outDto = _mapper.Map<DepartmentDto>(entity);
                 outDto = await _fieldPermissionHelper.ApplyFieldPermissionsAsync(
                     outDto, userId, roleIds, "Department", jwtFieldPermissions);
@@ -143,7 +108,6 @@ namespace ArchiveProject.Infrastructure.Services
         #endregion
 
         #region Update department
-        #region Update department
         public async Task<Result<string>> UpdateAsync(long departmentId, UpdateDepartmentDto dto)
         {
             try
@@ -152,92 +116,37 @@ namespace ArchiveProject.Infrastructure.Services
                 var roleIds = CurrentRoleIds;
                 var jwtFieldPermissions = JwtFieldPerms;
 
-                // 0) القسم الحالي
                 var entity = await _context.Departments.FindAsync(departmentId);
                 if (entity == null)
                     return Result<string>.Failure(new[] { "القسم غير موجود." });
 
-                // 1) المستخدم المنفّذ
-                var actor = await _context.Users
-                    .AsNoTracking()
-                    .OfType<User>()
-                    .FirstOrDefaultAsync(u => u.Id == userId);
-
-                if (actor is null)
-                    return Result<string>.Failure(new[] { "المستخدم الحالي غير موجود." });
-
-                // 2) أدوار المنفّذ (فقط SuperAdmin أو BranchManager)
                 var actorRoles = await _context.UserRoleAssociations
                     .Where(ura => ura.UserId == userId)
                     .Join(_context.Roles, ura => ura.RoleId, r => r.Id, (ura, r) => r.NormalizedName)
                     .ToListAsync();
 
                 var isSuperAdmin = actorRoles.Any(n => n == "SUPERADMIN");
-                var isBranchManager = actorRoles.Any(n => n == "BRANCHMANAGER");
-
-                if (!isSuperAdmin && !isBranchManager)
+                if (!isSuperAdmin)
                     return Result<string>.Failure(new[] { "غير مسموح بتعديل الأقسام." });
 
-                // 3) BranchManager: فقط ضمن فرعو + ممنوع يغيّر BranchId
-                if (!isSuperAdmin)
-                {
-                    // تأكيد أنه فعلاً مدير فرع (حسب منطقك: BranchId موجود و DepartmentId = null)
-                    if (!actor.BranchId.HasValue || actor.DepartmentId.HasValue)
-                        return Result<string>.Failure(new[] { "غير مسموح بتعديل الأقسام إلا لمدير الفرع أو SuperAdmin." });
-
-                    // القسم الهدف لازم يكون ضمن فرع المدير
-                    if (entity.BranchId != actor.BranchId.Value)
-                        return Result<string>.Failure(new[] { "لا يمكنك تعديل قسم خارج فرعك." });
-
-                    // ممنوع تغيير الفرع من العميل
-                    if (dto.BranchId.HasValue && dto.BranchId.Value != entity.BranchId)
-                        return Result<string>.Failure(new[] { "غير مسموح لمدير الفرع بتغيير فرع القسم." });
-
-                    // أو إذا بتحب تتجاهل بدل الرفض:
-                    dto.BranchId = null;
-                }
-
-                // 4) صلاحيات الحقول (بعد تثبيت/تقييد BranchId)
                 var errors = await PermissionHelperUtilities.ValidateFieldPermissionsFromJwtAsync(
                     dto, jwtFieldPermissions, "Department", _fieldPermissionHelper, userId, roleIds);
 
                 if (errors.Any())
                     return Result<string>.Failure(errors.ToArray());
 
-                // 5) حساب القيم الهدف (BranchId للـ SuperAdmin فقط يمكن تغييره)
-                var targetBranchId = isSuperAdmin
-                    ? (dto.BranchId ?? entity.BranchId)
-                    : entity.BranchId;
-
                 var targetCode = string.IsNullOrWhiteSpace(dto.Code) ? entity.Code : dto.Code.Trim();
 
-                // 6) تحقق الفرع موجود إذا SuperAdmin غيّره
-                if (isSuperAdmin && dto.BranchId.HasValue && dto.BranchId.Value != entity.BranchId)
-                {
-                    var branchExists = await _context.Branchs
-                        .AsNoTracking()
-                        .AnyAsync(b => b.BranchId == targetBranchId);
-
-                    if (!branchExists)
-                        return Result<string>.Failure(new[] { "الفرع غير موجود." });
-                }
-
-                // 7) فريدية الكود ضمن الفرع
                 var exists = await _context.Departments
                     .AsNoTracking()
                     .AnyAsync(d =>
                         d.DepartmentId != departmentId &&
-                        d.BranchId == targetBranchId &&
                         d.Code == targetCode);
 
                 if (exists)
-                    return Result<string>.Failure(new[] { "رمز القسم مستخدم ضمن هذا الفرع." });
+                    return Result<string>.Failure(new[] { "رمز القسم مستخدم مسبقاً." });
 
-                // 8) تطبيق التعديلات
                 _mapper.Map(dto, entity);
-
-                // ضمان الربط النهائي
-                entity.BranchId = targetBranchId;
                 entity.Description ??= string.Empty;
 
                 _context.Departments.Update(entity);
@@ -250,8 +159,6 @@ namespace ArchiveProject.Infrastructure.Services
                 return Result<string>.Failure(new[] { $"حدث خطأ أثناء التحديث: {ex.Message}" });
             }
         }
-        #endregion
-
         #endregion
 
         #region Delete department
@@ -322,35 +229,26 @@ namespace ArchiveProject.Infrastructure.Services
             bool isSuperAdmin = roleNames.Any(n => n == "SUPERADMIN");
             bool isBranchManager = roleNames.Any(n => n == "BRANCHMANAGER");
 
-            // معلومات الممثل (نجيب فقط ما يلزم)
-            var actorInfo = await _context.Users.AsNoTracking()
+            var actor = await _context.Users.AsNoTracking()
                 .Where(u => u.Id == userId)
-                .Select(u => new { u.BranchId, u.DepartmentId })
+                .Select(u => new { u.DepartmentId })
                 .FirstOrDefaultAsync();
 
-            if (actorInfo is null)
+            if (actor is null)
                 return Result<IEnumerable<DropDownDto>>.Failure(new[] { "المستخدم الحالي غير موجود." });
 
             var query = _context.Departments.AsNoTracking().AsQueryable();
 
-            if (isSuperAdmin)
+            if (isSuperAdmin || isBranchManager)
             {
-                // يرى الكل
-            }
-            else if (isBranchManager)
-            {
-                if (!actorInfo.BranchId.HasValue)
-                    return Result<IEnumerable<DropDownDto>>.Failure(new[] { "لا يمكن تحديد فرع المستخدم الحالي." });
-
-                query = query.Where(d => d.BranchId == actorInfo.BranchId.Value);
+                // يرى كل الأقسام
             }
             else
             {
-                // موظّف قسم
-                if (!actorInfo.DepartmentId.HasValue)
+                if (!actor.DepartmentId.HasValue)
                     return Result<IEnumerable<DropDownDto>>.Success(Array.Empty<DropDownDto>());
 
-                query = query.Where(d => d.DepartmentId == actorInfo.DepartmentId.Value);
+                query = query.Where(d => d.DepartmentId == actor.DepartmentId.Value);
             }
 
             var data = await query
@@ -367,7 +265,7 @@ namespace ArchiveProject.Infrastructure.Services
         #endregion
 
         #region GetAllDepartments Paged list (simple filter: code, name, isActive) 
-        public async Task<Result<PaginatedList<DepartmentDto>>> GetDepartmentsAsync(int pageNumber = 1, int pageSize = 10, long? branchId = null, string? name = null, bool? isActive = null)
+        public async Task<Result<PaginatedList<DepartmentDto>>> GetDepartmentsAsync(int pageNumber = 1, int pageSize = 10, string? name = null, bool? isActive = null)
         {
             try
             {
@@ -391,52 +289,27 @@ namespace ArchiveProject.Infrastructure.Services
                 if (actor is null)
                     return Result<PaginatedList<DepartmentDto>>.Failure(new[] { "المستخدم الحالي غير موجود." });
 
-                long? actorBranchId = actor.BranchId;
-                long? actorDepartmentId = actor.DepartmentId;
-
-                // 3) تحديد النطاق النهائي
-                long? effectiveBranchId = null;
                 long? effectiveDepartmentId = null;
 
-                if (actorIsSuperAdmin)
+                if (actorIsSuperAdmin || actorIsBranchManager)
                 {
-                    // يشوف كل شيء، ولو مرّر branchId نفلتر عليه
-                    effectiveBranchId = branchId;
-                }
-                else if (actorIsBranchManager)
-                {
-                    if (!actorBranchId.HasValue)
-                        return Result<PaginatedList<DepartmentDto>>.Failure(new[] { "لا يمكن تحديد فرع المنفّذ." });
-
-                    // تجاهل أي branchId مختلف
-                    effectiveBranchId = actorBranchId.Value;
+                    // يرى كل الأقسام
                 }
                 else
                 {
-                    // موظف قسم: يرى قسمه فقط
-                    if (!actorDepartmentId.HasValue)
+                    if (!actor.DepartmentId.HasValue)
                         return Result<PaginatedList<DepartmentDto>>.Failure(new[] { "لا يمكن تحديد قسم المنفّذ." });
 
-                    effectiveDepartmentId = actorDepartmentId.Value;
-
-                    // ❗ تجاهل فلتر البحث بالاسم لموظف القسم
+                    effectiveDepartmentId = actor.DepartmentId.Value;
                     name = null;
                 }
 
-                // 4) بناء الاستعلام
                 var query = _context.Departments.AsNoTracking().AsQueryable();
 
                 if (effectiveDepartmentId.HasValue)
-                {
                     query = query.Where(d => d.DepartmentId == effectiveDepartmentId.Value);
-                }
-                else if (effectiveBranchId.HasValue)
-                {
-                    query = query.Where(d => d.BranchId == effectiveBranchId.Value);
-                }
-                // سوبر أدمن دون branchId = يرى الكل
 
-                if (!string.IsNullOrWhiteSpace(name))
+                                if (!string.IsNullOrWhiteSpace(name))
                     query = query.Where(d => d.DepartmentName.Contains(name));
 
                 if (isActive.HasValue)
@@ -476,7 +349,29 @@ namespace ArchiveProject.Infrastructure.Services
                 var roleIds = CurrentRoleIds;
                 var jwt = JwtFieldPerms;
 
+                var actorRoleNorms = await _context.UserRoleAssociations
+                    .Where(ura => ura.UserId == userId)
+                    .Join(_context.Roles, ura => ura.RoleId, r => r.Id, (ura, r) => r.NormalizedName)
+                    .ToListAsync();
+
+                bool actorIsSuperAdmin = actorRoleNorms.Any(n => n == "SUPERADMIN");
+                bool actorIsBranchManager = actorRoleNorms.Any(n => n == "BRANCHMANAGER");
+
+                var actor = await _context.Users.AsNoTracking()
+                    .FirstOrDefaultAsync(u => u.Id == userId) as User;
+
+                if (actor is null)
+                    return Result<PaginatedList<DepartmentDto>>.Failure(new[] { "المستخدم الحالي غير موجود." });
+
                 var query = _context.Departments.AsNoTracking().AsQueryable();
+
+                if (!actorIsSuperAdmin && !actorIsBranchManager)
+                {
+                    if (!actor.DepartmentId.HasValue)
+                        return Result<PaginatedList<DepartmentDto>>.Failure(new[] { "لا يمكن تحديد قسم المنفّذ." });
+
+                    query = query.Where(d => d.DepartmentId == actor.DepartmentId.Value);
+                }
 
                 if (!string.IsNullOrWhiteSpace(criteria.Code))
                     query = query.Where(d => d.Code.Contains(criteria.Code));

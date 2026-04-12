@@ -7,9 +7,6 @@ using ArchiveProject.Infrastructure.Data;
 using ArchiveProject.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using System.Linq.Expressions;
-
-
 namespace ArchiveProject.Infrastructure.Services.AuthServices;
 
 public class UserService : IUserService
@@ -34,7 +31,7 @@ public class UserService : IUserService
     {
         var errors = new List<string>();
 
-        var (actor, actorBranchId, actorIsSuperAdmin) = await GetActorAsync();
+        var (_, actorIsSuperAdmin, actorIsBranchManager) = await GetActorAsync();
 
         // تحقّقات أساسية
         if (string.IsNullOrWhiteSpace(createdUser.username)) errors.Add("اسم المستخدم مطلوب.");
@@ -66,13 +63,9 @@ public class UserService : IUserService
         if (missing.Any())
             return Result<CreateUserDto>.Failure(new[] { $"أدوار غير موجودة أو غير نشطة: {string.Join(", ", missing)}" }, null);
 
-        // السماح فقط: SuperAdmin أو مدير فرع (مستخدم فرع = عنده BranchId ولا يملك DepartmentId)
-        var actorIsBranchManager = !actorIsSuperAdmin && actorBranchId.HasValue && !actor.DepartmentId.HasValue;
         if (!actorIsSuperAdmin && !actorIsBranchManager)
             return Result<CreateUserDto>.Failure(new[] { "غير مسموح بإنشاء المستخدمين." }, null);
 
-        // منطق الفرع/القسم للمستخدم الجديد
-        long? newBranchId = createdUser.BranchId;
         long? newDepartmentId = createdUser.DepartmentId;
 
         if (newDepartmentId.HasValue)
@@ -80,28 +73,9 @@ public class UserService : IUserService
             var dept = await _context.Departments.AsNoTracking()
                 .FirstOrDefaultAsync(d => d.DepartmentId == newDepartmentId.Value && d.IsActive);
             if (dept is null) return Result<CreateUserDto>.Failure(new[] { "القسم غير موجود أو غير فعّال." }, null);
-
-            newBranchId = dept.BranchId; // يُستنتج من القسم
-
-            if (!actorIsSuperAdmin)
-            {
-                if (!actorBranchId.HasValue || actorBranchId.Value != dept.BranchId)
-                    return Result<CreateUserDto>.Failure(new[] { "لا يمكنك إنشاء مستخدم لهذا القسم لأنه لا يتبع فرعك." }, null);
-            }
         }
-        else if (newBranchId.HasValue)
-        {
-            var branchExists = await _context.Branchs.AsNoTracking().AnyAsync(b => b.BranchId == newBranchId.Value);
-            if (!branchExists) return Result<CreateUserDto>.Failure(new[] { "الفرع غير موجود." }, null);
-
-            if (!actorIsSuperAdmin && (!actorBranchId.HasValue || actorBranchId.Value != newBranchId.Value))
-                return Result<CreateUserDto>.Failure(new[] { "لا يمكنك إنشاء مستخدم لفرع آخر." }, null);
-        }
-        else
-        {
-            if (!actorIsSuperAdmin)
-                return Result<CreateUserDto>.Failure(new[] { "يجب تحديد قسم أو فرع للمستخدم الجديد." }, null);
-        }
+        else if (!actorIsSuperAdmin)
+            return Result<CreateUserDto>.Failure(new[] { "يجب تحديد قسم للمستخدم الجديد." }, null);
 
         using var tx = await _context.Database.BeginTransactionAsync();
         try
@@ -114,7 +88,6 @@ public class UserService : IUserService
                 IsActive = createdUser.isActive,
                 CreationDate = DateTime.Now,
                 FullName = createdUser.fullName,
-                BranchId = newBranchId,
                 DepartmentId = newDepartmentId
             };
 
@@ -151,7 +124,6 @@ public class UserService : IUserService
             await _context.SaveChangesAsync();
             await tx.CommitAsync();
 
-            createdUser.BranchId = newBranchId;
             createdUser.DepartmentId = newDepartmentId;
             return Result<CreateUserDto>.Success(createdUser);
         }
@@ -283,30 +255,14 @@ public class UserService : IUserService
 
     public async Task<Result<string>> Update(string id, UpdateUserDto updatedUser)
     {
-        var (actor, actorBranchId, actorIsSuperAdmin) = await GetActorAsync();
+        var (_, actorIsSuperAdmin, actorIsBranchManager) = await GetActorAsync();
 
-        // الهدف
-        var target = await _context.Users
-            .Where(u => u.Id == id)
-            .Select(u => new
-            {
-                Entity = u,
-                TargetBranch = (long?)u.BranchId ?? (u.DepartmentId != null ? (long?)u.Department.BranchId : null)
-            })
-            .FirstOrDefaultAsync();
+        if (!actorIsSuperAdmin && !actorIsBranchManager)
+            return Result<string>.Failure(new[] { "غير مسموح بتعديل المستخدمين." }, null);
 
-        if (target is null) return Result<string>.Failure(new[] { "المستخدم غير موجود" }, null);
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == id);
+        if (user is null) return Result<string>.Failure(new[] { "المستخدم غير موجود" }, null);
 
-        // نطاق الفرع
-        if (!actorIsSuperAdmin)
-        {
-            if (!actorBranchId.HasValue || target.TargetBranch != actorBranchId.Value)
-                return Result<string>.Failure(new[] { "لا يمكنك تعديل مستخدم خارج فرعك." }, null);
-        }
-
-        var user = target.Entity;
-
-        // تعديل Email/Username (كما عندك)
         if (!string.IsNullOrWhiteSpace(updatedUser.Email) &&
             !string.Equals(updatedUser.Email, user.Email, StringComparison.OrdinalIgnoreCase))
         {
@@ -329,8 +285,6 @@ public class UserService : IUserService
             if (!setUserName.Succeeded) return Result<string>.Failure(setUserName.Errors.Select(e => e.Description), null);
         }
 
-        // نقل/تعديل الفرع/القسم
-        long? newBranchId = updatedUser.BranchId;
         long? newDepartmentId = updatedUser.DepartmentId;
 
         if (newDepartmentId.HasValue)
@@ -339,36 +293,16 @@ public class UserService : IUserService
                 .FirstOrDefaultAsync(d => d.DepartmentId == newDepartmentId.Value && d.IsActive);
             if (dept == null) return Result<string>.Failure(new[] { "القسم المطلوب غير موجود أو غير فعّال." }, null);
 
-            // لغير السوبر، يجب أن يكون القسم ضمن فرعه
-            if (!actorIsSuperAdmin && (!actorBranchId.HasValue || dept.BranchId != actorBranchId.Value))
-                return Result<string>.Failure(new[] { "لا يمكنك نقل المستخدم إلى قسم خارج فرعك." }, null);
-
-            newBranchId = dept.BranchId;
             user.DepartmentId = newDepartmentId;
-            user.BranchId = newBranchId;
-        }
-        else if (newBranchId.HasValue)
-        {
-            var branchExists = await _context.Branchs.AsNoTracking().AnyAsync(b => b.BranchId == newBranchId.Value);
-            if (!branchExists) return Result<string>.Failure(new[] { "الفرع المطلوب غير موجود." }, null);
-
-            if (!actorIsSuperAdmin && (!actorBranchId.HasValue || actorBranchId.Value != newBranchId.Value))
-                return Result<string>.Failure(new[] { "لا يمكنك نقل المستخدم إلى فرع آخر." }, null);
-
-            user.BranchId = newBranchId;
-            user.DepartmentId = null;
         }
         else
         {
-            // null/null مسموحة فقط للسوبر
             if (!actorIsSuperAdmin)
-                return Result<string>.Failure(new[] { "يجب تحديد الفرع أو القسم (مسموح الإلغاء فقط لحسابات SuperAdmin)." }, null);
+                return Result<string>.Failure(new[] { "يجب تحديد القسم (مسموح الإلغاء فقط لحسابات SuperAdmin)." }, null);
 
-            user.BranchId = null;
             user.DepartmentId = null;
         }
 
-        // تفعيل/تعطيل
         bool invalidateTokens = false;
         if (updatedUser.IsActive.HasValue && updatedUser.IsActive.Value != user.IsActive)
         {
@@ -413,27 +347,16 @@ public class UserService : IUserService
 
     public async Task<Result<string>> Delete(string userId)
     {
-        var (actor, actorBranchId, actorIsSuperAdmin) = await GetActorAsync();
+        var (_, actorIsSuperAdmin, actorIsBranchManager) = await GetActorAsync();
 
-        var target = await _context.Users
-            .Where(u => u.Id == userId)
-            .Select(u => new
-            {
-                Entity = u,
-                TargetBranch = (long?)u.BranchId ?? (u.DepartmentId != null ? (long?)u.Department.BranchId : null)
-            })
-            .FirstOrDefaultAsync();
+        if (!actorIsSuperAdmin && !actorIsBranchManager)
+            return Result<string>.Failure(new[] { "غير مسموح بحذف المستخدمين." }, null);
 
-        if (target is null)
+        var user = await _userManager.FindByIdAsync(userId);
+        if (user is null)
             return Result<string>.Failure(new[] { "المستخدم غير موجود" }, null);
 
-        if (!actorIsSuperAdmin)
-        {
-            if (!actorBranchId.HasValue || target.TargetBranch != actorBranchId.Value)
-                return Result<string>.Failure(new[] { "لا يمكنك حذف مستخدم خارج فرعك." }, null);
-        }
-
-        var result = await _userManager.DeleteAsync(target.Entity);
+        var result = await _userManager.DeleteAsync(user);
         if (!result.Succeeded)
             return Result<string>.Failure(result.Errors.Select(e => e.Description), null);
 
@@ -462,7 +385,7 @@ public class UserService : IUserService
 
         var actor = await _context.Users.AsNoTracking()
             .Where(u => u.Id == currentUserId)
-            .Select(u => new { u.BranchId, u.DepartmentId })
+            .Select(u => new { u.DepartmentId })
             .FirstOrDefaultAsync();
 
         IQueryable<User> baseQuery = _context.Users.AsNoTracking();
@@ -470,9 +393,9 @@ public class UserService : IUserService
         // 🧭 تطبيق النطاق
         if (!isSuperAdmin)
         {
-            if (isBranchManger && actor?.BranchId != null)
+            if (isBranchManger)
             {
-                baseQuery = baseQuery.Where(u => u.BranchId == actor.BranchId);
+                // يرى كل المستخدمين
             }
             else if (actor?.DepartmentId != null)
             {
@@ -516,8 +439,6 @@ public class UserService : IUserService
                 u.Email,
                 u.PhoneNumber,
                 u.IsActive,
-                u.BranchId,
-                BranchName = u.Branch != null ? u.Branch.BranchName : null,
                 u.DepartmentId,
                 DepartmentName = u.Department != null ? u.Department.DepartmentName : null,
                 u.CreationDate
@@ -593,8 +514,6 @@ public class UserService : IUserService
                 email = u.Email ?? string.Empty,
                 phone = u.PhoneNumber,
                 isActive = u.IsActive,
-                BranchId = u.BranchId,
-                BranchName = u.BranchName,
                 DepartmentId = u.DepartmentId,
                 DepartmentName = u.DepartmentName,
                 createdAt = u.CreationDate,
@@ -615,19 +534,9 @@ public class UserService : IUserService
     #region     جلب حسب المعرف 
     public async Task<Result<UserListItemDto>> GetUserAsync(string id)
     {
-        var (actor, actorBranchId, actorIsSuperAdmin) = await GetActorAsync();
+        var (actor, actorIsSuperAdmin, actorIsBranchManager) = await GetActorAsync();
 
-        IQueryable<User> q = _context.Users.AsNoTracking();
-
-        if (!actorIsSuperAdmin)
-        {
-            if (!actorBranchId.HasValue || actor.DepartmentId.HasValue)
-                return Result<UserListItemDto>.Failure(new[] { "غير مسموح بالوصول." }, null);
-
-            q = q.Where(InBranch(actorBranchId.Value));
-        }
-
-        var user = await q
+        var user = await _context.Users.AsNoTracking()
             .Where(u => u.Id == id)
             .Select(u => new
             {
@@ -636,8 +545,6 @@ public class UserService : IUserService
                 u.Email,
                 u.PhoneNumber,
                 u.IsActive,
-                u.BranchId,
-                BranchName = u.Branch != null ? u.Branch.BranchName : null,
                 u.DepartmentId,
                 DepartmentName = u.Department != null ? u.Department.DepartmentName : null,
                 u.CreationDate,
@@ -647,6 +554,12 @@ public class UserService : IUserService
 
         if (user == null)
             return Result<UserListItemDto>.Failure(new[] { "المستخدم غير موجود" }, null);
+
+        if (!actorIsSuperAdmin && !actorIsBranchManager)
+        {
+            if (actor.Id != user.Id && (actor.DepartmentId is null || actor.DepartmentId != user.DepartmentId))
+                return Result<UserListItemDto>.Failure(new[] { "غير مسموح بالوصول." }, null);
+        }
 
         var roles = await _context.UserRoleAssociations
             .AsNoTracking()
@@ -696,8 +609,6 @@ public class UserService : IUserService
             email = user.Email ?? string.Empty,
             phone = user.PhoneNumber,
             isActive = user.IsActive,
-            BranchId = user.BranchId,
-            BranchName = user.BranchName,
             DepartmentId = user.DepartmentId,
             DepartmentName = user.DepartmentName,
             createdAt = user.CreationDate,
@@ -892,38 +803,13 @@ public class UserService : IUserService
             .Join(_context.Roles, ura => ura.RoleId, r => r.Id, (ura, r) => r.NormalizedName)
             .AnyAsync(n => n == "SUPERADMIN");
 
-        // بيانات الممثل
-        var actor = await _context.Users
-            .AsNoTracking()
-            .FirstOrDefaultAsync(u => u.Id == actorId) as User;
+        var isBranchManager = await _context.UserRoleAssociations
+            .Where(ura => ura.UserId == actorId)
+            .Join(_context.Roles, ura => ura.RoleId, r => r.Id, (ura, r) => r.NormalizedName)
+            .AnyAsync(n => n == "BRANCHMANAGER");
 
-        if (actor is null)
-            return Result<UserListItemDto>.Failure(new[] { "المستخدم الحالي غير موجود." }, null);
-
-        long? actorBranchId = actor.BranchId;
-        long? actorDepartmentId = actor.DepartmentId;
-
-        // إذا ليس SuperAdmin ⇒ يجب أن يكون مدير فرع، والهدف ضمن نفس الفرع
-        if (!isSuperAdmin)
-        {
-            // مدير الفرع فقط (BranchId موجود و DepartmentId فارغ)
-            var actorIsBranchManager = actorBranchId.HasValue && !actorDepartmentId.HasValue;
-            if (!actorIsBranchManager)
-                return Result<UserListItemDto>.Failure(new[] { "غير مسموح بالتعديل إلا لمدير الفرع أو SuperAdmin." }, null);
-
-            // تحديد فرع الهدف: إمّا BranchId مباشر أو عبر قسمه
-            long? targetBranchId = user.BranchId;
-            if (!targetBranchId.HasValue && user.DepartmentId.HasValue)
-            {
-                targetBranchId = await _context.Departments
-                    .Where(d => d.DepartmentId == user.DepartmentId.Value)
-                    .Select(d => (long?)d.BranchId)
-                    .FirstOrDefaultAsync();
-            }
-
-            if (!targetBranchId.HasValue || targetBranchId.Value != actorBranchId.Value)
-                return Result<UserListItemDto>.Failure(new[] { "لا يمكنك تعديل مستخدم خارج فرعك." }, null);
-        }
+        if (!isSuperAdmin && !isBranchManager)
+            return Result<UserListItemDto>.Failure(new[] { "غير مسموح بالتعديل إلا لمدير الفرع أو SuperAdmin." }, null);
 
         // 2) تحقّقات uniqueness عند تعديل username/email
         if (!string.IsNullOrWhiteSpace(dto.username) &&
@@ -1190,30 +1076,13 @@ public class UserService : IUserService
             .Join(_context.Roles, ura => ura.RoleId, r => r.Id, (ura, r) => r.NormalizedName)
             .AnyAsync(n => n == "SUPERADMIN");
 
-        var actor = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == actorId) as User;
-        if (actor is null)
-            return Result<string>.Failure(new[] { "المستخدم الحالي غير موجود." }, null);
+        var isBranchManager = await _context.UserRoleAssociations
+            .Where(ura => ura.UserId == actorId)
+            .Join(_context.Roles, ura => ura.RoleId, r => r.Id, (ura, r) => r.NormalizedName)
+            .AnyAsync(n => n == "BRANCHMANAGER");
 
-        long? actorBranchId = actor.BranchId;
-        long? actorDeptId = actor.DepartmentId;
-
-        if (!isSuperAdmin)
-        {
-            var actorIsBranchManager = actorBranchId.HasValue && !actorDeptId.HasValue;
-            if (!actorIsBranchManager)
-                return Result<string>.Failure(new[] { "غير مسموح بتعديل الأدوار إلا لمدير الفرع أو SuperAdmin." }, null);
-
-            long? targetBranchId = user.BranchId;
-            if (!targetBranchId.HasValue && user.DepartmentId.HasValue)
-            {
-                targetBranchId = await _context.Departments
-                    .Where(d => d.DepartmentId == user.DepartmentId.Value)
-                    .Select(d => (long?)d.BranchId)
-                    .FirstOrDefaultAsync();
-            }
-            if (!targetBranchId.HasValue || targetBranchId.Value != actorBranchId.Value)
-                return Result<string>.Failure(new[] { "لا يمكنك تعديل أدوار مستخدم خارج فرعك." }, null);
-        }
+        if (!isSuperAdmin && !isBranchManager)
+            return Result<string>.Failure(new[] { "غير مسموح بتعديل الأدوار إلا لمدير الفرع أو SuperAdmin." }, null);
 
         // 2) حلّ القائمة المرسلة إلى RoleIds نهائية
         var incomingIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1420,32 +1289,13 @@ public class UserService : IUserService
             .Join(_context.Roles, ura => ura.RoleId, r => r.Id, (ura, r) => r.NormalizedName)
             .AnyAsync(n => n == "SUPERADMIN");
 
-        var actor = await _context.Users.AsNoTracking()
-            .FirstOrDefaultAsync(u => u.Id == actorId) as User;
+        var isBranchManager = await _context.UserRoleAssociations
+            .Where(ura => ura.UserId == actorId)
+            .Join(_context.Roles, ura => ura.RoleId, r => r.Id, (ura, r) => r.NormalizedName)
+            .AnyAsync(n => n == "BRANCHMANAGER");
 
-        if (actor is null)
-            return Result<string>.Failure(new[] { "المستخدم الحالي غير موجود." }, null);
-
-        if (!isSuperAdmin)
-        {
-            // مدير فرع فقط: BranchId موجود و DepartmentId فارغ
-            var actorIsBranchManager = actor.BranchId.HasValue && !actor.DepartmentId.HasValue;
-            if (!actorIsBranchManager)
-                return Result<string>.Failure(new[] { "غير مسموح بتعديل الصلاحيات إلا لمدير الفرع أو SuperAdmin." }, null);
-
-            // نطاق فرع المستخدم الهدف (BranchId مباشر أو عبر قسمه)
-            long? targetBranchId = user.BranchId;
-            if (!targetBranchId.HasValue && user.DepartmentId.HasValue)
-            {
-                targetBranchId = await _context.Departments
-                    .Where(d => d.DepartmentId == user.DepartmentId.Value)
-                    .Select(d => (long?)d.BranchId)
-                    .FirstOrDefaultAsync();
-            }
-
-            if (!targetBranchId.HasValue || targetBranchId.Value != actor.BranchId!.Value)
-                return Result<string>.Failure(new[] { "لا يمكنك تعديل صلاحيات مستخدم خارج فرعك." }, null);
-        }
+        if (!isSuperAdmin && !isBranchManager)
+            return Result<string>.Failure(new[] { "غير مسموح بتعديل الصلاحيات إلا لمدير الفرع أو SuperAdmin." }, null);
 
         // 3) حلّ القائمة المرسلة (تنظيف + Distinct) + تحقق نشاط الصلاحيات
         var incomingIds = dto.PermissionId
@@ -1712,19 +1562,21 @@ public class UserService : IUserService
             .AnyAsync(n => n == "SUPERADMIN");
 
     // ✅ إحضار منفّذ الطلب + فرعه
-    private async Task<(User actor, long? actorBranchId, bool isSuperAdmin)> GetActorAsync()
+    private async Task<(User actor, bool isSuperAdmin, bool isBranchManager)> GetActorAsync()
     {
         var actorId = _currentUserService.UserId ?? string.Empty;
         var actor = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == actorId) as User;
         if (actor is null) throw new InvalidOperationException("المستخدم الحالي غير موجود.");
 
-        var isSuper = await IsSuperAdminAsync(actorId);
-        return (actor, actor.BranchId, isSuper);
-    }
+        var norms = await _context.UserRoleAssociations
+            .Where(ura => ura.UserId == actorId)
+            .Join(_context.Roles, ura => ura.RoleId, r => r.Id, (ura, r) => r.NormalizedName)
+            .ToListAsync();
 
-    // ✅ شرط نطاق الفرع للمستخدمين (يعمل للي عنده BranchId أو Department)
-    private static Expression<Func<User, bool>> InBranch(long branchId) =>
-        u => u.BranchId == branchId || (u.DepartmentId != null && u.Department.BranchId == branchId);
+        var isSuper = norms.Any(n => n == "SUPERADMIN");
+        var isBm = norms.Any(n => n == "BRANCHMANAGER");
+        return (actor, isSuper, isBm);
+    }
     #endregion
     private async Task<UserListItemDto> BuildUserListItemDtoAsync(string userId, string? fullNameFromRequest)
     {

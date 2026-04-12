@@ -21,7 +21,6 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
         private sealed record Scope(
             bool IsSuperAdmin,
             bool IsBranchManager,
-            long? BranchId,
             long? DepartmentId,
             string UserId);
 
@@ -39,10 +38,10 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
 
             var actor = await _context.Users.AsNoTracking()
                 .Where(u => u.Id == userId)
-                .Select(u => new { u.BranchId, u.DepartmentId })
+                .Select(u => new { u.DepartmentId })
                 .FirstOrDefaultAsync();
 
-            return new Scope(isSuper, isMgr, actor?.BranchId, actor?.DepartmentId, userId);
+            return new Scope(isSuper, isMgr, actor?.DepartmentId, userId);
         }
 
         // ======== Date Range Helper (Europe/Istanbul -> UTC DateTimeOffset) ========
@@ -127,58 +126,23 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
             return System.Linq.Expressions.Expression.Lambda<Func<T, bool>>(body, p);
         }
 
-        // ======== Docs Scope (يدعم DepartmentId null عبر User.BranchId) ========
         private IQueryable<Document> ApplyScopeDocs(IQueryable<Document> q, Scope s)
         {
-            if (s.IsSuperAdmin) return q;
+            if (s.IsSuperAdmin || s.IsBranchManager) return q;
 
-            // left join departments + users to decide branch/department visibility safely
-            var joined =
-                from d in q
-                join dep in _context.Departments.AsNoTracking()
-                    on d.DepartmentId equals dep.DepartmentId into depj
-                from dep in depj.DefaultIfEmpty()
-                join u in _context.Users.AsNoTracking()
-                    on d.UserId equals u.Id into uj
-                from u in uj.DefaultIfEmpty()
-                select new
-                {
-                    Doc = d,
-                    DepId = (long?)d.DepartmentId,
-                    DepBranchId = (long?)(dep == null ? null : dep.BranchId),
-                    UserBranchId = (long?)(u == null ? null : u.BranchId),
-                    UserId = d.UserId
-                };
-
-            if (s.IsBranchManager && s.BranchId.HasValue)
-            {
-                // كل وثائق الفرع: (وثائق الأقسام التي BranchId=فرعي) + (وثائق بلا قسم لكن User.BranchId=فرعي)
-                var bid = s.BranchId.Value;
-                return joined
-                    .Where(x => (x.DepBranchId.HasValue && x.DepBranchId.Value == bid)
-                             || (!x.DepBranchId.HasValue && x.UserBranchId.HasValue && x.UserBranchId.Value == bid))
-                    .Select(x => x.Doc);
-            }
-
-            // Employee
             if (s.DepartmentId.HasValue)
             {
                 var did = s.DepartmentId.Value;
-                return joined
-                    .Where(x =>
-                        (x.DepId.HasValue && x.DepId.Value == did) // وثائق القسم
-                        || (x.UserId == s.UserId)                  // وثائق المستخدم بأي حال
-                    )
-                    .Select(x => x.Doc);
+                return q.Where(d => d.DepartmentId == did || d.UserId == s.UserId);
             }
 
-            return joined.Where(x => x.UserId == s.UserId).Select(x => x.Doc);
+            return q.Where(d => d.UserId == s.UserId);
         }
 
         // ======== Audit Scope (مثل قبل لكن ثابت) ========
         private IQueryable<AuditLog> ApplyScopeAudit(IQueryable<AuditLog> q, Scope s)
         {
-            if (s.IsSuperAdmin) return q;
+            if (s.IsSuperAdmin || s.IsBranchManager) return q;
 
             var joined = from a in q
                          join u in _context.Users.AsNoTracking() on a.UserId equals u.Id into uu
@@ -186,12 +150,8 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
                          select new
                          {
                              Log = a,
-                             BranchId = (long?)(u == null ? null : u.BranchId),
                              DepartmentId = (long?)(u == null ? null : u.DepartmentId)
                          };
-
-            if (s.IsBranchManager && s.BranchId.HasValue)
-                return joined.Where(x => x.BranchId == s.BranchId.Value).Select(x => x.Log);
 
             if (s.DepartmentId.HasValue)
                 return joined.Where(x => x.DepartmentId == s.DepartmentId.Value || x.Log.UserId == s.UserId)
@@ -215,23 +175,6 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
                 // filters (within scope)
                 if (f.DepartmentId.HasValue)
                     docsQ = docsQ.Where(d => d.DepartmentId == f.DepartmentId.Value);
-
-                if (f.BranchId.HasValue)
-                {
-                    // branch filter عبر الأقسام أو عبر User.BranchId لو الوثيقة بدون قسم
-                    var bid = f.BranchId.Value;
-                    docsQ =
-                        from d in docsQ
-                        join dep in _context.Departments.AsNoTracking()
-                            on d.DepartmentId equals dep.DepartmentId into depj
-                        from dep in depj.DefaultIfEmpty()
-                        join u in _context.Users.AsNoTracking()
-                            on d.UserId equals u.Id into uj
-                        from u in uj.DefaultIfEmpty()
-                        where (dep != null && dep.BranchId == bid)
-                           || (dep == null && u != null && u.BranchId == bid)
-                        select d;
-                }
 
                 // apply date range on documents if provided (CreatedAt is DateTime)
                 if (start.HasValue || endEx.HasValue)
@@ -315,63 +258,17 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
                     LastActivityAt = x.LastActivity.UtcDateTime.ToString("o")
                 }).ToList();
 
-                // ====== Branches Stats (مرئية حسب الدور) ======
-                IQueryable<Branch> branchesVisibleQ = _context.Branchs.AsNoTracking();
-
-                if (!s.IsSuperAdmin)
-                {
-                    if (s.IsBranchManager && s.BranchId.HasValue)
-                        branchesVisibleQ = branchesVisibleQ.Where(b => b.BranchId == s.BranchId.Value);
-                    else
-                    {
-                        // موظف: فرع قسمه (إذا عنده قسم)
-                        if (s.DepartmentId.HasValue)
-                        {
-                            var deptBranchId = await _context.Departments.AsNoTracking()
-                                .Where(d => d.DepartmentId == s.DepartmentId.Value)
-                                .Select(d => (long?)d.BranchId)
-                                .FirstOrDefaultAsync();
-
-                            if (deptBranchId.HasValue)
-                                branchesVisibleQ = branchesVisibleQ.Where(b => b.BranchId == deptBranchId.Value);
-                            else
-                                branchesVisibleQ = branchesVisibleQ.Where(b => false);
-                        }
-                        else branchesVisibleQ = branchesVisibleQ.Where(b => false);
-                    }
-                }
-
-                if (f.BranchId.HasValue)
-                    branchesVisibleQ = branchesVisibleQ.Where(b => b.BranchId == f.BranchId.Value);
-
-                var branchesStats = await (
-                    from b in branchesVisibleQ
-                    join dep in _context.Departments.AsNoTracking() on b.BranchId equals dep.BranchId
-                    join d in docsQ on dep.DepartmentId equals d.DepartmentId into dg
-                    select new BranchStatsDto
-                    {
-                        BranchId = b.BranchId,
-                        BranchName = b.BranchName,
-                        DocumentsCount = dg.LongCount()
-                    })
-                    .OrderByDescending(x => x.DocumentsCount)
-                    .ToListAsync();
-
                 // ====== Departments Stats ======
                 var departmentsVisibleQ = _context.Departments.AsNoTracking().AsQueryable();
 
                 if (!s.IsSuperAdmin)
                 {
-                    if (s.IsBranchManager && s.BranchId.HasValue)
-                        departmentsVisibleQ = departmentsVisibleQ.Where(d => d.BranchId == s.BranchId.Value);
+                    if (s.IsBranchManager) { /*يرى كل الأقسام */ }
                     else if (s.DepartmentId.HasValue)
                         departmentsVisibleQ = departmentsVisibleQ.Where(d => d.DepartmentId == s.DepartmentId.Value);
                     else
                         departmentsVisibleQ = departmentsVisibleQ.Where(d => false);
                 }
-
-                if (f.BranchId.HasValue)
-                    departmentsVisibleQ = departmentsVisibleQ.Where(d => d.BranchId == f.BranchId.Value);
 
                 if (f.DepartmentId.HasValue)
                     departmentsVisibleQ = departmentsVisibleQ.Where(d => d.DepartmentId == f.DepartmentId.Value);
@@ -481,7 +378,6 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
                     DocumentsCount = documentsCount,
                     RecentActivities = recent,
                     MostActiveUsers = topUsers,
-                    BranchesStats = branchesStats,
                     DepartmentsStats = departmentsStats,
                     DocumentGrowth = growth,
                     StorageUsage = storage,

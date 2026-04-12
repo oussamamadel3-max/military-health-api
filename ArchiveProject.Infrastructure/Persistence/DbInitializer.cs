@@ -49,7 +49,7 @@ namespace ArchiveProject.Infrastructure.Persistence
                 return role;
             }
 
-            async Task<User> EnsureUserAsync(string userName, string email, string password,string fullName,long? branchId = null, long? departmentId = null,IEnumerable<Role>? attachRoles = null)
+            async Task<User> EnsureUserAsync(string userName, string email, string password,string fullName, long? departmentId = null,IEnumerable<Role>? attachRoles = null)
             {
                 var u = await userManager.Users.FirstOrDefaultAsync(x => x.UserName == userName);
                 if (u == null)
@@ -66,7 +66,6 @@ namespace ArchiveProject.Infrastructure.Persistence
                         CreationDate = DateTime.Now,
                         SecurityStamp = Guid.NewGuid().ToString(),
                         FullName = fullName,
-                        BranchId = branchId,
                         DepartmentId = departmentId
                     };
                     var res = await userManager.CreateAsync(u, password);
@@ -76,7 +75,6 @@ namespace ArchiveProject.Infrastructure.Persistence
                 else
                 {
                     bool changed = false;
-                    if (u.BranchId != branchId) { u.BranchId = branchId; changed = true; }
                     if (u.DepartmentId != departmentId) { u.DepartmentId = departmentId; changed = true; }
                     if (changed) await userManager.UpdateAsync(u);
                 }
@@ -186,12 +184,6 @@ namespace ArchiveProject.Infrastructure.Persistence
             // 3.2) صلاحيات عامة: تُنشأ فقط
             var publicPermsOnly = new (string Name, string? Desc)[]
             {
-                // ========== Branch CRUD ===================
-                ("Branch.Read",   "قراءة بيانات الفروع"),
-                ("Branch.Create", "إنشاء فروع جديدة"),
-                ("Branch.Edit",   "تعديل بيانات الفروع"),
-                ("Branch.Delete", "حذف الفروع"),
-
                 // ========== Department CRUD ===============
                 ("Department.Read",   "قراءة بيانات الأقسام"),
                 ("Department.Create", "إنشاء أقسام جديدة"),
@@ -227,7 +219,6 @@ namespace ArchiveProject.Infrastructure.Persistence
                 email: "superAdmin@gmail.com",
                 password: "Admin@123",
                 fullName: "Super Administrator",
-                branchId: null,
                 departmentId: null,
                 attachRoles: new[] { roleSuperAdmin }
             );

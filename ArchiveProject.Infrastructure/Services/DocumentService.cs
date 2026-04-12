@@ -66,38 +66,23 @@ namespace ArchiveProject.Infrastructure.Services
                 bool isSuperAdmin = actorRoleNorms.Any(n => n == "SUPERADMIN");
                 bool isBranchManager = actorRoleNorms.Any(n => n == "BRANCHMANAGER");
 
-                // تحديد DepartmentId الفعلي بحسب الدور
                 long effectiveDepartmentId;
                 if (actor.DepartmentId.HasValue && !isBranchManager && !isSuperAdmin)
                 {
-                    effectiveDepartmentId = actor.DepartmentId.Value; // موظف قسم
+                    effectiveDepartmentId = actor.DepartmentId.Value;
                     dto.DepartmentId = effectiveDepartmentId;
-                }
-                else if (isBranchManager)
-                {
-                    if (!actor.BranchId.HasValue)
-                        return Result<List<DocumentDto>>.Failure(new[] { "لا يمكن تحديد فرع المستخدم الحالي." });
-
-                    var dept = await _context.Departments.AsNoTracking()
-                                 .FirstOrDefaultAsync(d => d.DepartmentId == dto.DepartmentId);
-                    if (dept is null)
-                        return Result<List<DocumentDto>>.Failure(new[] { "القسم غير موجود." });
-
-                    if (dept.BranchId != actor.BranchId.Value)
-                        return Result<List<DocumentDto>>.Failure(new[] { "لا يمكنك إنشاء وثائق لقسم خارج فرعك." });
-
-                    effectiveDepartmentId = dept.DepartmentId;
                 }
                 else
                 {
                     if (dto.DepartmentId <= 0)
                         return Result<List<DocumentDto>>.Failure(new[] { "القسم مطلوب." });
 
-                    var depExists0 = await _context.Departments.AnyAsync(d => d.DepartmentId == dto.DepartmentId);
-                    if (!depExists0)
+                    var dept = await _context.Departments.AsNoTracking()
+                        .FirstOrDefaultAsync(d => d.DepartmentId == dto.DepartmentId);
+                    if (dept is null)
                         return Result<List<DocumentDto>>.Failure(new[] { "القسم غير موجود." });
 
-                    effectiveDepartmentId = dto.DepartmentId;
+                    effectiveDepartmentId = dept.DepartmentId;
                 }
 
                 // صلاحيات الحقول
@@ -342,7 +327,6 @@ namespace ArchiveProject.Infrastructure.Services
                 bool isSuperAdmin = actorRoleNorms.Any(n => n == "SUPERADMIN");
                 bool isBranchManager = actorRoleNorms.Any(n => n == "BRANCHMANAGER");
 
-                // === تحديد القسم النهائي ===
                 var originalDepartmentId = entity.DepartmentId;
                 long requestedDepartmentId = dto.DepartmentId ?? entity.DepartmentId;
                 long finalDepartmentId;
@@ -355,26 +339,13 @@ namespace ArchiveProject.Infrastructure.Services
                     finalDepartmentId = actor.DepartmentId.Value;
                     dto.DepartmentId = finalDepartmentId;
                 }
-                else if (isBranchManager)
+                else
                 {
-                    if (!actor.BranchId.HasValue)
-                        return Result<string>.Failure(new[] { "لا يمكن تحديد فرع المستخدم الحالي." });
-
                     var dept = await _context.Departments.AsNoTracking()
                         .FirstOrDefaultAsync(d => d.DepartmentId == requestedDepartmentId);
                     if (dept is null) return Result<string>.Failure(new[] { "القسم غير موجود." });
-                    if (dept.BranchId != actor.BranchId.Value)
-                        return Result<string>.Failure(new[] { "لا يمكنك نقل/تعديل وثيقة لقسم خارج فرعك." });
 
                     finalDepartmentId = dept.DepartmentId;
-                    dto.DepartmentId = finalDepartmentId;
-                }
-                else
-                {
-                    var depExists = await _context.Departments.AnyAsync(d => d.DepartmentId == requestedDepartmentId);
-                    if (!depExists) return Result<string>.Failure(new[] { "القسم غير موجود." });
-
-                    finalDepartmentId = requestedDepartmentId;
                     dto.DepartmentId = finalDepartmentId;
                 }
 
@@ -569,7 +540,7 @@ namespace ArchiveProject.Infrastructure.Services
 
                 var actor = await _context.Users.AsNoTracking()
                     .Where(u => u.Id == userId)
-                    .Select(u => new { u.BranchId, u.DepartmentId })
+                    .Select(u => new { u.DepartmentId })
                     .FirstOrDefaultAsync();
 
                 if (actor == null)
@@ -577,32 +548,21 @@ namespace ArchiveProject.Infrastructure.Services
 
                 var baseQuery = _context.Documents.AsNoTracking()
                     .Where(d => d.DocumentId == documentId)
-                    .Join(_context.Departments,
-                          d => d.DepartmentId,
-                          dep => dep.DepartmentId,
-                          (d, dep) => new { d, dep.BranchId });
+                    .AsQueryable();
 
-                if (isSuperAdmin)
+                if (isSuperAdmin || isBranchManager)
                 {
                     // يرى الكل
-                }
-                else if (isBranchManager)
-                {
-                    if (!actor.BranchId.HasValue)
-                        return Result<DocumentDto>.Failure(new[] { "لا يمكن تحديد فرع المستخدم الحالي." });
-
-                    baseQuery = baseQuery.Where(x => x.BranchId == actor.BranchId.Value);
                 }
                 else
                 {
                     if (!actor.DepartmentId.HasValue)
                         return Result<DocumentDto>.Failure(new[] { "لا يمكن تحديد قسم المستخدم الحالي." });
 
-                    baseQuery = baseQuery.Where(x => x.d.DepartmentId == actor.DepartmentId.Value);
+                    baseQuery = baseQuery.Where(d => d.DepartmentId == actor.DepartmentId.Value);
                 }
 
                 var dto = await baseQuery
-                    .Select(x => x.d)
                     .ProjectTo<DocumentDto>(_mapper.ConfigurationProvider)
                     .FirstOrDefaultAsync();
 
@@ -658,43 +618,28 @@ namespace ArchiveProject.Infrastructure.Services
 
                 var actor = await _context.Users.AsNoTracking()
                     .Where(u => u.Id == userId)
-                    .Select(u => new { u.BranchId, u.DepartmentId })
+                    .Select(u => new { u.DepartmentId })
                     .FirstOrDefaultAsync();
 
                 if (actor == null)
                     return Result<PaginatedList<DocumentDto>>.Failure(new[] { "المستخدم الحالي غير موجود." });
 
-                var query = _context.Documents.AsNoTracking()
-                    .Join(_context.Departments,
-                          d => d.DepartmentId,
-                          dep => dep.DepartmentId,
-                          (d, dep) => new { d, dep.BranchId });
+                var query = _context.Documents.AsNoTracking().AsQueryable();
 
-                if (!isSuperAdmin)
+                if (!isSuperAdmin && !isBranchManager)
                 {
-                    if (isBranchManager)
-                    {
-                        if (!actor.BranchId.HasValue)
-                            return Result<PaginatedList<DocumentDto>>.Failure(new[] { "لا يمكن تحديد فرع المستخدم الحالي." });
+                    if (!actor.DepartmentId.HasValue)
+                        return Result<PaginatedList<DocumentDto>>.Failure(new[] { "لا يمكن تحديد قسم المستخدم الحالي." });
 
-                        query = query.Where(x => x.BranchId == actor.BranchId.Value);
-                    }
-                    else
-                    {
-                        if (!actor.DepartmentId.HasValue)
-                            return Result<PaginatedList<DocumentDto>>.Failure(new[] { "لا يمكن تحديد قسم المستخدم الحالي." });
-
-                        query = query.Where(x => x.d.DepartmentId == actor.DepartmentId.Value);
-                    }
+                    query = query.Where(d => d.DepartmentId == actor.DepartmentId.Value);
                 }
 
                 if (!string.IsNullOrWhiteSpace(title))
-                    query = query.Where(x => x.d.Title.Contains(title));
+                    query = query.Where(d => d.Title.Contains(title));
 
                 var projected = query
-                    .OrderByDescending(x => x.d.CreatedAt)
-                    .ThenByDescending(x => x.d.DocumentId)
-                    .Select(x => x.d)
+                    .OrderByDescending(d => d.CreatedAt)
+                    .ThenByDescending(d => d.DocumentId)
                     .ProjectTo<DocumentDto>(_mapper.ConfigurationProvider);
 
                 var paged = await PaginatedList<DocumentDto>.CreateAsync(projected, pageNumber, pageSize);
@@ -774,18 +719,16 @@ namespace ArchiveProject.Infrastructure.Services
                 var roleIds = CurrentRoleIds;
                 var jwt = JwtFieldPerms;
 
-                var deptInfo = await _context.Departments
+                var deptExists = await _context.Departments
                     .AsNoTracking()
-                    .Where(d => d.DepartmentId == departmentId)
-                    .Select(d => new { d.DepartmentId, d.BranchId })
-                    .FirstOrDefaultAsync();
+                    .AnyAsync(d => d.DepartmentId == departmentId);
 
-                if (deptInfo is null)
+                if (!deptExists)
                     return Result<PaginatedList<DocumentDto>>.Failure(new[] { "القسم غير موجود." });
 
                 var actor = await _context.Users.AsNoTracking()
                     .Where(u => u.Id == userId)
-                    .Select(u => new { u.BranchId, u.DepartmentId })
+                    .Select(u => new { u.DepartmentId })
                     .FirstOrDefaultAsync();
 
                 if (actor is null)
@@ -799,18 +742,10 @@ namespace ArchiveProject.Infrastructure.Services
                 bool isSuperAdmin = roles.Any(r => r == "SUPERADMIN");
                 bool isBranchManager = roles.Any(r => r == "BRANCHMANAGER");
 
-                if (!isSuperAdmin)
+                if (!isSuperAdmin && !isBranchManager)
                 {
-                    if (isBranchManager)
-                    {
-                        if (!actor.BranchId.HasValue || actor.BranchId.Value != deptInfo.BranchId)
-                            return Result<PaginatedList<DocumentDto>>.Failure(new[] { "غير مسموح بالوصول إلى وثائق هذا القسم." });
-                    }
-                    else
-                    {
-                        if (!actor.DepartmentId.HasValue || actor.DepartmentId.Value != departmentId)
-                            return Result<PaginatedList<DocumentDto>>.Failure(new[] { "غير مسموح بالوصول إلى وثائق هذا القسم." });
-                    }
+                    if (!actor.DepartmentId.HasValue || actor.DepartmentId.Value != departmentId)
+                        return Result<PaginatedList<DocumentDto>>.Failure(new[] { "غير مسموح بالوصول إلى وثائق هذا القسم." });
                 }
 
                 var query = _context.Documents.AsNoTracking()
@@ -853,53 +788,34 @@ namespace ArchiveProject.Infrastructure.Services
 
                 var actor = await _context.Users.AsNoTracking()
                     .Where(u => u.Id == userId)
-                    .Select(u => new { u.BranchId, u.DepartmentId })
+                    .Select(u => new { u.DepartmentId })
                     .FirstOrDefaultAsync();
 
                 if (actor == null)
                     return Result<PaginatedList<DocumentDto>>.Failure(new[] { "المستخدم الحالي غير موجود." });
 
-                // ===== Base query WITH scope =====
-                // نضمّ Departments حتى نفلتر بالفرع لمدير الفرع
-                var q = _context.Documents.AsNoTracking()
-                    .Join(_context.Departments.AsNoTracking(),
-                          d => d.DepartmentId,
-                          dep => dep.DepartmentId,
-                          (d, dep) => new { d, dep.BranchId })
-                    .AsQueryable();
+                var q = _context.Documents.AsNoTracking().AsQueryable();
 
-                if (!isSuperAdmin)
+                if (!isSuperAdmin && !isBranchManager)
                 {
-                    if (isBranchManager)
-                    {
-                        if (!actor.BranchId.HasValue)
-                            return Result<PaginatedList<DocumentDto>>.Failure(new[] { "لا يمكن تحديد فرع المستخدم الحالي." });
+                    if (!actor.DepartmentId.HasValue)
+                        return Result<PaginatedList<DocumentDto>>.Failure(new[] { "لا يمكن تحديد قسم المستخدم الحالي." });
 
-                        q = q.Where(x => x.BranchId == actor.BranchId.Value);
-                    }
-                    else
-                    {
-                        if (!actor.DepartmentId.HasValue)
-                            return Result<PaginatedList<DocumentDto>>.Failure(new[] { "لا يمكن تحديد قسم المستخدم الحالي." });
-
-                        // إذا بدك “يشوف وثائقه حتى لو خارج قسمه”:
-                        // q = q.Where(x => x.d.DepartmentId == actor.DepartmentId.Value || x.d.UserId == userId);
-                        q = q.Where(x => x.d.DepartmentId == actor.DepartmentId.Value);
-                    }
+                    q = q.Where(d => d.DepartmentId == actor.DepartmentId.Value);
                 }
 
                 // ===== Filters =====
                 if (c.DepartmentId.HasValue)
-                    q = q.Where(x => x.d.DepartmentId == c.DepartmentId.Value);
+                    q = q.Where(d => d.DepartmentId == c.DepartmentId.Value);
 
                 if (c.DocumentTypeId.HasValue)
-                    q = q.Where(x => x.d.DocumentTypeId == c.DocumentTypeId.Value);
+                    q = q.Where(d => d.DocumentTypeId == c.DocumentTypeId.Value);
 
                 // ===== Search (Title/Description) =====
                 if (!string.IsNullOrWhiteSpace(c.Title))
                 {
                     var t = c.Title.Trim();
-                    q = q.Where(x => x.d.Title.Contains(t));
+                    q = q.Where(d => d.Title.Contains(t));
                     // إذا أنت PostgreSQL وتحب بحث غير حساس لحالة الأحرف:
                     // q = q.Where(x => EF.Functions.ILike(x.d.Title, $"%{t}%"));
                 }
@@ -907,7 +823,7 @@ namespace ArchiveProject.Infrastructure.Services
                 if (!string.IsNullOrWhiteSpace(c.Description))
                 {
                     var dsc = c.Description.Trim();
-                    q = q.Where(x => x.d.Description.Contains(dsc));
+                    q = q.Where(d => d.Description.Contains(dsc));
                     // PostgreSQL:
                     // q = q.Where(x => EF.Functions.ILike(x.d.Description, $"%{dsc}%"));
                 }
@@ -916,14 +832,14 @@ namespace ArchiveProject.Infrastructure.Services
                 if (c.CreatedFrom.HasValue)
                 {
                     var from = c.CreatedFrom.Value;
-                    q = q.Where(x => x.d.CreatedAt >= from);
+                    q = q.Where(d => d.CreatedAt >= from);
                 }
 
                 if (c.CreatedTo.HasValue)
                 {
                     // inclusive لآخر اليوم
                     var toExclusive = c.CreatedTo.Value.Date.AddDays(1);
-                    q = q.Where(x => x.d.CreatedAt < toExclusive);
+                    q = q.Where(d => d.CreatedAt < toExclusive);
                 }
 
                 // ===== Sorting =====
@@ -933,20 +849,20 @@ namespace ArchiveProject.Infrastructure.Services
 
                 q = sortBy switch
                 {
-                    "title" => desc ? q.OrderByDescending(x => x.d.Title).ThenByDescending(x => x.d.CreatedAt)
-                                    : q.OrderBy(x => x.d.Title).ThenByDescending(x => x.d.CreatedAt),
+                    "title" => desc ? q.OrderByDescending(d => d.Title).ThenByDescending(d => d.CreatedAt)
+                                    : q.OrderBy(d => d.Title).ThenByDescending(d => d.CreatedAt),
 
-                    "documentnumber" => desc ? q.OrderByDescending(x => x.d.DocumentNumber).ThenByDescending(x => x.d.CreatedAt)
-                                             : q.OrderBy(x => x.d.DocumentNumber).ThenByDescending(x => x.d.CreatedAt),
+                    "documentnumber" => desc ? q.OrderByDescending(d => d.DocumentNumber).ThenByDescending(d => d.CreatedAt)
+                                             : q.OrderBy(d => d.DocumentNumber).ThenByDescending(d => d.CreatedAt),
 
-                    "createdat" => desc ? q.OrderByDescending(x => x.d.CreatedAt).ThenByDescending(x => x.d.DocumentId)
-                                        : q.OrderBy(x => x.d.CreatedAt).ThenByDescending(x => x.d.DocumentId),
+                    "createdat" => desc ? q.OrderByDescending(d => d.CreatedAt).ThenByDescending(d => d.DocumentId)
+                                        : q.OrderBy(d => d.CreatedAt).ThenByDescending(d => d.DocumentId),
 
-                    _ => q.OrderByDescending(x => x.d.CreatedAt).ThenByDescending(x => x.d.DocumentId)
+                    _ => q.OrderByDescending(d => d.CreatedAt).ThenByDescending(d => d.DocumentId)
                 };
 
                 // ===== Projection + Pagination =====
-                var projected = q.Select(x => x.d)
+                var projected = q
                     .ProjectTo<DocumentDto>(_mapper.ConfigurationProvider);
 
                 var paged = await PaginatedList<DocumentDto>.CreateAsync(projected, pageNumber, pageSize);

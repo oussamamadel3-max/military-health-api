@@ -112,9 +112,6 @@ namespace ArchiveProject.Application.Dtos.DepartmentDtos
         [FieldPermission("IsActive", DisplayName = "الحالة")]
         public bool? IsActive { get; set; }
 
-        [FieldPermission("BranchId", DisplayName = "رمز الفرع")]
-        public long? BranchId { get; set; }
-
         // معلومات التدقيق
         [FieldPermission("CreatedAt", DisplayName = "تاريخ الإنشاء")]
         public DateTime? CreatedAt { get; set; }
@@ -149,11 +146,6 @@ namespace ArchiveProject.Application.Dtos.DepartmentDtos
 
         [FieldPermission("IsActive", DisplayName = "الحالة")]
         public bool IsActive { get; set; } = true;
-
-        // ✅ ما عاد Required لأن BranchManager رح يكون تلقائي
-        [Range(1, long.MaxValue, ErrorMessage = "الفرع غير صالح")]
-        [FieldPermission("BranchId", DisplayName = "الفرع")]
-        public long? BranchId { get; set; }
     }
 
     public class UpdateDepartmentDto
@@ -172,10 +164,6 @@ namespace ArchiveProject.Application.Dtos.DepartmentDtos
 
         [FieldPermission("IsActive", DisplayName = "الحالة")]
         public bool? IsActive { get; set; }
-
-        [Range(1, long.MaxValue, ErrorMessage = "الفرع غير صالح")]
-        [FieldPermission("BranchId", DisplayName = "الفرع")]
-        public long? BranchId { get; set; }
     }
 
     public class DepartmentSearchCriteria
@@ -187,7 +175,6 @@ namespace ArchiveProject.Application.Dtos.DepartmentDtos
         public string? Code { get; set; }
 
         public bool? IsActive { get; set; }
-        public long? BranchId { get; set; }
 
         [StringLength(20)]
         public string? SortBy { get; set; }
