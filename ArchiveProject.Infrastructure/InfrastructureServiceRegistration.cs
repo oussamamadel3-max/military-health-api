@@ -42,7 +42,6 @@ namespace ArchiveProject.Infrastructure
             #endregion
 
             #region === يمكنك إضافة خدمات المشروع الأخرى هنا ===
-            services.AddScoped<IArchiveGroupService, ArchiveGroupService>();
             services.AddScoped<IBranchService, BranchService>();
             services.AddScoped<IDepartmentService, DepartmentService>();
             services.AddScoped<IDocumentService, DocumentService>();

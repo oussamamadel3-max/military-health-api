@@ -1,5 +1,4 @@
 ﻿using ArchiveProject.Application.Dtos;
-using ArchiveProject.Application.Dtos.ArchiveGroupDtos;
 using ArchiveProject.Application.Dtos.AuthDtos;
 using ArchiveProject.Application.Dtos.BranchDtos;
 using ArchiveProject.Application.Dtos.DepartmentDtos;
@@ -95,13 +94,6 @@ namespace ArchiveProject.Application.Mappings
             CreateMap<DocumentType, DocumentTypeDto>();
             CreateMap<CreateDocumentTypeDto, DocumentType>();
             CreateMap<UpdateDocumentTypeDto, DocumentType>();
-
-            //     ArchiveGroup
-            CreateMap<ArchiveGroup, ArchiveGroupDto>();
-            CreateMap<CreateArchiveGroupDto, ArchiveGroup>()
-                // لو أردت توليد GroupNumber تلقائيًا ممكن ضمه هنا
-                .ForMember(dest => dest.ArchiveGroupNumber, opt => opt.Ignore());
-            CreateMap<UpdateArchiveGroupDto, ArchiveGroup>();
 
             //        Document
             CreateMap<Document, DocumentDto>();

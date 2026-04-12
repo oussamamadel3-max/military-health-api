@@ -79,7 +79,6 @@ namespace ArchiveProject.Infrastructure.Services.Reports
                 // Filters
                 if (c.DepartmentId.HasValue) q = q.Where(d => d.DepartmentId == c.DepartmentId.Value);
                 if (c.DocumentTypeId.HasValue) q = q.Where(d => d.DocumentTypeId == c.DocumentTypeId.Value);
-                if (c.ArchiveGroupId.HasValue) q = q.Where(d => d.ArchiveGroupId == c.ArchiveGroupId.Value);
                 if (!string.IsNullOrWhiteSpace(c.Title)) q = q.Where(d => d.Title.Contains(c.Title));
                 if (!string.IsNullOrWhiteSpace(c.Description)) q = q.Where(d => d.Description.Contains(c.Description));
                 if (c.CreatedFrom.HasValue) q = q.Where(d => d.CreatedAt >= c.CreatedFrom.Value);
@@ -104,8 +103,6 @@ namespace ArchiveProject.Infrastructure.Services.Reports
                                   join br in _context.Branchs.AsNoTracking() on dep.BranchId equals br.BranchId
                                   join dt in _context.DocumentTypes.AsNoTracking() on d.DocumentTypeId equals dt.DocumentTypeId into dtt
                                   from dt in dtt.DefaultIfEmpty()
-                                  join ag in _context.ArchiveGroups.AsNoTracking() on d.ArchiveGroupId equals ag.ArchiveGroupId into agg
-                                  from ag in agg.DefaultIfEmpty()
                                   select new DocumentReportRowDto
                                   {
                                       DocumentNumber = d.DocumentNumber,
@@ -113,7 +110,6 @@ namespace ArchiveProject.Infrastructure.Services.Reports
                                       BranchName = br.BranchName ?? "",
                                       DepartmentName = dep.DepartmentName ?? "",
                                       DocumentTypeName = dt != null ? dt.DocumentTypeName : "",
-                                      ArchiveGroupTitle = ag != null ? ag.Title : null,
                                       CreatedAt = d.CreatedAt,
                                       CreatedBy = d.User.UserName ?? ""
                                   }).ToListAsync();
@@ -151,7 +147,6 @@ namespace ArchiveProject.Infrastructure.Services.Reports
                         ["BranchName"] = "الفرع",
                         ["DepartmentName"] = "القسم",
                         ["DocumentTypeName"] = "نوع الوثيقة",
-                        ["ArchiveGroupTitle"] = "مجموعة الأرشفة",
                         ["CreatedAt"] = "تاريخ الإنشاء",
                         ["CreatedBy"] = "أنشئ بواسطة",
                     }
@@ -372,7 +367,6 @@ namespace ArchiveProject.Infrastructure.Services.Reports
                 var rows = new List<DashboardExportRow>
                 {
                     new() { Name = "عدد الوثائق", Value = dto.DocumentsCount.ToString() },
-                    new() { Name = "عدد المجموعات", Value = dto.GroupsCount.ToString() },
                     new() { Name = "إجمالي التخزين", Value = dto.StorageUsage?.TotalReadable ?? "0 B" },
 
                     // فاصل/عنوان قسم

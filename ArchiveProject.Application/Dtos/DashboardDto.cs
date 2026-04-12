@@ -68,7 +68,6 @@
     public class DashboardStatsDto
     {
         public long DocumentsCount { get; set; }
-        public long GroupsCount { get; set; }
 
         public List<RecentActivityDto> RecentActivities { get; set; } = new();
         public List<ActiveUserStatsDto> MostActiveUsers { get; set; } = new();

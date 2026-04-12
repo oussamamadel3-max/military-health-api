@@ -25,7 +25,6 @@ namespace ArchiveProject.Domain.Entities
         [ForeignKey(nameof(BranchId))]
         public Branch Branch { get; set; } = null!;
 
-        public IList<ArchiveGroup> ArchiveGroups { get; set; } = new List<ArchiveGroup>();
         public IList<User> Users { get; set; } = new List<User>();
 
 

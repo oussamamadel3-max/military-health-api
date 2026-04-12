@@ -47,12 +47,6 @@
                 ["Department.Edit"] = "تعديل بيانات الأقسام",
                 ["Department.Delete"] = "حذف الأقسام",
 
-                // ArchiveGroup CRUD
-                ["ArchiveGroup.Read"] = "قراءة المجموعات الأرشيفية",
-                ["ArchiveGroup.Create"] = "إنشاء مجموعات أرشيفية",
-                ["ArchiveGroup.Edit"] = "تعديل المجموعات الأرشيفية",
-                ["ArchiveGroup.Delete"] = "حذف المجموعات الأرشيفية",
-
                 // DocumentType CRUD
                 ["DocumentType.Read"] = "قراءة أنواع الوثائق",
                 ["DocumentType.Create"] = "إنشاء أنواع وثائق جديدة",

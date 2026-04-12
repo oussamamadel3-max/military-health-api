@@ -7,7 +7,6 @@
         public string DepartmentName { get; set; } = "";
         public string BranchName { get; set; } = "";
         public string DocumentTypeName { get; set; } = "";
-        public string? ArchiveGroupTitle { get; set; }
         public DateTime CreatedAt { get; set; }
         public string CreatedBy { get; set; } = "";
     }

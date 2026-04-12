@@ -198,12 +198,6 @@ namespace ArchiveProject.Infrastructure.Persistence
                 ("Department.Edit",   "تعديل بيانات الأقسام"),
                 ("Department.Delete", "حذف الأقسام"),
 
-                // ========== ArchiveGroup CRUD =============
-                ("ArchiveGroup.Read",   "قراءة المجموعات الأرشيفية"),
-                ("ArchiveGroup.Create", "إنشاء مجموعات أرشيفية"),
-                ("ArchiveGroup.Edit",   "تعديل المجموعات الأرشيفية"),
-                ("ArchiveGroup.Delete", "حذف المجموعات الأرشيفية"),
-
                 // ========== DocumentType CRUD =============
                 ("DocumentType.Read",   "قراءة أنواع الوثائق"),
                 ("DocumentType.Create", "إنشاء أنواع وثائق جديدة"),
@@ -244,9 +238,6 @@ namespace ArchiveProject.Infrastructure.Persistence
             // امنحه جميع صلاحيات CRUD العامة بدون BranchManager
             var publicCrudPermsForSuperAdmin = publicPermsOnly
                 .Where(p => !string.Equals(p.Name, "BranchManager", StringComparison.OrdinalIgnoreCase))
-                .Where(p => !string.Equals(p.Name, "ArchiveGroup.Create", StringComparison.OrdinalIgnoreCase))
-                .Where(p => !string.Equals(p.Name, "ArchiveGroup.Edit", StringComparison.OrdinalIgnoreCase))
-                .Where(p => !string.Equals(p.Name, "ArchiveGroup.Delete", StringComparison.OrdinalIgnoreCase))
                 .ToArray();
 
             await EnsurePermissionsAndAssignToUserAsync(superAdmin.Id, publicCrudPermsForSuperAdmin);

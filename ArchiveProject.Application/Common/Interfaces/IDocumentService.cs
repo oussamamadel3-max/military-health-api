@@ -18,8 +18,6 @@ namespace ArchiveProject.Application.Common.Interfaces
 
         Task<Result<IEnumerable<DropDownDto>>> GetDocumentsDropdownAsync();
 
-        Task<Result<PaginatedList<DocumentDto>>> GetByArchiveGroupPagedAsync(long archiveGroupId, int pageNumber = 1, int pageSize = 10);
-
         Task<Result<PaginatedList<DocumentDto>>> GetUngroupedByDepartmentPagedAsync(long departmentId, int pageNumber = 1, int pageSize = 10);
 
 

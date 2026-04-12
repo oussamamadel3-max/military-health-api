@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Identity;
+﻿using ArchiveProject.Domain.Entities;
+using Microsoft.AspNetCore.Identity;
 using System.ComponentModel.DataAnnotations;
 
 namespace ArchiveProject.Domain.Entities.Auth;
@@ -19,8 +20,6 @@ public class User : IdentityUser
 
 
     public IList<Document> Documents { get; set; } = new List<Document>();
-    public IList<ArchiveGroup> ArchiveGroups { get; set; } = new List<ArchiveGroup>();
-
 
     public IList<UserRoleAssociation> UserRoleAssociations { get; set; } = new List<UserRoleAssociation>();
     public IList<UserPermission> UserPermissions { get; set; } = new List<UserPermission>();

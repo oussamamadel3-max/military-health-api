@@ -262,12 +262,9 @@ namespace ArchiveProject.Infrastructure.Services
                 var entity = await _context.Departments.FindAsync(departmentId);
                 if (entity == null) return Result<string>.Failure(new[] { "القسم غير موجود." });
 
-                // منع حذف قسم عليه مستخدمون أو مجموعات أرشفة أو وثائق
+                // منع حذف قسم عليه مستخدمون أو وثائق
                 var hasUsers = await _context.Users.AnyAsync(u => u.DepartmentId == departmentId);
                 if (hasUsers) return Result<string>.Failure(new[] { "لا يمكن حذف القسم لوجود مستخدمين مرتبطين به." });
-
-                var hasGroups = await _context.ArchiveGroups.AnyAsync(g => g.DepartmentId == departmentId);
-                if (hasGroups) return Result<string>.Failure(new[] { "لا يمكن حذف القسم لوجود مجموعات أرشفة مرتبطة به." });
 
                 var hasDocs = await _context.Documents.AnyAsync(d => d.DepartmentId == departmentId);
                 if (hasDocs) return Result<string>.Failure(new[] { "لا يمكن حذف القسم لوجود وثائق مرتبطة به." });

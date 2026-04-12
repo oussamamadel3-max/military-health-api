@@ -22,53 +22,6 @@ namespace ArchiveProject.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("ArchiveProject.Domain.Entities.ArchiveGroup", b =>
-                {
-                    b.Property<long>("ArchiveGroupId")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("ArchiveGroupId"));
-
-                    b.Property<long>("ArchiveGroupNumber")
-                        .HasColumnType("bigint");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("text");
-
-                    b.Property<long>("DepartmentId")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(250)
-                        .HasColumnType("character varying(250)");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("text");
-
-                    b.Property<string>("UserId")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("ArchiveGroupId");
-
-                    b.HasIndex("DepartmentId");
-
-                    b.HasIndex("UserId");
-
-                    b.HasIndex("DepartmentId", "ArchiveGroupNumber")
-                        .IsUnique();
-
-                    b.ToTable("ArchiveGroups");
-                });
-
             modelBuilder.Entity("ArchiveProject.Domain.Entities.Attachment", b =>
                 {
                     b.Property<Guid>("AttachmentId")
@@ -601,9 +554,6 @@ namespace ArchiveProject.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("DocumentId"));
 
-                    b.Property<long?>("ArchiveGroupId")
-                        .HasColumnType("bigint");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -640,8 +590,6 @@ namespace ArchiveProject.Infrastructure.Migrations
                         .HasColumnType("text");
 
                     b.HasKey("DocumentId");
-
-                    b.HasIndex("ArchiveGroupId");
 
                     b.HasIndex("DepartmentId");
 
@@ -690,25 +638,6 @@ namespace ArchiveProject.Infrastructure.Migrations
                     b.HasIndex("DocumentTypeName");
 
                     b.ToTable("DocumentTypes");
-                });
-
-            modelBuilder.Entity("ArchiveProject.Domain.Entities.ArchiveGroup", b =>
-                {
-                    b.HasOne("ArchiveProject.Domain.Entities.Department", "Department")
-                        .WithMany("ArchiveGroups")
-                        .HasForeignKey("DepartmentId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("ArchiveProject.Domain.Entities.Auth.User", "User")
-                        .WithMany("ArchiveGroups")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Department");
-
-                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("ArchiveProject.Domain.Entities.Auth.RoleFieldPermission", b =>
@@ -844,11 +773,6 @@ namespace ArchiveProject.Infrastructure.Migrations
 
             modelBuilder.Entity("ArchiveProject.Domain.Entities.Document", b =>
                 {
-                    b.HasOne("ArchiveProject.Domain.Entities.ArchiveGroup", "ArchiveGroup")
-                        .WithMany("Documents")
-                        .HasForeignKey("ArchiveGroupId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.HasOne("ArchiveProject.Domain.Entities.Department", "Department")
                         .WithMany()
                         .HasForeignKey("DepartmentId")
@@ -867,18 +791,11 @@ namespace ArchiveProject.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.Navigation("ArchiveGroup");
-
                     b.Navigation("Department");
 
                     b.Navigation("DocumentType");
 
                     b.Navigation("User");
-                });
-
-            modelBuilder.Entity("ArchiveProject.Domain.Entities.ArchiveGroup", b =>
-                {
-                    b.Navigation("Documents");
                 });
 
             modelBuilder.Entity("ArchiveProject.Domain.Entities.Auth.FieldPermission", b =>
@@ -906,8 +823,6 @@ namespace ArchiveProject.Infrastructure.Migrations
 
             modelBuilder.Entity("ArchiveProject.Domain.Entities.Auth.User", b =>
                 {
-                    b.Navigation("ArchiveGroups");
-
                     b.Navigation("Documents");
 
                     b.Navigation("UserFieldPermissions");
@@ -926,8 +841,6 @@ namespace ArchiveProject.Infrastructure.Migrations
 
             modelBuilder.Entity("ArchiveProject.Domain.Entities.Department", b =>
                 {
-                    b.Navigation("ArchiveGroups");
-
                     b.Navigation("Users");
                 });
 

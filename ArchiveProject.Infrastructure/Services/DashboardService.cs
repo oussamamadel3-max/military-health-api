@@ -247,28 +247,6 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
 
                 var documentsCount = await docsQ.LongCountAsync();
 
-                // ====== Groups (إذا ما عندك CreatedAt للمجموعات، ما فينا نفلترها زمنياً بشكل صحيح) ======
-                var groupsQ = from g in _context.ArchiveGroups.AsNoTracking()
-                              join dep in _context.Departments.AsNoTracking()
-                                  on g.DepartmentId equals dep.DepartmentId
-                              select new { g, dep.BranchId, dep.DepartmentId };
-
-                // scope
-                if (!s.IsSuperAdmin)
-                {
-                    if (s.IsBranchManager && s.BranchId.HasValue)
-                        groupsQ = groupsQ.Where(x => x.BranchId == s.BranchId.Value);
-                    else if (s.DepartmentId.HasValue)
-                        groupsQ = groupsQ.Where(x => x.DepartmentId == s.DepartmentId.Value);
-                    else
-                        groupsQ = groupsQ.Where(x => false);
-                }
-
-                if (f.DepartmentId.HasValue) groupsQ = groupsQ.Where(x => x.DepartmentId == f.DepartmentId.Value);
-                if (f.BranchId.HasValue) groupsQ = groupsQ.Where(x => x.BranchId == f.BranchId.Value);
-
-                var groupsCount = await groupsQ.LongCountAsync();
-
                 // ====== Audit (scoped + date range optional) ======
                 var auditQ = ApplyScopeAudit(_context.AuditLogs.AsNoTracking(), s);
 
@@ -501,7 +479,6 @@ namespace ArchiveProject.Infrastructure.Services.Dashboard
                 var dto = new DashboardStatsDto
                 {
                     DocumentsCount = documentsCount,
-                    GroupsCount = groupsCount,
                     RecentActivities = recent,
                     MostActiveUsers = topUsers,
                     BranchesStats = branchesStats,

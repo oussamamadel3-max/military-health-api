@@ -114,19 +114,6 @@ namespace ArchiveProject.Infrastructure.Services
                 if (docType == null)
                     return Result<List<DocumentDto>>.Failure(new[] { "نوع الوثيقة غير موجود." });
 
-                // تحقق ArchiveGroup (اختياري) ويجب أن يتبع نفس القسم
-                if (dto.ArchiveGroupId.HasValue)
-                {
-                    var groupDeptId = await _context.ArchiveGroups
-                        .Where(g => g.ArchiveGroupId == dto.ArchiveGroupId.Value)
-                        .Select(g => (long?)g.DepartmentId)
-                        .FirstOrDefaultAsync();
-                    if (!groupDeptId.HasValue)
-                        return Result<List<DocumentDto>>.Failure(new[] { "مجموعة الأرشفة غير موجودة." });
-                    if (groupDeptId.Value != effectiveDepartmentId)
-                        return Result<List<DocumentDto>>.Failure(new[] { "مجموعة الأرشفة لا تتبع نفس القسم المحدد." });
-                }
-
                 // احسب رقم الوثيقة التالي داخل القسم
                 var currentMax = await _context.Documents
                     .Where(d => d.DepartmentId == effectiveDepartmentId)
@@ -137,7 +124,6 @@ namespace ArchiveProject.Infrastructure.Services
                 {
                     DepartmentId = effectiveDepartmentId,
                     DocumentTypeId = dto.DocumentTypeId,
-                    ArchiveGroupId = dto.ArchiveGroupId,
                     Title = dto.Title,
                     Description = dto.Description ?? string.Empty,
                     UserId = userId,
@@ -274,26 +260,10 @@ namespace ArchiveProject.Infrastructure.Services
         //        if (docType == null)
         //            return Result<string>.Failure(new[] { "نوع الوثيقة غير موجود." });
 
-        //        long? targetGroupId = dto.ArchiveGroupId ?? entity.ArchiveGroupId;
-        //        if (targetGroupId.HasValue)
-        //        {
-        //            var groupDeptId = await _context.ArchiveGroups
-        //                .Where(g => g.ArchiveGroupId == targetGroupId.Value)
-        //                .Select(g => (long?)g.DepartmentId)
-        //                .FirstOrDefaultAsync();
-
-        //            if (!groupDeptId.HasValue)
-        //                return Result<string>.Failure(new[] { "مجموعة الأرشفة غير موجودة." });
-
-        //            if (groupDeptId.Value != finalDepartmentId)
-        //                return Result<string>.Failure(new[] { "مجموعة الأرشفة لا تتبع نفس القسم النهائي." });
-        //        }
-
         //        // Map التغييرات الأساسية
         //        _mapper.Map(dto, entity);
         //        entity.DepartmentId = finalDepartmentId;
         //        entity.DocumentTypeId = targetTypeId;
-        //        entity.ArchiveGroupId = targetGroupId;
 
         //        // إعادة الترقيم عند تغيير القسم
         //        bool departmentChanged = (finalDepartmentId != originalDepartmentId);
@@ -420,25 +390,10 @@ namespace ArchiveProject.Infrastructure.Services
                 var docType = await _context.DocumentTypes.FindAsync(targetTypeId.Value);
                 if (docType == null) return Result<string>.Failure(new[] { "نوع الوثيقة غير موجود." });
 
-                long? targetGroupId = dto.ArchiveGroupId ?? entity.ArchiveGroupId;
-                if (targetGroupId.HasValue)
-                {
-                    var groupDeptId = await _context.ArchiveGroups
-                        .Where(g => g.ArchiveGroupId == targetGroupId.Value)
-                        .Select(g => (long?)g.DepartmentId)
-                        .FirstOrDefaultAsync();
-
-                    if (!groupDeptId.HasValue)
-                        return Result<string>.Failure(new[] { "مجموعة الأرشفة غير موجودة." });
-                    if (groupDeptId.Value != finalDepartmentId)
-                        return Result<string>.Failure(new[] { "مجموعة الأرشفة لا تتبع نفس القسم النهائي." });
-                }
-
                 // === تطبيق التغييرات الأساسية ===
                 _mapper.Map(dto, entity);
                 entity.DepartmentId = finalDepartmentId;
                 entity.DocumentTypeId = targetTypeId;
-                entity.ArchiveGroupId = targetGroupId;
 
                 // إعادة ترقيم إذا تغيّر القسم
                 bool departmentChanged = (finalDepartmentId != originalDepartmentId);
@@ -810,77 +765,6 @@ namespace ArchiveProject.Infrastructure.Services
         }
         #endregion
 
-        #region Get Documents By ArchiveGroupId (paged)
-        public async Task<Result<PaginatedList<DocumentDto>>> GetByArchiveGroupPagedAsync(long archiveGroupId, int pageNumber = 1, int pageSize = 10)
-        {
-            try
-            {
-                var userId = CurrentUserId;
-                var roleIds = CurrentRoleIds;
-                var jwt = JwtFieldPerms;
-
-                var groupInfo = await _context.ArchiveGroups
-                    .AsNoTracking()
-                    .Where(g => g.ArchiveGroupId == archiveGroupId)
-                    .Join(_context.Departments,
-                          g => g.DepartmentId,
-                          d => d.DepartmentId,
-                          (g, d) => new { d.DepartmentId, d.BranchId })
-                    .FirstOrDefaultAsync();
-
-                if (groupInfo is null)
-                    return Result<PaginatedList<DocumentDto>>.Failure(new[] { "مجموعة الأرشفة غير موجودة." });
-
-                var actor = await _context.Users.AsNoTracking()
-                    .Where(u => u.Id == userId)
-                    .Select(u => new { u.BranchId, u.DepartmentId })
-                    .FirstOrDefaultAsync();
-
-                if (actor is null)
-                    return Result<PaginatedList<DocumentDto>>.Failure(new[] { "المستخدم الحالي غير موجود." });
-
-                var roles = await _context.UserRoleAssociations
-                    .Where(ura => ura.UserId == userId)
-                    .Join(_context.Roles, ura => ura.RoleId, r => r.Id, (ura, r) => r.NormalizedName)
-                    .ToListAsync();
-
-                bool isSuperAdmin = roles.Any(r => r == "SUPERADMIN");
-                bool isBranchManager = roles.Any(r => r == "BRANCHMANAGER");
-
-                if (!isSuperAdmin)
-                {
-                    if (isBranchManager)
-                    {
-                        if (!actor.BranchId.HasValue || actor.BranchId.Value != groupInfo.BranchId)
-                            return Result<PaginatedList<DocumentDto>>.Failure(new[] { "غير مسموح بالوصول إلى وثائق هذه المجموعة." });
-                    }
-                    else
-                    {
-                        if (!actor.DepartmentId.HasValue || actor.DepartmentId.Value != groupInfo.DepartmentId)
-                            return Result<PaginatedList<DocumentDto>>.Failure(new[] { "غير مسموح بالوصول إلى وثائق هذه المجموعة." });
-                    }
-                }
-
-                var query = _context.Documents.AsNoTracking()
-                    .Where(d => d.ArchiveGroupId == archiveGroupId)
-                    .OrderBy(d => d.DocumentNumber)
-                    .ProjectTo<DocumentDto>(_mapper.ConfigurationProvider);
-
-                var paged = await PaginatedList<DocumentDto>.CreateAsync(query, pageNumber, pageSize);
-
-                var permitted = await _fieldPerms.ApplyFieldPermissionsAsync(
-                    paged.Items.ToList(), userId, roleIds, "Document", jwt);
-
-                return Result<PaginatedList<DocumentDto>>.Success(
-                    new PaginatedList<DocumentDto>(permitted, paged.TotalCount, paged.PageNumber, pageSize));
-            }
-            catch (Exception ex)
-            {
-                return Result<PaginatedList<DocumentDto>>.Failure(new[] { $"حدث خطأ أثناء الجلب: {ex.Message}" });
-            }
-        }
-        #endregion
-
         #region Get Ungrouped Documents By DepartmentId (paged)
         public async Task<Result<PaginatedList<DocumentDto>>> GetUngroupedByDepartmentPagedAsync(long departmentId, int pageNumber = 1, int pageSize = 10)
         {
@@ -1010,9 +894,6 @@ namespace ArchiveProject.Infrastructure.Services
 
                 if (c.DocumentTypeId.HasValue)
                     q = q.Where(x => x.d.DocumentTypeId == c.DocumentTypeId.Value);
-
-                if (c.ArchiveGroupId.HasValue)
-                    q = q.Where(x => x.d.ArchiveGroupId == c.ArchiveGroupId.Value);
 
                 // ===== Search (Title/Description) =====
                 if (!string.IsNullOrWhiteSpace(c.Title))

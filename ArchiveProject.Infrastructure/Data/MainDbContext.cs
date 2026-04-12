@@ -45,7 +45,6 @@ namespace ArchiveProject.Infrastructure.Data
         public DbSet<Department> Departments { get; set; }
         public DbSet<DocumentType> DocumentTypes { get; set; }
         public DbSet<Document> Documents { get; set; }
-        public DbSet<ArchiveGroup> ArchiveGroups { get; set; }
         public DbSet<Attachment> Attachments { get; set; }
 
 
@@ -265,28 +264,6 @@ namespace ArchiveProject.Infrastructure.Data
                 entity.HasIndex(t => t.DocumentTypeName);
             });
 
-            // ===== ArchiveGroup =====
-            modelBuilder.Entity<ArchiveGroup>(entity =>
-            {
-                entity.HasKey(g => g.ArchiveGroupId);
-                entity.Property(g => g.Title).IsRequired().HasMaxLength(250);
-
-                entity.HasIndex(d => new { d.DepartmentId, d.ArchiveGroupNumber }).IsUnique();
-
-                entity.HasIndex(g => g.DepartmentId);
-                entity.HasIndex(g => g.UserId);
-
-                entity.HasOne(g => g.Department)
-                      .WithMany(d => d.ArchiveGroups)
-                      .HasForeignKey(g => g.DepartmentId)
-                      .OnDelete(DeleteBehavior.Restrict);
-
-                entity.HasOne(g => g.User)
-                      .WithMany(u => u.ArchiveGroups)
-                      .HasForeignKey(g => g.UserId)
-                      .OnDelete(DeleteBehavior.Restrict);
-            });
-
             // ===== Document =====
             modelBuilder.Entity<Document>(entity =>
             {
@@ -306,7 +283,6 @@ namespace ArchiveProject.Infrastructure.Data
                 entity.HasIndex(d => d.DepartmentId);
                 entity.HasIndex(d => d.UserId);
                 entity.HasIndex(d => d.DocumentTypeId);
-                entity.HasIndex(d => d.ArchiveGroupId);
 
                 entity.HasOne(d => d.Department)
                       .WithMany()
@@ -322,11 +298,6 @@ namespace ArchiveProject.Infrastructure.Data
                       .WithMany(t => t.Documents)
                       .HasForeignKey(d => d.DocumentTypeId)
                       .OnDelete(DeleteBehavior.Restrict);
-
-                entity.HasOne(d => d.ArchiveGroup)
-                      .WithMany(g => g.Documents)
-                      .HasForeignKey(d => d.ArchiveGroupId)
-                      .OnDelete(DeleteBehavior.SetNull);
             });
 
             // ===== Attachment =====

@@ -24,9 +24,6 @@ namespace ArchiveProject.Domain.Entities
         public long? DocumentTypeId { get; set; }
         public DocumentType? DocumentType { get; set; } = null!;
 
-        public long? ArchiveGroupId { get; set; }
-        public ArchiveGroup? ArchiveGroup { get; set; }
-
         /// <summary>
         /// رقم الوثيقة ضمن القسم (توليد تلقائي لكل قسم)
         /// </summary>

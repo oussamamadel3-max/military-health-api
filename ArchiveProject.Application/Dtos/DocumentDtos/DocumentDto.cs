@@ -17,9 +17,6 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
         [FieldPermission("DocumentTypeId", DisplayName = "نوع الوثيقة")]
         public long? DocumentTypeId { get; set; }
 
-        [FieldPermission("ArchiveGroupId", DisplayName = "مجموعة الأرشفة")]
-        public long? ArchiveGroupId { get; set; }
-
         [FieldPermission("DocumentNumber", DisplayName = "رقم الوثيقة")]
         public long? DocumentNumber { get; set; }
 
@@ -68,9 +65,6 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
         [FieldPermission("DocumentTypeId", Required = false, DisplayName = "نوع الوثيقة")]
         public long? DocumentTypeId { get; set; }
 
-        [FieldPermission("ArchiveGroupId", Required = false, DisplayName = "مجموعة الأرشفة")]
-        public long? ArchiveGroupId { get; set; }
-
         [Required(ErrorMessage = "العنوان مطلوب")]
         [StringLength(50, MinimumLength = 2)]
         [FieldPermission("Title", DisplayName = "العنوان")]
@@ -94,10 +88,6 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
         [FieldPermission("DocumentTypeId", DisplayName = "نوع الوثيقة")]
         [Range(1, long.MaxValue, ErrorMessage = "نوع الوثيقة غير موجود")]
         public long? DocumentTypeId { get; set; }
-
-        [FieldPermission("ArchiveGroupId", DisplayName = "مجموعة الأرشفة")]
-        [Range(1, long.MaxValue, ErrorMessage = "مجموعة الأرشفة غير موجودة")]
-        public long? ArchiveGroupId { get; set; }
 
         [FieldPermission("Title", DisplayName = "العنوان")]
         [StringLength(50, MinimumLength = 2)]
@@ -140,10 +130,6 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
         [Range(1, long.MaxValue, ErrorMessage = "نوع الوثيقة غير موجود")]
         public long? DocumentTypeId { get; set; }
 
-        [FieldPermission("ArchiveGroupId", Required = false, DisplayName = "مجموعة الأرشفة")]
-        [Range(1, long.MaxValue, ErrorMessage = "مجموعة الأرشفة غير موجودة")]
-        public long? ArchiveGroupId { get; set; }
-
         [FieldPermission("AttachmentIds", Required = false, DisplayName = "المرفقات")]
         [MaxLength(200)]
         public List<Guid> AttachmentIds { get; set; } = new();
@@ -153,7 +139,6 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
     {
         public long? DepartmentId { get; set; }
         public long? DocumentTypeId { get; set; }
-        public long? ArchiveGroupId { get; set; }
 
         [StringLength(20)]
         public string? SortBy { get; set; }
