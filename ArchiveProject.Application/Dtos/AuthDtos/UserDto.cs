@@ -1,4 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations;
+﻿using ArchiveProject.Application.Attributes;
+using System.ComponentModel.DataAnnotations;
 
 namespace ArchiveProject.Application.Dtos.AuthDtos;
 public class UserDto
@@ -107,8 +108,16 @@ public class UserListItemDto
 }
 public class UpdateUserWithRolesDto
 {
+    [Required]
+    [StringLength(50, MinimumLength = 3)]
+    [RegularExpression(@"^[a-zA-Z0-9._-]+$", ErrorMessage = "اسم المستخدم يحوي محارف غير مسموحة")]
     public required string UserName { get; set; }
+
+    [Required]
+    [EmailAddress]
+    [StringLength(254)]
     public required string Email { get; set; }
+
     public List<string> RoleIds { get; set; } = new List<string>();
 }
 

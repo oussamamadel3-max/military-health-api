@@ -1,7 +1,9 @@
-﻿using ArchiveProject.Application.Common.Interfaces.AttachmentInterfaces;
+﻿using ArchiveProject.API.Validation;
+using ArchiveProject.Application.Common.Interfaces.AttachmentInterfaces;
 using ArchiveProject.Application.Dtos;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.ComponentModel.DataAnnotations;
 
 namespace ArchiveProject.API.Controllers
 {
@@ -22,6 +24,11 @@ namespace ArchiveProject.API.Controllers
         [HttpPost("upload/{entityType}/{entityId:long}")]
         public async Task<Result<AttachmentReadDto>> Upload(string entityType,long entityId,IFormFile file,string? description = null)
         {
+            if (!AttachmentRouteConstraints.IsValidEntityType(entityType))
+                return Result<AttachmentReadDto>.Failure(new[] { "نوع الكيان غير صالح." });
+            if (file is null || file.Length == 0)
+                return Result<AttachmentReadDto>.Failure(new[] { "الملف فارغ أو غير محدد." });
+
             return await _service.UploadAsync(entityId, entityType, file, description, false);
         }
 
@@ -57,11 +64,8 @@ namespace ArchiveProject.API.Controllers
         }
 
         [HttpPost("delete-temp")]
-        public async Task<Result<string>> DeleteTemp([FromBody] List<Guid> attachmentIds)
+        public async Task<Result<string>> DeleteTemp([FromBody][MinLength(1, ErrorMessage = "لم يتم تحديد مرفقات.")] List<Guid> attachmentIds)
         {
-            if (attachmentIds == null || attachmentIds.Count == 0)
-                return Result<string>.Failure(new[] { "لم يتم تحديد مرفقات." });
-
             foreach (var id in attachmentIds)
                 await _service.DeleteAsync(id);
 
@@ -73,6 +77,11 @@ namespace ArchiveProject.API.Controllers
         [HttpPost("upload-profile/{entityType}/{entityId:long}")]
         public async Task<Result<AttachmentReadDto>> UploadProfile(string entityType,long entityId,IFormFile file)
         {
+            if (!AttachmentRouteConstraints.IsValidEntityType(entityType))
+                return Result<AttachmentReadDto>.Failure(new[] { "نوع الكيان غير صالح." });
+            if (file is null || file.Length == 0)
+                return Result<AttachmentReadDto>.Failure(new[] { "الملف فارغ أو غير محدد." });
+
             return await _service.UploadAsync(entityId, entityType, file, null, true);
         }
 
@@ -81,6 +90,9 @@ namespace ArchiveProject.API.Controllers
         [HttpGet("{entityType}/{entityId:long}")]
         public async Task<Result<List<AttachmentReadDto>>> GetByEntity(string entityType, long entityId)
         {
+            if (!AttachmentRouteConstraints.IsValidEntityType(entityType))
+                return Result<List<AttachmentReadDto>>.Failure(new[] { "نوع الكيان غير صالح." });
+
             return await _service.GetAttachmentsForEntityAsync(entityId, entityType);
         }
 
@@ -104,6 +116,9 @@ namespace ArchiveProject.API.Controllers
         [HttpPost("link/{attachmentId:Guid}/{entityId:long}/{entityType}")]
         public async Task<Result<string>> Link(Guid attachmentId, long entityId, string entityType)
         {
+            if (!AttachmentRouteConstraints.IsValidEntityType(entityType))
+                return Result<string>.Failure(new[] { "نوع الكيان غير صالح." });
+
             return await _service.LinkToEntityAsync(attachmentId, entityId, entityType);
         }
 
@@ -125,6 +140,9 @@ namespace ArchiveProject.API.Controllers
         [Authorize]
         public async Task<IActionResult> DownloadZip(string entityType, long entityId)
         {
+            if (!AttachmentRouteConstraints.IsValidEntityType(entityType))
+                return BadRequest(new { message = "نوع الكيان غير صالح." });
+
             var res = await _service.DownloadZipForEntityAsync(entityId, entityType);
             if (!res.Succeeded)
                 return BadRequest(res);

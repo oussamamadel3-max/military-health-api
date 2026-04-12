@@ -12,8 +12,12 @@ namespace ArchiveProject.API.Extensions
                 {
                     var errors = context.ModelState
                         .Where(kvp => kvp.Value?.Errors.Count > 0)
-                        .SelectMany(kvp => kvp.Value!.Errors.Select(e => e.ErrorMessage))
-                        .ToList();
+                        .GroupBy(kvp => string.IsNullOrEmpty(kvp.Key) ? "$" : kvp.Key)
+                        .ToDictionary(
+                            g => g.Key,
+                            g => g.SelectMany(x => x.Value!.Errors
+                                    .Select(e => string.IsNullOrEmpty(e.ErrorMessage) ? "قيمة غير صالحة." : e.ErrorMessage))
+                                .ToArray());
 
                     return new BadRequestObjectResult(new
                     {

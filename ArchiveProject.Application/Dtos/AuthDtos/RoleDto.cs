@@ -1,3 +1,6 @@
+using ArchiveProject.Application.Attributes;
+using System.ComponentModel.DataAnnotations;
+
 namespace ArchiveProject.Application.Dtos.AuthDtos;
 public class RoleDto
 {
@@ -9,13 +12,22 @@ public class RoleDto
 }
 public class CreateRoleDto
 {
+    [Required(ErrorMessage = "اسم الدور مطلوب.")]
+    [StringLength(200, MinimumLength = 2)]
     public string Name { get; set; } = string.Empty;
+
+    [StringLength(500)]
     public string? Description { get; set; }
     public bool? IsActive { get; set; } = true;
 }
+
 public class UpdateRoleDto
 {
+    [Required(ErrorMessage = "اسم الدور مطلوب.")]
+    [StringLength(200, MinimumLength = 2)]
     public string Name { get; set; } = string.Empty;
+
+    [StringLength(500)]
     public string? Description { get; set; }
 }
 
@@ -37,7 +49,11 @@ public class RoleDetailsDto
 
 public class CreateRoleWithPermissionsDto
 {
+    [Required(ErrorMessage = "اسم الدور مطلوب.")]
+    [StringLength(200, MinimumLength = 2)]
     public string Name { get; set; } = string.Empty;
+
+    [StringLength(500)]
     public string? Description { get; set; }
     public List<Guid> PermissionIds { get; set; } = new();
     public bool? IsActive { get; set; } = true;

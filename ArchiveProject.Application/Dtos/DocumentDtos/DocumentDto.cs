@@ -65,7 +65,7 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
         public List<Guid> AttachmentIds { get; set; } = new();
     }
 
-    public class UpdateDocumentDto
+    public class UpdateDocumentDto : IValidatableObject
     {
         [FieldPermission("Title", DisplayName = "العنوان")]
         [StringLength(50, MinimumLength = 2)]
@@ -86,6 +86,15 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
 
         [MaxLength(200)]
         public List<Guid>? RemoveAttachmentIds { get; set; }
+
+        public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+        {
+            if (Title is not null && string.IsNullOrWhiteSpace(Title))
+                yield return new ValidationResult("إذا أُرسل العنوان فلا يمكن أن يكون فارغاً أو مسافات فقط.", new[] { nameof(Title) });
+
+            if (Description is not null && string.IsNullOrWhiteSpace(Description))
+                yield return new ValidationResult("إذا أُرسل الوصف فلا يمكن أن يكون فارغاً أو مسافات فقط.", new[] { nameof(Description) });
+        }
     }
 
     public class CreateDocumentManyDto
@@ -104,7 +113,7 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
         public List<Guid> AttachmentIds { get; set; } = new();
     }
 
-    public class DocumentSearchCriteria
+    public class DocumentSearchCriteria : IValidatableObject
     {
         [StringLength(20)]
         public string? SortBy { get; set; }
@@ -119,5 +128,17 @@ namespace ArchiveProject.Application.Dtos.DocumentDtos
 
         public DateTime? CreatedFrom { get; set; }
         public DateTime? CreatedTo { get; set; }
+
+        public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+        {
+            if (CreatedFrom.HasValue && CreatedTo.HasValue && CreatedFrom > CreatedTo)
+                yield return new ValidationResult("تاريخ البداية يجب ألا يتعدى تاريخ النهاية.", new[] { nameof(CreatedFrom), nameof(CreatedTo) });
+
+            if (Title is not null && string.IsNullOrWhiteSpace(Title))
+                yield return new ValidationResult("عنوان البحث لا يمكن أن يكون مسافات فقط.", new[] { nameof(Title) });
+
+            if (Description is not null && string.IsNullOrWhiteSpace(Description))
+                yield return new ValidationResult("وصف البحث لا يمكن أن يكون مسافات فقط.", new[] { nameof(Description) });
+        }
     }
 }

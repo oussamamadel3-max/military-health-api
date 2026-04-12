@@ -1,5 +1,5 @@
 ﻿using ArchiveProject.Application.Common.Results;
-using ArchiveProject.Application.ModelsDto.AuditLogDtos;
+using System.ComponentModel.DataAnnotations;
 
 namespace ArchiveProject.Application.ModelsDto.AuditLogDtos
 {
@@ -64,14 +64,26 @@ namespace ArchiveProject.Application.ModelsDto.AuditLogDtos
         public long Modified { get; set; }
         public long Deleted { get; set; }
     }
-    public class AuditLogFilter
+    public class AuditLogFilter : IValidatableObject
     {
+        [StringLength(200)]
         public string? searchUserName { get; set; }
+
         public DateTimeOffset? From { get; set; }
         public DateTimeOffset? To { get; set; }
-        public string? userName { get; set; }     
-        public AuditActionType? actionType { get; set; }
-        public List<string>? tableNames { get; set; }  
 
+        [StringLength(200)]
+        public string? userName { get; set; }
+
+        public AuditActionType? actionType { get; set; }
+
+        [MaxLength(100)]
+        public List<string>? tableNames { get; set; }
+
+        public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+        {
+            if (From.HasValue && To.HasValue && From > To)
+                yield return new ValidationResult("تاريخ البداية يجب ألا يتعدى تاريخ النهاية.", new[] { nameof(From), nameof(To) });
+        }
     }
 }

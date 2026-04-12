@@ -3,6 +3,7 @@ using ArchiveProject.Application.Common.Results;
 using ArchiveProject.Application.Dtos;
 using ArchiveProject.Application.Dtos.DocumentDtos;
 using Microsoft.AspNetCore.Mvc;
+using System.ComponentModel.DataAnnotations;
 
 namespace ArchiveProject.API.Controllers
 {
@@ -68,8 +69,8 @@ namespace ArchiveProject.API.Controllers
         [HttpGet("GetAllDocuments")]
         [AuthorizePermission("Document.Read")]
         public async Task<Result<PaginatedList<DocumentDto>>> GetAll(
-            [FromQuery] int pageNumber = 1,
-            [FromQuery] int pageSize = 10,
+            [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
+            [FromQuery][Range(1, 500)] int pageSize = 10,
             [FromQuery] string? title = null)
             => Pipe(await _service.GetDocumentsAsync(pageNumber, pageSize, title));
 
@@ -79,8 +80,8 @@ namespace ArchiveProject.API.Controllers
         [AuthorizePermission("Document.Read")]
         public async Task<Result<PaginatedList<DocumentDto>>> Search(
             [FromForm] DocumentSearchCriteria criteria,
-            [FromForm] int pageNumber = 1,
-            [FromForm] int pageSize = 10)
+            [FromForm][Range(1, int.MaxValue)] int pageNumber = 1,
+            [FromForm][Range(1, 500)] int pageSize = 10)
             => Pipe(await _service.SearchAsync(criteria, pageNumber, pageSize));
     }
 }

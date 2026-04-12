@@ -4,6 +4,7 @@ using ArchiveProject.Application.Common.Results;
 using ArchiveProject.Application.Dtos.AuthDtos;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.ComponentModel.DataAnnotations;
 
 namespace ArchiveProject.API.Controllers.AuthControllers
 {
@@ -65,7 +66,11 @@ namespace ArchiveProject.API.Controllers.AuthControllers
 
         [HttpGet("[action]")]
         [AuthorizePermission("UserManagement.Read")]
-        public async Task<Result<PaginatedList<UserListItemDto>>> GetUsersList([FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 10, [FromQuery] string? q = null, [FromQuery] bool? isActive = null)
+        public async Task<Result<PaginatedList<UserListItemDto>>> GetUsersList(
+            [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
+            [FromQuery][Range(1, 500)] int pageSize = 10,
+            [FromQuery] string? q = null,
+            [FromQuery] bool? isActive = null)
         {
             var result = await _userService.GetUsersListAsync(pageNumber, pageSize, q, isActive);
 

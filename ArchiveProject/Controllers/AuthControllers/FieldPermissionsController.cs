@@ -4,6 +4,7 @@ using ArchiveProject.Domain.Enums;
 using ArchiveProject.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.ComponentModel.DataAnnotations;
 
 
 namespace ArchiveProject.API.Controllers.AuthControllers
@@ -26,8 +27,8 @@ namespace ArchiveProject.API.Controllers.AuthControllers
 
         [HttpGet("[action]")]
         public async Task<Result<PaginatedList<FieldPermissionDto>>> GetFieldPermissions(
-            [FromQuery] int pageNumber = 1,
-            [FromQuery] int pageSize = 10,
+            [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
+            [FromQuery][Range(1, 500)] int pageSize = 10,
             [FromQuery] string? roleId = null,
             [FromQuery] string? userId = null,
             [FromQuery] string? entityName = null,

@@ -4,6 +4,7 @@ using ArchiveProject.Domain.Common;
 using ArchiveProject.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.ComponentModel.DataAnnotations;
 
 [Route("api/[controller]")]
 [ApiController]
@@ -51,7 +52,10 @@ public class AuditLogController : ControllerBase
 
     [HttpPost("[action]")]
     [AuthorizePermission("AuditLog.Read")]
-    public async Task<IActionResult> GetAllFiltered([FromQuery] int pageNumber = 1,[FromQuery] int pageSize = 10,[FromForm] AuditLogFilter filter = null!)
+    public async Task<IActionResult> GetAllFiltered(
+        [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
+        [FromQuery][Range(1, 500)] int pageSize = 10,
+        [FromForm] AuditLogFilter? filter = null)
     {
         filter ??= new AuditLogFilter();
 

@@ -1,5 +1,6 @@
 using ArchiveProject.Domain.Enums;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 
 namespace ArchiveProject.Application.Dtos.AuthDtos;
 
@@ -23,13 +24,34 @@ public class FieldPermissionDto
 }
 
 
-public class CreateFieldPermissionDto
+public class CreateFieldPermissionDto : IValidatableObject
 {
+    [Required(ErrorMessage = "اسم الكيان مطلوب.")]
+    [StringLength(200, MinimumLength = 1)]
+    [RegularExpression(@"^[A-Za-z][A-Za-z0-9_]*$", ErrorMessage = "اسم الكيان غير صالح.")]
     public string EntityName { get; set; } = string.Empty;
+
+    [Required]
+    [MinLength(1, ErrorMessage = "يجب تحديد حقل واحد على الأقل.")]
     public List<string> FieldNames { get; set; } = new();
+
     public FieldAccessType AccessType { get; set; } = FieldAccessType.Read;
+
     public List<string>? RoleIds { get; set; } = new();
+
     public List<string>? UserIds { get; set; } = new();
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        foreach (var fn in FieldNames ?? Enumerable.Empty<string>())
+        {
+            if (string.IsNullOrWhiteSpace(fn))
+            {
+                yield return new ValidationResult("اسم الحقل لا يمكن أن يكون فارغاً.", new[] { nameof(FieldNames) });
+                yield break;
+            }
+        }
+    }
 }
 
 public class CreateFieldPermissionsResultDto
