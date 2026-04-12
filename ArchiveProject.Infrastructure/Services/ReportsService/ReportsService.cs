@@ -1,4 +1,5 @@
 ﻿using ArchiveProject.Application.Common.Interfaces;
+using ArchiveProject.Application.Common.Utilities;
 using ArchiveProject.Application.Common.Interfaces.DashboardInterfaces;
 using ArchiveProject.Application.Common.Interfaces.Reports;
 using ArchiveProject.Application.Common.Interfaces.UserContextInterfaces;
@@ -61,8 +62,16 @@ namespace ArchiveProject.Infrastructure.Services.Reports
                 var q = ApplyScopeDocs(_context.Documents.AsNoTracking(), s);
 
                 // Filters
-                if (!string.IsNullOrWhiteSpace(c.Title)) q = q.Where(d => d.Title.Contains(c.Title));
-                if (!string.IsNullOrWhiteSpace(c.Description)) q = q.Where(d => d.Description.Contains(c.Description));
+                if (!string.IsNullOrWhiteSpace(c.Title))
+                {
+                    var titleEsc = SqlLikePatternEscape.EscapeForSqlServerLike(c.Title.Trim());
+                    q = q.Where(d => d.Title.Contains(titleEsc));
+                }
+                if (!string.IsNullOrWhiteSpace(c.Description))
+                {
+                    var descEsc = SqlLikePatternEscape.EscapeForSqlServerLike(c.Description.Trim());
+                    q = q.Where(d => d.Description.Contains(descEsc));
+                }
                 if (c.CreatedFrom.HasValue)
                 {
                     var from = c.CreatedFrom.Value.Date;
@@ -143,14 +152,14 @@ namespace ArchiveProject.Infrastructure.Services.Reports
 
                 if (!string.IsNullOrWhiteSpace(filter.searchUserName))
                 {
-                    var ns = filter.searchUserName.Trim().ToLower();
+                    var ns = SqlLikePatternEscape.EscapeForSqlServerLike(filter.searchUserName.Trim().ToLower());
                     q = q.Where(a =>
                         (a.UserName ?? "").ToLower().Contains(ns));
                 }
 
                 if (!string.IsNullOrWhiteSpace(filter.userName))
                 {
-                    var name = filter.userName.Trim().ToLower();
+                    var name = SqlLikePatternEscape.EscapeForSqlServerLike(filter.userName.Trim().ToLower());
                     q = q.Where(a =>
                         (a.UserName ?? "").ToLower().Contains(name) ||
                         (a.UserId ?? "").ToLower().Contains(name));

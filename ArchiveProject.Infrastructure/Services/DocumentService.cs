@@ -1,5 +1,6 @@
 ﻿using ArchiveProject.Application.Common.Interfaces;
 using ArchiveProject.Application.Common.Interfaces.AttachmentInterfaces;
+using ArchiveProject.Application.Common.Utilities;
 using ArchiveProject.Application.Common.Interfaces.UserContextInterfaces;
 using ArchiveProject.Application.Common.Results;
 using ArchiveProject.Application.Dtos;
@@ -24,9 +25,10 @@ namespace ArchiveProject.Infrastructure.Services
         private readonly IMapper _mapper;
         private readonly IAttachmentService _attachments;
         private readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly ITextInputSanitizer _textSanitizer;
 
 
-        public DocumentService(MainDbContext context,FieldPermissionHelper fieldPerms,IUserContextService userCtx,IMapper mapper,IAttachmentService attachments, IHttpContextAccessor httpContextAccessor)
+        public DocumentService(MainDbContext context,FieldPermissionHelper fieldPerms,IUserContextService userCtx,IMapper mapper,IAttachmentService attachments, IHttpContextAccessor httpContextAccessor, ITextInputSanitizer textSanitizer)
         {
             _context = context;
             _fieldPerms = fieldPerms;
@@ -34,6 +36,7 @@ namespace ArchiveProject.Infrastructure.Services
             _mapper = mapper;
             _attachments = attachments;
             _httpContextAccessor = httpContextAccessor;
+            _textSanitizer = textSanitizer;
         }
 
         private string CurrentUserId => _userCtx.UserId ?? string.Empty;
@@ -69,8 +72,8 @@ namespace ArchiveProject.Infrastructure.Services
 
                 var entity = new Document
                 {
-                    Title = dto.Title,
-                    Description = dto.Description ?? string.Empty,
+                    Title = _textSanitizer.SanitizePlainText(dto.Title) ?? string.Empty,
+                    Description = _textSanitizer.SanitizePlainText(dto.Description) ?? string.Empty,
                     UserId = userId,
                     DocumentNumber = currentMax + 1
                 };
@@ -124,145 +127,6 @@ namespace ArchiveProject.Infrastructure.Services
         #endregion
 
         #region Update Document (link new AttachmentIds if provided)
-        //public async Task<Result<string>> UpdateAsync(long documentId, UpdateDocumentDto dto)
-        //{
-        //    try
-        //    {
-        //        var userId = CurrentUserId;
-        //        var roleIds = CurrentRoleIds;
-        //        var jwt = JwtFieldPerms;
-
-        //        var entity = await _context.Documents.FirstOrDefaultAsync(d => d.DocumentId == documentId);
-        //        if (entity == null)
-        //            return Result<string>.Failure(new[] { "الوثيقة غير موجودة." });
-
-        //        // الممثل + الأدوار
-        //        var actor = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId) as User;
-        //        if (actor is null)
-        //            return Result<string>.Failure(new[] { "المستخدم الحالي غير موجود." });
-
-        //        var actorRoleNorms = await _context.UserRoleAssociations
-        //            .Where(ura => ura.UserId == userId)
-        //            .Join(_context.Roles, ura => ura.RoleId, r => r.Id, (ura, r) => r.NormalizedName)
-        //            .ToListAsync();
-
-        //        bool isSuperAdmin = actorRoleNorms.Any(n => n == "SUPERADMIN");
-        //        bool isBranchManager = actorRoleNorms.Any(n => n == "BRANCHMANAGER");
-
-        //        // تحديد القسم النهائي
-        //        var originalDepartmentId = entity.DepartmentId;
-        //        long requestedDepartmentId = dto.DepartmentId ?? entity.DepartmentId;
-        //        long finalDepartmentId;
-
-        //        if (!isSuperAdmin && !isBranchManager && actor.DepartmentId.HasValue)
-        //        {
-        //            if (entity.DepartmentId != actor.DepartmentId.Value)
-        //                return Result<string>.Failure(new[] { "لا يمكنك تعديل وثيقة خارج قسمك." });
-
-        //            finalDepartmentId = actor.DepartmentId.Value;
-        //            dto.DepartmentId = finalDepartmentId;
-        //        }
-        //        else if (isBranchManager)
-        //        {
-        //            if (!actor.BranchId.HasValue)
-        //                return Result<string>.Failure(new[] { "لا يمكن تحديد فرع المستخدم الحالي." });
-
-        //            var dept = await _context.Departments.AsNoTracking()
-        //                .FirstOrDefaultAsync(d => d.DepartmentId == requestedDepartmentId);
-        //            if (dept is null)
-        //                return Result<string>.Failure(new[] { "القسم غير موجود." });
-
-        //            if (dept.BranchId != actor.BranchId.Value)
-        //                return Result<string>.Failure(new[] { "لا يمكنك نقل/تعديل وثيقة لقسم خارج فرعك." });
-
-        //            finalDepartmentId = dept.DepartmentId;
-        //            dto.DepartmentId = finalDepartmentId;
-        //        }
-        //        else
-        //        {
-        //            var depExists = await _context.Departments
-        //                .AnyAsync(d => d.DepartmentId == requestedDepartmentId);
-        //            if (!depExists)
-        //                return Result<string>.Failure(new[] { "القسم غير موجود." });
-
-        //            finalDepartmentId = requestedDepartmentId;
-        //            dto.DepartmentId = finalDepartmentId;
-        //        }
-
-        //        // صلاحيات الحقول
-        //        var errors = await PermissionHelperUtilities.ValidateFieldPermissionsFromJwtAsync(
-        //            dto, jwt, "Document", _fieldPerms, userId, roleIds);
-        //        if (errors.Any())
-        //            return Result<string>.Failure(errors.ToArray());
-
-        //        // تحقق المرجعيات
-        //        long? targetTypeId = dto.DocumentTypeId ?? entity.DocumentTypeId;
-        //        if (!targetTypeId.HasValue)
-        //            return Result<string>.Failure(new[] { "نوع الوثيقة مطلوب." });
-
-        //        var docType = await _context.DocumentTypes.FindAsync(targetTypeId.Value);
-        //        if (docType == null)
-        //            return Result<string>.Failure(new[] { "نوع الوثيقة غير موجود." });
-
-        //        // Map التغييرات الأساسية
-        //        _mapper.Map(dto, entity);
-        //        entity.DepartmentId = finalDepartmentId;
-        //        entity.DocumentTypeId = targetTypeId;
-
-        //        // إعادة الترقيم عند تغيير القسم
-        //        bool departmentChanged = (finalDepartmentId != originalDepartmentId);
-        //        if (departmentChanged)
-        //        {
-        //            var newMax = await _context.Documents
-        //                .Where(d => d.DepartmentId == finalDepartmentId)
-        //                .Select(d => (long?)d.DocumentNumber)
-        //                .MaxAsync() ?? 0;
-
-        //            entity.DocumentNumber = newMax + 1;
-        //        }
-
-        //        _context.Documents.Update(entity);
-
-        //        // حفظ مع Retry لتعارض الترقيم
-        //        const int maxRetries = 5;
-        //        for (int attempt = 1; attempt <= maxRetries; attempt++)
-        //        {
-        //            try
-        //            {
-        //                await _context.SaveChangesAsync();
-        //                break;
-        //            }
-        //            catch (DbUpdateException dbEx) when (IsUniqueConstraintViolation(dbEx))
-        //            {
-        //                if (attempt == maxRetries)
-        //                    return Result<string>.Failure(new[] { "تعذر حفظ التغييرات بسبب تعارض الترقيم بعد عدة محاولات." });
-
-        //                var retryMax = await _context.Documents
-        //                    .Where(d => d.DepartmentId == entity.DepartmentId)
-        //                    .Select(d => (long?)d.DocumentNumber)
-        //                    .MaxAsync() ?? 0;
-
-        //                entity.DocumentNumber = retryMax + 1;
-        //            }
-        //        }
-
-        //        // ربط المرفقات الجديدة إن أُرسلت (لا نقوم بإزالة الموجود حالياً حفاظاً على البيانات)
-        //        if (dto.AttachmentIds != null && dto.AttachmentIds.Count > 0)
-        //        {
-        //            // يمكن التحسين مستقبلاً بمقارنة الموجود وإضافة الجديد فقط
-        //            foreach (var attId in dto.AttachmentIds.Distinct())
-        //            {
-        //                await _attachments.LinkToEntityAsync(attId, entity.DocumentId, "Document");
-        //            }
-        //        }
-
-        //        return Result<string>.Success("تم تحديث الوثيقة بنجاح.");
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        return Result<string>.Failure(new[] { $"حدث خطأ أثناء التحديث: {ex.Message}" });
-        //    }
-        //}
         public async Task<Result<string>> UpdateAsync(long documentId, UpdateDocumentDto dto)
         {
             try
@@ -296,7 +160,8 @@ namespace ArchiveProject.Infrastructure.Services
 
                 // === تطبيق التغييرات الأساسية ===
                 _mapper.Map(dto, entity);
-                entity.Description ??= string.Empty;
+                entity.Title = _textSanitizer.SanitizePlainText(entity.Title) ?? string.Empty;
+                entity.Description = _textSanitizer.SanitizePlainText(entity.Description) ?? string.Empty;
 
                 using var tx = await _context.Database.BeginTransactionAsync();
                 try
@@ -549,7 +414,10 @@ namespace ArchiveProject.Infrastructure.Services
                     query = query.Where(d => d.UserId == userId);
 
                 if (!string.IsNullOrWhiteSpace(title))
-                    query = query.Where(d => d.Title.Contains(title));
+                {
+                    var t = SqlLikePatternEscape.EscapeForSqlServerLike(title.Trim());
+                    query = query.Where(d => d.Title.Contains(t));
+                }
 
                 var projected = query
                     .OrderByDescending(d => d.CreatedAt)
@@ -657,7 +525,7 @@ namespace ArchiveProject.Infrastructure.Services
                 // ===== Search (Title/Description) =====
                 if (!string.IsNullOrWhiteSpace(c.Title))
                 {
-                    var t = c.Title.Trim();
+                    var t = SqlLikePatternEscape.EscapeForSqlServerLike(c.Title.Trim());
                     q = q.Where(d => d.Title.Contains(t));
                     // إذا أنت PostgreSQL وتحب بحث غير حساس لحالة الأحرف:
                     // q = q.Where(x => EF.Functions.ILike(x.d.Title, $"%{t}%"));
@@ -665,7 +533,7 @@ namespace ArchiveProject.Infrastructure.Services
 
                 if (!string.IsNullOrWhiteSpace(c.Description))
                 {
-                    var dsc = c.Description.Trim();
+                    var dsc = SqlLikePatternEscape.EscapeForSqlServerLike(c.Description.Trim());
                     q = q.Where(d => d.Description.Contains(dsc));
                     // PostgreSQL:
                     // q = q.Where(x => EF.Functions.ILike(x.d.Description, $"%{dsc}%"));

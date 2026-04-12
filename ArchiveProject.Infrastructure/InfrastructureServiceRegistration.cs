@@ -13,6 +13,7 @@ using ArchiveProject.Infrastructure.Services.AuthServices;
 using ArchiveProject.Infrastructure.Services.Dashboard;
 using ArchiveProject.Infrastructure.Services.FileStorageService;
 using ArchiveProject.Infrastructure.Services.Reports;
+using ArchiveProject.Infrastructure.Services.Sanitization;
 using FinanceProject.Infrastructure.Services;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -22,6 +23,8 @@ namespace ArchiveProject.Infrastructure
     {
         public static IServiceCollection ConfigureInfrastructureServices(this IServiceCollection services)
         {
+            services.AddSingleton<ITextInputSanitizer, HtmlTextInputSanitizer>();
+
             services.AddScoped<AuditInterceptor>();
             services.AddScoped<IAuditLogService, AuditLogService>();
 

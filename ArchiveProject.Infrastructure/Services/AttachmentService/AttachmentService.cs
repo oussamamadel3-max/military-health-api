@@ -1,4 +1,5 @@
-﻿using ArchiveProject.Application.Common.Interfaces.AttachmentInterfaces;
+﻿using ArchiveProject.Application.Common.Interfaces;
+using ArchiveProject.Application.Common.Interfaces.AttachmentInterfaces;
 using ArchiveProject.Application.Common.Interfaces.FileStorageInterfaces;
 using ArchiveProject.Application.Dtos;
 using ArchiveProject.Domain.Entities;
@@ -19,13 +20,16 @@ namespace ArchiveProject.Infrastructure.Services.AttachmentService
         private readonly IFileStorageService _fileStorage;
         private readonly IHttpContextAccessor _httpContextAccessor;
         private readonly IWebHostEnvironment _env;
-        public AttachmentService(MainDbContext context, IMapper mapper, IFileStorageService fileStorage, IHttpContextAccessor httpContextAccessor, IWebHostEnvironment env)
+        private readonly ITextInputSanitizer _textSanitizer;
+
+        public AttachmentService(MainDbContext context, IMapper mapper, IFileStorageService fileStorage, IHttpContextAccessor httpContextAccessor, IWebHostEnvironment env, ITextInputSanitizer textSanitizer)
         {
             _context = context;
             _mapper = mapper;
             _fileStorage = fileStorage;
             _httpContextAccessor = httpContextAccessor;
             _env = env;
+            _textSanitizer = textSanitizer;
         }
 
         #region Upload
@@ -59,7 +63,7 @@ namespace ArchiveProject.Infrastructure.Services.AttachmentService
                     FilePath = path,
                     FileSize = size,
                     ContentType = file.ContentType,
-                    Description = description,
+                    Description = _textSanitizer.SanitizePlainText(description),
                     IsProfilePhoto = isProfilePhoto,
                     UploadedAt = DateTime.UtcNow,
                     CreatedAt = DateTime.UtcNow,

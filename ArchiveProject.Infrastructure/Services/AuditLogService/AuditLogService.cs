@@ -1,4 +1,5 @@
 ﻿using ArchiveProject.Application.Common.Interfaces.AuditLogInterfaces;
+using ArchiveProject.Application.Common.Utilities;
 using ArchiveProject.Application.Common.Interfaces.AuthInterfaces;
 using ArchiveProject.Application.Common.Results;
 using ArchiveProject.Application.ModelsDto.AuditLogDtos;
@@ -77,7 +78,7 @@ namespace FinanceProject.Infrastructure.Services
             // ========= searchUserName (بحث بالاسم فقط) =========
             if (!string.IsNullOrWhiteSpace(auditLogFilter.searchUserName))
             {
-                var s = auditLogFilter.searchUserName.Trim().ToLower();
+                var s = SqlLikePatternEscape.EscapeForSqlServerLike(auditLogFilter.searchUserName.Trim().ToLower());
                 scoped = scoped.Where(a =>
                     (a.UserName ?? "").ToLower().Contains(s));
             }
@@ -85,7 +86,7 @@ namespace FinanceProject.Infrastructure.Services
             // ========= userName (اسم أو Id) =========
             if (!string.IsNullOrWhiteSpace(auditLogFilter.userName))
             {
-                var s = auditLogFilter.userName.Trim().ToLower();
+                var s = SqlLikePatternEscape.EscapeForSqlServerLike(auditLogFilter.userName.Trim().ToLower());
                 scoped = scoped.Where(a =>
                     (a.UserName ?? "").ToLower().Contains(s) ||
                     (a.UserId ?? "").ToLower().Contains(s));

@@ -1,5 +1,6 @@
 ﻿using AutoMapper;
 using ArchiveProject.Application.Common.Interfaces.AuthInterfaces;
+using ArchiveProject.Application.Common.Utilities;
 using ArchiveProject.Application.Dtos.AuthDtos;
 using ArchiveProject.Domain.Entities.Auth;
 using ArchiveProject.Infrastructure.Data;
@@ -124,7 +125,7 @@ namespace ArchiveProject.Infrastructure.Services.AuthServices
                 // فلترة بالاسم (جزئي، غير حساس لحالة الأحرف)
                 if (!string.IsNullOrWhiteSpace(name))
                 {
-                    var s = name.Trim();
+                    var s = SqlLikePatternEscape.EscapeForSqlServerLike(name.Trim());
                     query = query.Where(p => EF.Functions.Like(p.Name, $"%{s}%"));
                 }
 

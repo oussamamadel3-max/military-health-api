@@ -1,5 +1,6 @@
 ﻿using AutoMapper;
 using ArchiveProject.Application.Common.Interfaces.AuthInterfaces;
+using ArchiveProject.Application.Common.Utilities;
 using ArchiveProject.Application.Common.Results;
 using ArchiveProject.Application.Dtos.AuthDtos;
 using ArchiveProject.Domain.Entities.Auth;
@@ -141,7 +142,7 @@ namespace ArchiveProject.Infrastructure.Services.AuthServices
 
             if (!string.IsNullOrWhiteSpace(name))
             {
-                var s = name.Trim();
+                var s = SqlLikePatternEscape.EscapeForSqlServerLike(name.Trim());
                 rolesQuery = rolesQuery.Where(r => EF.Functions.Like(r.Name!, $"%{s}%"));
             }
 

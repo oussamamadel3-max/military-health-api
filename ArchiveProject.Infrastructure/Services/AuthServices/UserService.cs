@@ -1,4 +1,6 @@
-﻿using ArchiveProject.Application.Common.Interfaces.AuthInterfaces;
+﻿using ArchiveProject.Application.Common.Interfaces;
+using ArchiveProject.Application.Common.Interfaces.AuthInterfaces;
+using ArchiveProject.Application.Common.Utilities;
 using ArchiveProject.Application.Common.Localization;
 using ArchiveProject.Application.Common.Results;
 using ArchiveProject.Application.Dtos.AuthDtos;
@@ -16,13 +18,16 @@ public class UserService : IUserService
     private readonly MainDbContext _context;
     private readonly JwtSettings _jwtSettings;
     private readonly ICurrentUserService _currentUserService;
-    public UserService(UserManager<User> userManager, MainDbContext context, JwtSettings jwtSettings, RoleManager<Role> roleManager, ICurrentUserService currentUserService)
+    private readonly ITextInputSanitizer _textSanitizer;
+
+    public UserService(UserManager<User> userManager, MainDbContext context, JwtSettings jwtSettings, RoleManager<Role> roleManager, ICurrentUserService currentUserService, ITextInputSanitizer textSanitizer)
     {
         _userManager = userManager;
         _context = context;
         _jwtSettings = jwtSettings;
         _roleManager = roleManager;
         _currentUserService = currentUserService;
+        _textSanitizer = textSanitizer;
     }
 
 
@@ -71,12 +76,12 @@ public class UserService : IUserService
         {
             var user = new User
             {
-                UserName = createdUser.username,
-                Email = createdUser.email,
-                PhoneNumber = createdUser.phone,
+                UserName = _textSanitizer.SanitizePlainText(createdUser.username) ?? createdUser.username,
+                Email = _textSanitizer.SanitizePlainText(createdUser.email) ?? createdUser.email,
+                PhoneNumber = string.IsNullOrEmpty(createdUser.phone) ? null : _textSanitizer.SanitizePlainText(createdUser.phone),
                 IsActive = createdUser.isActive,
                 CreationDate = DateTime.Now,
-                FullName = createdUser.fullName
+                FullName = _textSanitizer.SanitizePlainText(createdUser.fullName) ?? string.Empty
             };
 
             var createRes = await _userManager.CreateAsync(user, createdUser.password);
@@ -123,123 +128,7 @@ public class UserService : IUserService
 
     #endregion
 
-    #region       التعديل الكامل    
-    //public async Task<Result<string>> Update(string id, UpdateUserDto updatedUser)
-    //{
-    //    var errors = new List<string>();
-
-    //    // 1) جلب المستخدم
-    //    var user = await _userManager.FindByIdAsync(id);
-    //    if (user == null)
-    //        return Result<string>.Failure(new[] { "المستخدم غير موجود" }, null);
-
-    //    // 2) هل المستخدم SuperAdmin (من جداول الربط المخصصة لديك)
-    //    var isSuperAdmin = await _context.UserRoleAssociations
-    //        .Where(ura => ura.UserId == user.Id)
-    //        .Join(_context.Roles, ura => ura.RoleId, r => r.Id, (ura, r) => r.Name)
-    //        .AnyAsync(n => n != null && n.ToLower() == "superadmin");
-
-    //    // 3) تعديل الإيميل (مع التحقق عبر UserManager)
-    //    if (!string.IsNullOrWhiteSpace(updatedUser.Email) && !string.Equals(updatedUser.Email, user.Email, StringComparison.OrdinalIgnoreCase))
-    //    {
-    //        // منع التكرار اليدوي لرسالة عربية أوضح
-    //        var emailDup = await _userManager.FindByEmailAsync(updatedUser.Email);
-    //        if (emailDup != null && emailDup.Id != user.Id)
-    //            return Result<string>.Failure(new[] { "البريد الإلكتروني مستخدم من قبل حساب آخر." }, null);
-
-    //        var setEmail = await _userManager.SetEmailAsync(user, updatedUser.Email);
-    //        if (!setEmail.Succeeded)
-    //            return Result<string>.Failure(setEmail.Errors.Select(e => e.Description), null);
-    //    }
-
-    //    // 4) تعديل اسم المستخدم (مع التحقق عبر UserManager)
-    //    if (!string.IsNullOrWhiteSpace(updatedUser.UserName) && !string.Equals(updatedUser.UserName, user.UserName, StringComparison.OrdinalIgnoreCase))
-    //    {
-    //        var userNameDup = await _userManager.FindByNameAsync(updatedUser.UserName);
-    //        if (userNameDup != null && userNameDup.Id != user.Id)
-    //            return Result<string>.Failure(new[] { "اسم المستخدم مستخدم من قبل حساب آخر." }, null);
-
-    //        var setUserName = await _userManager.SetUserNameAsync(user, updatedUser.UserName);
-    //        if (!setUserName.Succeeded)
-    //            return Result<string>.Failure(setUserName.Errors.Select(e => e.Description), null);
-    //    }
-
-    //    // 5) منطق الفرع / القسم
-    //    //   الحالات المسموحة:
-    //    //   - DepartmentId فقط (موظف قسم) => يُستنتج BranchId من القسم
-    //    //   - BranchId فقط (مستخدم فرع)
-    //    //   - لا شيء (مسموح فقط إذا SuperAdmin)
-    //    //   - كلاهما مع تطابق (القسم يتبع نفس الفرع)
-    //    long? newDepartmentId = updatedUser.DepartmentId;
-    //    long? newBranchId = updatedUser.BranchId;
-
-    //    if (newDepartmentId.HasValue)
-    //    {
-    //        // التحقق من القسم وفعاليته
-    //        var dept = await _context.Departments.AsNoTracking()
-    //            .FirstOrDefaultAsync(d => d.DepartmentId == newDepartmentId.Value && d.IsActive);
-
-    //        if (dept == null)
-    //            return Result<string>.Failure(new[] { "القسم المطلوب غير موجود أو غير فعّال." }, null);
-
-    //        // إن لم يُرسل BranchId نضبطه من القسم
-    //        if (!newBranchId.HasValue)
-    //            newBranchId = dept.BranchId;
-    //        else if (newBranchId.Value != dept.BranchId)
-    //            return Result<string>.Failure(new[] { "القسم لا يتبع الفرع الممرّر." }, null);
-
-    //        // تعيين قيم المستخدم
-    //        user.DepartmentId = newDepartmentId;
-    //        user.BranchId = newBranchId;     // للتناسق (لو كنت تخزنه مع موظفي القسم)
-    //    }
-    //    else if (newBranchId.HasValue)
-    //    {
-    //        // مستخدم فرع: فرع موجود، وقسم = null
-    //        var branchExists = await _context.Branchs.AsNoTracking()
-    //            .AnyAsync(b => b.BranchId == newBranchId.Value);
-
-    //        if (!branchExists)
-    //            return Result<string>.Failure(new[] { "الفرع المطلوب غير موجود." }, null);
-
-    //        user.BranchId = newBranchId;
-    //        user.DepartmentId = null;
-    //    }
-    //    else
-    //    {
-    //        // لم تُرسل فرع ولا قسم
-    //        if (!isSuperAdmin)
-    //            return Result<string>.Failure(new[] { "يجب تحديد الفرع أو القسم (مسموح الإلغاء فقط لحسابات SuperAdmin)." }, null);
-
-    //        // SuperAdmin: مسموح أن تكون null/null
-    //        user.BranchId = null;
-    //        user.DepartmentId = null;
-    //    }
-
-    //    // 6) حالة التفعيل/التعطيل
-    //    bool invalidateTokens = false;
-    //    if (updatedUser.IsActive.HasValue && updatedUser.IsActive.Value != user.IsActive)
-    //    {
-    //        user.IsActive = updatedUser.IsActive.Value;
-
-    //        // لو تم التعطيل => ابطال كل الـ Refresh Tokens + تغيير SecurityStamp ليخرج من الجلسات
-    //        if (!user.IsActive)
-    //            invalidateTokens = true;
-    //    }
-
-    //    // 7) تحديث المستخدم
-    //    var updateRes = await _userManager.UpdateAsync(user);
-    //    if (!updateRes.Succeeded)
-    //        return Result<string>.Failure(updateRes.Errors.Select(e => e.Description), null);
-
-    //    // 8) إبطال الجلسات عند التعطيل
-    //    if (invalidateTokens)
-    //    {
-    //        await SecurityStampHelper.InvalidateUserTokensAsync(_context, _userManager, user.Id); // تُحدّث SecurityStamp وتُلغي كل Refresh Tokens. :contentReference[oaicite:0]{index=0}
-    //    }
-
-    //    return Result<string>.Success("تم التحديث بنجاح");
-    //}
-
+    #region التعديل الكامل    
     public async Task<Result<string>> Update(string id, UpdateUserDto updatedUser)
     {
         var (_, actorIsSuperAdmin, actorIsBranchManager) = await GetActorAsync();
@@ -290,29 +179,7 @@ public class UserService : IUserService
 
     #endregion
 
-    #region         الحذف
-    //public async Task<Result<string>> Delete(string userId)
-    //{
-    //    var errorList = new List<string>();
-
-    //    var user = await _userManager.FindByIdAsync(userId);
-
-    //    if (user == null)
-    //    {
-    //        errorList.Add("المستخدم غير موجود");
-    //        return Result<string>.Failure(errorList, null);
-    //    }
-
-    //    var result = await _userManager.DeleteAsync(user);
-
-    //    if (!result.Succeeded)
-    //    {
-    //        errorList.AddRange(result.Errors.Select(e => e.Description));
-    //        return Result<string>.Failure(errorList, null);
-    //    }
-
-    //    return Result<string>.Success("تم الحذف بنجاح");
-    //}
+    #region الحذف
 
     public async Task<Result<string>> Delete(string userId)
     {
@@ -363,7 +230,7 @@ public class UserService : IUserService
         // 🔎 بحث موحّد: الاسم (FullName إن وجد، وإلا UserName) أو الإيميل
         if (!string.IsNullOrWhiteSpace(q))
         {
-            var s = q.Trim();
+            var s = SqlLikePatternEscape.EscapeForSqlServerLike(q.Trim());
             baseQuery = baseQuery.Where(u =>
                 EF.Functions.Like((u.FullName ?? u.UserName)!, $"%{s}%") ||
                 (u.Email != null && EF.Functions.Like(u.Email, $"%{s}%"))
@@ -562,170 +429,7 @@ public class UserService : IUserService
 
     #endregion
 
-    #region     التعديل الجزئي 
-    //public async Task<Result<UserListItemDto>> UpdateUserAsync(string id, UpdateUserPatchRequest dto)
-    //{
-    //    var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == id);
-    //    if (user is null)
-    //        return Result<UserListItemDto>.Failure(new[] { "المستخدم غير موجود" }, null);
-
-    //    // تحققات uniqueness عند تعديل username/email
-    //    if (!string.IsNullOrWhiteSpace(dto.username) && !string.Equals(dto.username, user.UserName, StringComparison.OrdinalIgnoreCase))
-    //    {
-    //        var existsUserName = await _userManager.FindByNameAsync(dto.username);
-    //        if (existsUserName is not null && existsUserName.Id != user.Id)
-    //            return Result<UserListItemDto>.Failure(new[] { "اسم المستخدم موجود مسبقا." }, null);
-    //    }
-
-    //    if (!string.IsNullOrWhiteSpace(dto.email) && !string.Equals(dto.email, user.Email, StringComparison.OrdinalIgnoreCase))
-    //    {
-    //        var existsEmail = await _userManager.FindByEmailAsync(dto.email);
-    //        if (existsEmail is not null && existsEmail.Id != user.Id)
-    //            return Result<UserListItemDto>.Failure(new[] { "الايميل موجود مسبقا." }, null);
-    //    }
-    //    // تعديل الحقول (PATCH)
-    //    if (dto.fullName is not null) user.FullName = dto.fullName;
-    //    if (dto.username is not null) user.UserName = dto.username;
-    //    if (dto.email is not null) user.Email = dto.email;
-    //    if (dto.phone is not null) user.PhoneNumber = dto.phone;
-    //    if (dto.isActive.HasValue) user.IsActive = dto.isActive.Value;
-
-    //    // حدث المستخدم عبر Identity (يحافظ على قواعد Identity)
-    //    var updRes = await _userManager.UpdateAsync(user);
-    //    if (!updRes.Succeeded)
-    //        return Result<UserListItemDto>.Failure(updRes.Errors.Select(e => e.Description), null);
-
-    //    // الأدوار:
-    //    // - null  => لا تعديل
-    //    // - empty => إزالة كل الأدوار
-    //    // - values=> استبدال كامل (نحسب toAdd/toRemove)
-    //    if (dto.roles != null)
-    //    {
-    //        // نحصل الأدوار الحالية من جدول الربط
-    //        var current = await _context.UserRoleAssociations
-    //            .Where(ura => ura.UserId == user.Id)
-    //            .ToListAsync();
-
-    //        // حوّل المدخلات إلى RoleIds نهائية:
-    //        // أولوية roleId إن وُجد، وإلا نحلّ بالاسم.
-    //        var requested = (dto.roles ?? new()).Where(r => r is not null).ToList();
-
-    //        // IDs مباشرة
-    //        var incomingIds = requested
-    //            .Where(r => !string.IsNullOrWhiteSpace(r.RoleId))
-    //            .Select(r => r.RoleId)
-    //            .ToList();
-
-    //        // أسماء نحتاج نحلها إلى IDs
-    //        var incomingNames = requested
-    //            .Where(r => string.IsNullOrWhiteSpace(r.RoleId) && !string.IsNullOrWhiteSpace(r.RoleName))
-    //            .Select(r => r.RoleName.Trim())
-    //            .Distinct(StringComparer.OrdinalIgnoreCase)
-    //            .ToList();
-
-    //        // حلّ الأسماء إلى IDs
-    //        var rolesByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-    //        if (incomingNames.Any())
-    //        {
-    //            var foundByName = await _context.Roles
-    //                .Where(r => r.Name != null && incomingNames.Contains(r.Name))
-    //                .Select(r => new { r.Id, r.Name })
-    //                .ToListAsync();
-
-    //            var validByName = foundByName.Where(x => !string.IsNullOrWhiteSpace(x.Name)).ToList();
-    //            rolesByName = validByName.ToDictionary(x => x.Name!, x => x.Id, StringComparer.OrdinalIgnoreCase);
-
-    //            var missing = incomingNames.Where(n => !rolesByName.ContainsKey(n)).ToList();
-    //            if (missing.Any())
-    //                return Result<UserListItemDto>.Failure(new[] { $"بعض الأدوار غير موجودة: {string.Join(", ", missing)}" }, null);
-    //        }
-
-    //        var finalIncomingIds = new HashSet<string>(incomingIds, StringComparer.OrdinalIgnoreCase);
-    //        foreach (var kv in rolesByName) finalIncomingIds.Add(kv.Value);
-
-    //        // احسب ما يجب إضافته/إزالته
-    //        var currentIds = new HashSet<string>(current.Select(c => c.RoleId), StringComparer.OrdinalIgnoreCase);
-
-    //        var toAdd = finalIncomingIds.Except(currentIds, StringComparer.OrdinalIgnoreCase).ToList();
-    //        var toRemove = currentIds.Except(finalIncomingIds, StringComparer.OrdinalIgnoreCase).ToList();
-
-    //        if (toRemove.Any())
-    //        {
-    //            var removeRows = current.Where(c => toRemove.Contains(c.RoleId, StringComparer.OrdinalIgnoreCase)).ToList();
-    //            _context.UserRoleAssociations.RemoveRange(removeRows);
-    //        }
-
-    //        if (toAdd.Any())
-    //        {
-    //            var addRows = toAdd.Select(rid => new UserRoleAssociation
-    //            {
-    //                UserId = user.Id,
-    //                RoleId = rid
-    //            });
-    //            await _context.UserRoleAssociations.AddRangeAsync(addRows);
-    //        }
-
-    //        await _context.SaveChangesAsync();
-    //    }
-    //    // اعداد الخرج: roles + permissions
-    //    var rolesLite = await _context.UserRoleAssociations
-    //        .AsNoTracking()
-    //        .Where(ura => ura.UserId == user.Id)
-    //        .Select(ura => new RoleLiteDto(
-    //            ura.RoleId,
-    //            (ura.Role != null && !string.IsNullOrWhiteSpace(ura.Role.Name)) ? ura.Role.Name : string.Empty
-    //        ))
-    //        .ToListAsync();
-
-    //    var roleIds = rolesLite.Select(r => r.RoleId).ToList();
-
-    //    var rolePerms = await _context.RolePermissions
-    //        .AsNoTracking()
-    //        .Where(rp => roleIds.Contains(rp.RoleId) && rp.Permission != null && rp.Permission.IsActive) // فقط الصلاحيات النشطة
-    //        .Select(rp => new { rp.PermissionId, rp.Permission!.Name })
-    //        .ToListAsync();
-
-    //    var directPerms = await _context.UserPermissions
-    //        .AsNoTracking()
-    //        .Where(up => up.UserId == user.Id && up.Permission != null && up.Permission.IsActive) // فقط الصلاحيات النشطة
-    //        .Select(up => new { up.PermissionId, up.Permission!.Name })
-    //        .ToListAsync();
-
-    //    var permissionPairs2 = directPerms
-    //        .Where(p => p.PermissionId.HasValue && !string.IsNullOrWhiteSpace(p.Name))
-    //        .Select(p => new { Id = p.PermissionId!.Value, Name = p.Name! })
-    //        .Concat(
-    //            rolePerms
-    //                .Where(p => p.PermissionId != Guid.Empty && !string.IsNullOrWhiteSpace(p.Name))
-    //                .Select(p => new { Id = p.PermissionId, Name = p.Name! })
-    //        );
-
-    //    var permissionMap2 = permissionPairs2
-    //        .GroupBy(p => p.Id)
-    //        .ToDictionary(g => g.Key, g => g.First().Name, EqualityComparer<Guid>.Default);
-
-    //    var permissionsLite2 = permissionMap2
-    //        .OrderBy(kvp => kvp.Value, StringComparer.OrdinalIgnoreCase)
-    //        .Select(kvp => new PermissionLiteDto(kvp.Key.ToString(), kvp.Value))
-    //        .ToList();
-
-    //    var dtoOut = new UserListItemDto
-    //    {
-    //        userId = user.Id,
-    //        fullName = user.FullName,
-    //        username = user.UserName ?? string.Empty,
-    //        email = user.Email ?? string.Empty,
-    //        phone = user.PhoneNumber,
-    //        isActive = user.IsActive,
-    //        createdAt = user.CreationDate,
-    //        roles = rolesLite.OrderBy(r => r.RoleName, StringComparer.OrdinalIgnoreCase).ToList(),
-    //        permissionsCount = permissionsLite2.Count,
-    //        Permissions = permissionsLite2
-    //    };
-
-    //    return Result<UserListItemDto>.Success(dtoOut);
-    //}
-
+    #region التعديل الجزئي 
     public async Task<Result<UserListItemDto>> UpdateUserAsync(string id, UpdateUserPatchRequest dto)
     {
         // 0) الهدف
@@ -768,10 +472,10 @@ public class UserService : IUserService
         }
 
         // 3) تعديل الحقول (PATCH)
-        if (dto.fullName is not null) user.FullName = dto.fullName;
-        if (dto.username is not null) user.UserName = dto.username;
-        if (dto.email is not null) user.Email = dto.email;
-        if (dto.phone is not null) user.PhoneNumber = dto.phone;
+        if (dto.fullName is not null) user.FullName = _textSanitizer.SanitizePlainText(dto.fullName) ?? dto.fullName;
+        if (dto.username is not null) user.UserName = _textSanitizer.SanitizePlainText(dto.username) ?? dto.username;
+        if (dto.email is not null) user.Email = _textSanitizer.SanitizePlainText(dto.email) ?? dto.email;
+        if (dto.phone is not null) user.PhoneNumber = _textSanitizer.SanitizePlainText(dto.phone) ?? dto.phone;
         if (dto.isActive.HasValue) user.IsActive = dto.isActive.Value;
 
         // 4) تحديث المستخدم عبر Identity
@@ -1383,10 +1087,12 @@ public class UserService : IUserService
         try
         {
             // ====================== تحديث بيانات المستخدم ======================
-            user.UserName = dto.UserName;
-            user.NormalizedUserName = dto.UserName.ToUpperInvariant();
-            user.Email = dto.Email;
-            user.NormalizedEmail = dto.Email.ToUpperInvariant();
+            var safeUserName = _textSanitizer.SanitizePlainText(dto.UserName) ?? dto.UserName;
+            var safeEmail = _textSanitizer.SanitizePlainText(dto.Email) ?? dto.Email;
+            user.UserName = safeUserName;
+            user.NormalizedUserName = safeUserName.ToUpperInvariant();
+            user.Email = safeEmail;
+            user.NormalizedEmail = safeEmail.ToUpperInvariant();
 
             var updateRes = await _userManager.UpdateAsync(user);
             if (!updateRes.Succeeded)

@@ -702,12 +702,25 @@ namespace ArchiveProject.Infrastructure.Services
                     break;
 
                 default:
-                    // تنظيف نصوص من محارف التحكم + قصها لحد Excel
+                    // تنظيف نصوص من محارف التحكم + قصها لحد Excel + تخفيف Formula Injection في Excel
                     var s = value.ToString();
-                    cell.Value = CleanForXml(s);
+                    cell.Value = NeutralizeExcelFormulaInjection(CleanForXml(s));
                     cell.Style.Font.FontColor = XLColor.FromHtml("#495057");
                     break;
             }
+        }
+
+        private static string NeutralizeExcelFormulaInjection(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return string.Empty;
+            var t = text.TrimStart();
+            if (t.Length == 0)
+                return text;
+            var c = t[0];
+            if (c is '=' or '+' or '-' or '@' or '\t')
+                return "'" + text;
+            return text;
         }
 
         // 8) تنظيف النصوص والأرقام (جديد)
