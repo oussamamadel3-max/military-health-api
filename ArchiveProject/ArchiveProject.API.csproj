@@ -6,6 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>0999b79c-b984-40bd-9d54-38c004cf6de5</UserSecretsId>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+    <AssemblyTitle>Document Management API</AssemblyTitle>
+    <Product>Document Management API</Product>
   </PropertyGroup>
 
   <ItemGroup>

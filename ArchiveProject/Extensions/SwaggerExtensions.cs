@@ -12,8 +12,8 @@ namespace ArchiveProject.API.Extensions
                 options.SwaggerDoc("v1", new OpenApiInfo
                 {
                     Version = "v1",
-                    Title = "Archive Project",
-                    Description = "Archive Project API"
+                    Title = "Document Management API",
+                    Description = "Backend REST API for documents, authentication, and reporting."
                 });
 
                 options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
@@ -49,7 +49,7 @@ namespace ArchiveProject.API.Extensions
             app.UseSwagger();
             app.UseSwaggerUI(c =>
             {
-                c.SwaggerEndpoint("/swagger/v1/swagger.json", "Archive Project v1");
+                c.SwaggerEndpoint("/swagger/v1/swagger.json", "Document Management API v1");
                 c.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.None);
                 c.DefaultModelsExpandDepth(-1);
             });
