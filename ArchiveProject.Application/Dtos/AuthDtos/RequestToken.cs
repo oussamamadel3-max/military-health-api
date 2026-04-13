@@ -6,13 +6,12 @@ namespace ArchiveProject.Application.Dtos.AuthDtos
     public class RequestToken
     {
         [Required]
-        [EmailAddress]
-        [StringLength(254, MinimumLength = 4)]
-        public string Email { get; set; } = string.Empty;
+        [StringLength(256, MinimumLength = 3)]
+        public string UserName { get; set; }
 
         [Required]
         [StringLength(128, MinimumLength = 5)]
-        public string PassWord { get; set; } = string.Empty;
+        public string PassWord { get; set; }
     }
 
     public class RefreshTokenRequest

@@ -30,11 +30,11 @@ public class AuthService : IAuthService
 
     public async Task<Result<LoginResponseDto>> LoginAsync(RequestToken requestToken)
     {
-        var email = (requestToken.Email ?? string.Empty).Trim();
+        var username = (requestToken.UserName ?? string.Empty).Trim();
         var password = requestToken.PassWord ?? string.Empty;
 
         // 1) ابحث عن المستخدم، لكن لا ترجع رسالة مختلفة
-        var user = await _userManager.FindByEmailAsync(email);
+        var user = await _userManager.FindByNameAsync(username);
 
         if (user == null)
         {
