@@ -1,4 +1,5 @@
 ﻿using ArchiveProject.Application.Attributes;
+using ArchiveProject.Application.Common;
 using System.ComponentModel.DataAnnotations;
 
 namespace ArchiveProject.Application.Dtos.AuthDtos;
@@ -82,6 +83,7 @@ public class CreateUserDto
 
     [Required]
     [StringLength(128, MinimumLength = 8)]
+    [RegularExpression(PasswordPolicy.ComplexityPattern, ErrorMessage = PasswordPolicy.ComplexityErrorMessage)]
     public string password { get; set; } = "";
     public bool isActive { get; set; } = true;
     public List<string> roles { get; set; } = new();

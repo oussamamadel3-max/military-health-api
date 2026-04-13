@@ -1,4 +1,5 @@
 using ArchiveProject.Application.Attributes;
+using ArchiveProject.Application.Common;
 using System.ComponentModel.DataAnnotations;
 
 namespace ArchiveProject.Application.Dtos.AuthDtos;
@@ -11,6 +12,7 @@ public class ChangePasswordRequest
 
     [Required(ErrorMessage = "كلمة المرور الجديدة مطلوبة.")]
     [StringLength(128, MinimumLength = 8, ErrorMessage = "كلمة المرور الجديدة يجب ألا تقل عن 8 أحرف.")]
+    [RegularExpression(PasswordPolicy.ComplexityPattern, ErrorMessage = PasswordPolicy.ComplexityErrorMessage)]
     public string NewPassword { get; set; } = string.Empty;
 }
 
@@ -22,5 +24,6 @@ public class AdminChangePasswordRequest
 
     [Required(ErrorMessage = "كلمة المرور الجديدة مطلوبة.")]
     [StringLength(128, MinimumLength = 8, ErrorMessage = "كلمة المرور الجديدة يجب ألا تقل عن 8 أحرف.")]
+    [RegularExpression(PasswordPolicy.ComplexityPattern, ErrorMessage = PasswordPolicy.ComplexityErrorMessage)]
     public string NewPassword { get; set; } = string.Empty;
 }
