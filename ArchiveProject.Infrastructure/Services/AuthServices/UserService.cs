@@ -161,6 +161,12 @@ public class UserService : IUserService
             if (!setUserName.Succeeded) return Result<string>.Failure(setUserName.Errors.Select(e => e.Description), null);
         }
 
+        if (!string.IsNullOrWhiteSpace(updatedUser.FullName))
+            user.FullName = _textSanitizer.SanitizePlainText(updatedUser.FullName) ?? updatedUser.FullName;
+
+        if (!string.IsNullOrWhiteSpace(updatedUser.Phone))
+            user.PhoneNumber = _textSanitizer.SanitizePlainText(updatedUser.Phone) ?? updatedUser.Phone;
+
         bool invalidateTokens = false;
         if (updatedUser.IsActive.HasValue && updatedUser.IsActive.Value != user.IsActive)
         {

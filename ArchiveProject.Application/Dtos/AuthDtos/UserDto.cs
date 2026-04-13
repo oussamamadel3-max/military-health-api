@@ -23,6 +23,10 @@ public class UserDto
 public class UpdateUserDto
 {
     [Required]
+    [StringLength(100, MinimumLength = 3)]
+    public string? FullName { get; set; }
+
+    [Required]
     [StringLength(50, MinimumLength = 3)]
     [RegularExpression(@"^[a-zA-Z0-9._-]+$", ErrorMessage = "اسم المستخدم يحوي محارف غير مسموحة")]
     public string? UserName { get; set; }
@@ -31,6 +35,11 @@ public class UpdateUserDto
     [EmailAddress]
     [StringLength(254)]
     public string? Email { get; set; }
+
+    [StringLength(20)]
+    [RegularExpression(@"^[0-9+ -]*$", ErrorMessage = "رقم الهاتف غير صالح")]
+    public string? Phone { get; set; }
+
     public bool? IsActive { get; set; }
 }
 public class UpdateUserPatchRequest
