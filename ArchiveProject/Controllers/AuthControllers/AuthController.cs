@@ -66,7 +66,7 @@ namespace ArchiveProject.API.Controllers.AuthControllers
             }
             catch (Exception ex)
             {
-                return Unauthorized(new { message = ex.Message });
+                return Unauthorized(new { message = "فشل تجديد الجلسة." });
             }
         }
 

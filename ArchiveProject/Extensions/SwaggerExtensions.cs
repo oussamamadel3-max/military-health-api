@@ -1,11 +1,17 @@
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.OpenApi.Models;
 
 namespace ArchiveProject.API.Extensions
 {
     public static class SwaggerExtensions
     {
-        public static IServiceCollection AddSwaggerDocumentation(this IServiceCollection services)
+        public static IServiceCollection AddSwaggerDocumentation(
+            this IServiceCollection services,
+            IWebHostEnvironment environment)
         {
+            if (!environment.IsDevelopment())
+                return services;
+
             services.AddEndpointsApiExplorer();
             services.AddSwaggerGen(options =>
             {
@@ -44,8 +50,13 @@ namespace ArchiveProject.API.Extensions
             return services;
         }
 
-        public static IApplicationBuilder UseSwaggerDocumentation(this IApplicationBuilder app)
+        public static IApplicationBuilder UseSwaggerDocumentation(
+            this IApplicationBuilder app,
+            IWebHostEnvironment environment)
         {
+            if (!environment.IsDevelopment())
+                return app;
+
             app.UseSwagger();
             app.UseSwaggerUI(c =>
             {
