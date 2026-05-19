@@ -1,4 +1,5 @@
-﻿using ArchiveProject.Application.Common.Interfaces.AuthInterfaces;
+﻿using ArchiveProject.API.Services;
+using ArchiveProject.Application.Common.Interfaces.AuthInterfaces;
 using ArchiveProject.Application.Dtos.AuthDtos;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -13,11 +14,19 @@ namespace ArchiveProject.API.Controllers.AuthControllers
     {
         private readonly IAuthService _authService;
         private readonly ITokenService _tokenService;
+        private readonly AuthCookieService _cookieService;
+        private readonly ICsrfService _csrfService;
 
-        public AuthController(IAuthService authService, ITokenService tokenService)
+        public AuthController(
+            IAuthService authService,
+            ITokenService tokenService,
+            AuthCookieService cookieService,
+            ICsrfService csrfService)
         {
             _authService = authService;
             _tokenService = tokenService;
+            _cookieService = cookieService;
+            _csrfService = csrfService;
         }
 
         [EnableRateLimiting("login")]
@@ -29,9 +38,17 @@ namespace ArchiveProject.API.Controllers.AuthControllers
             if (!result.Succeeded || result.Value == null)
                 return Unauthorized(result.Errors.FirstOrDefault() ?? "بيانات الدخول غير صحيحة");
 
-            return Ok(result.Value);
-        }
+            var tokens = result.Value;
+            _cookieService.SetAuthCookies(Response, tokens.AccessToken, tokens.RefreshToken);
 
+            var userId = ExtractUserIdFromAccessToken(tokens.AccessToken);
+            if (string.IsNullOrWhiteSpace(userId))
+                return Unauthorized("تعذر إنشاء الجلسة.");
+
+            _csrfService.IssueCsrf(Response, userId, out var csrfToken);
+
+            return Ok(new LoginResponseDto { CsrfToken = csrfToken });
+        }
 
         [Authorize]
         [HttpGet("me")]
@@ -52,35 +69,72 @@ namespace ArchiveProject.API.Controllers.AuthControllers
             return Ok(res.Value);
         }
 
-
-        /// <summary>
-        /// تجديد Access Token باستخدام Refresh Token
-        /// </summary>
-        [HttpPost("[action]")]
-        public async Task<ActionResult<TokenResponseDto>> Refresh([FromBody] RefreshTokenRequest request)
+        [Authorize]
+        [HttpGet("csrf")]
+        public IActionResult GetCsrf()
         {
+            var userId =
+                User.FindFirstValue(ClaimTypes.NameIdentifier)
+                ?? User.FindFirstValue("sub");
+
+            if (string.IsNullOrWhiteSpace(userId))
+                return Unauthorized();
+
+            _csrfService.IssueCsrf(Response, userId, out var csrfToken);
+            return Ok(new CsrfResponseDto { CsrfToken = csrfToken });
+        }
+
+        [HttpPost("[action]")]
+        public async Task<ActionResult<CsrfResponseDto>> Refresh()
+        {
+            var refreshToken = _cookieService.TryGetRefreshToken(Request);
+            if (string.IsNullOrWhiteSpace(refreshToken))
+                return Unauthorized(new { message = "فشل تجديد الجلسة." });
+
             try
             {
-                var tokens = await _tokenService.RefreshAccessTokenAsync(request.RefreshToken);
-                return Ok(tokens);
+                var tokens = await _tokenService.RefreshAccessTokenAsync(refreshToken);
+                _cookieService.SetAuthCookies(Response, tokens.AccessToken, tokens.RefreshToken);
+
+                var userId = ExtractUserIdFromAccessToken(tokens.AccessToken);
+                if (string.IsNullOrWhiteSpace(userId))
+                    return Unauthorized(new { message = "فشل تجديد الجلسة." });
+
+                _csrfService.IssueCsrf(Response, userId, out var csrfToken);
+
+                return Ok(new CsrfResponseDto { CsrfToken = csrfToken });
             }
-            catch (Exception ex)
+            catch
             {
                 return Unauthorized(new { message = "فشل تجديد الجلسة." });
             }
         }
 
-
-        /// <summary>
-        /// إبطال Refresh Token
-        /// </summary>
+        [Authorize]
         [HttpPost("[action]")]
-        public async Task<IActionResult> Logout([FromBody] RefreshTokenRequest request)
+        public async Task<IActionResult> Logout()
         {
-            var revoked = await _tokenService.RevokeRefreshTokenAsync(request.RefreshToken);
-            if (!revoked) return NotFound("Refresh token not found");
+            var refreshToken = _cookieService.TryGetRefreshToken(Request);
+            if (!string.IsNullOrWhiteSpace(refreshToken))
+                await _tokenService.RevokeRefreshTokenAsync(refreshToken);
 
+            _cookieService.ClearAuthCookies(Response);
             return Ok("Logged out successfully");
+        }
+
+        private static string? ExtractUserIdFromAccessToken(string accessToken)
+        {
+            try
+            {
+                var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
+                var jwt = handler.ReadJwtToken(accessToken);
+                return jwt.Claims.FirstOrDefault(c =>
+                    c.Type == ClaimTypes.NameIdentifier || c.Type == "sub")?.Value;
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 }

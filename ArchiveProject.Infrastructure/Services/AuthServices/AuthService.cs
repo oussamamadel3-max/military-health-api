@@ -28,7 +28,7 @@ public class AuthService : IAuthService
         _context = context;
     }
 
-    public async Task<Result<LoginResponseDto>> LoginAsync(RequestToken requestToken)
+    public async Task<Result<TokenGenerationResultDto>> LoginAsync(RequestToken requestToken)
     {
         var username = (requestToken.UserName ?? string.Empty).Trim();
         var password = requestToken.PassWord ?? string.Empty;
@@ -42,14 +42,14 @@ public class AuthService : IAuthService
             _passwordHasher.VerifyHashedPassword(null!, DummyHash, password);
 
             await Task.Delay(FailDelay);
-            return Result<LoginResponseDto>.Failure(new List<string> { GenericFailMsg }, null);
+            return Result<TokenGenerationResultDto>.Failure(new List<string> { GenericFailMsg }, null);
         }
 
         // 2) إذا الحساب مقفول (Lockout) لا تكشف، نفس الرسالة
         if (await _userManager.IsLockedOutAsync(user))
         {
             await Task.Delay(FailDelay);
-            return Result<LoginResponseDto>.Failure(new List<string> { GenericFailMsg }, null);
+            return Result<TokenGenerationResultDto>.Failure(new List<string> { GenericFailMsg }, null);
         }
 
         // 3) تحقق كلمة المرور مع lockoutOnFailure=true
@@ -60,14 +60,14 @@ public class AuthService : IAuthService
         if (!signIn.Succeeded)
         {
             await Task.Delay(FailDelay);
-            return Result<LoginResponseDto>.Failure(new List<string> { GenericFailMsg }, null);
+            return Result<TokenGenerationResultDto>.Failure(new List<string> { GenericFailMsg }, null);
         }
 
         // 4) تحقق من التفعيل (لا تكشف أيضاً)
         if (!user.IsActive)
         {
             await Task.Delay(FailDelay);
-            return Result<LoginResponseDto>.Failure(new List<string> { GenericFailMsg }, null);
+            return Result<TokenGenerationResultDto>.Failure(new List<string> { GenericFailMsg }, null);
         }
 
         // ✅ نجاح: صفّر عداد الفشل (احتياط)
@@ -75,14 +75,7 @@ public class AuthService : IAuthService
 
         // 5) توليد التوكن
         var tokenResult = await _tokenService.GenerateTokensAsync(user.Id);
-
-        var response = new LoginResponseDto
-        {
-            AccessToken = tokenResult.AccessToken,
-            RefreshToken = tokenResult.RefreshToken
-        };
-
-        return Result<LoginResponseDto>.Success(response);
+        return Result<TokenGenerationResultDto>.Success(tokenResult);
     }
 
     public async Task<Result<MeResponseDto>> GetMeAsync(string userId)

@@ -1,22 +1,26 @@
 ﻿using Microsoft.AspNetCore.CookiePolicy;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.Extensions.Hosting;
 
 namespace ArchiveProject.API.Extensions
 {
     public static class CookieSecurityExtensions
     {
-        public static IServiceCollection AddCookieSecurity(this IServiceCollection services)
+        public static IServiceCollection AddCookieSecurity(
+            this IServiceCollection services,
+            IWebHostEnvironment environment)
         {
             services.Configure<CookiePolicyOptions>(options =>
             {
-                // ✅ اجبار إرسال الكوكي فقط عبر HTTPS
-                options.Secure = CookieSecurePolicy.Always;
+                options.Secure = environment.IsDevelopment()
+                    ? CookieSecurePolicy.SameAsRequest
+                    : CookieSecurePolicy.Always;
 
                 // ✅ حماية من CSRF بشكل افتراضي (غير مدمّر)
                 options.MinimumSameSitePolicy = SameSiteMode.Lax;
 
-                // اختياري: سياسة HttpOnly افتراضية (لا تغيّر كوكيز تحتاجها JS)
-                options.HttpOnly = HttpOnlyPolicy.None;
+                options.HttpOnly = HttpOnlyPolicy.Always;
             });
 
             return services;

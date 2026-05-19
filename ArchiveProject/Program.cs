@@ -1,5 +1,6 @@
 ﻿using ArchiveProject.API.Extensions;
 using ArchiveProject.API.Middleware;
+using ArchiveProject.API.Services;
 using ArchiveProject.Infrastructure.Persistence;
 using Microsoft.AspNetCore.HttpOverrides;
 using System.Threading.RateLimiting;
@@ -81,7 +82,9 @@ builder.Services.AddRateLimiter(options =>
  * Middleware مخصص لتأمين الكوكيز
  * (SameSite, Secure, HttpOnly...)
  */
-builder.Services.AddCookieSecurity();
+builder.Services.AddCookieSecurity(builder.Environment);
+builder.Services.AddScoped<AuthCookieService>();
+builder.Services.AddScoped<ICsrfService, CsrfService>();
 
 /*
  * Middleware مخصص لتوحيد رسائل Validation
@@ -165,6 +168,8 @@ app.UseCookieSecurity();
  * (قراءة التوكن والتحقق منه)
  */
 app.UseAuthentication();
+
+app.UseMiddleware<CsrfValidationMiddleware>();
 
 /*
  * تفعيل التفويض

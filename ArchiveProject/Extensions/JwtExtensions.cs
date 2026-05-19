@@ -37,9 +37,14 @@ namespace ArchiveProject.API.Extensions
                     ClockSkew = TimeSpan.Zero
                 };
 
-                // التحقق من SecurityStamp عند كل طلب
                 options.Events = new JwtBearerEvents
                 {
+                    OnMessageReceived = context =>
+                    {
+                        if (context.Request.Cookies.TryGetValue(Services.AuthCookieNames.AccessToken, out var token))
+                            context.Token = token;
+                        return Task.CompletedTask;
+                    },
                     OnTokenValidated = async context =>
                     {
                         var dbContext = context.HttpContext.RequestServices.GetRequiredService<MainDbContext>();

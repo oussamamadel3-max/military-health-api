@@ -23,17 +23,18 @@ namespace ArchiveProject.Application.Dtos.AuthDtos
 
     public class LoginResponseDto
     {
-        //public string AccessToken { get; set; }
-        //public string RefreshToken { get; set; }
-        //public UserDetailCreateModel User { get; set; }
-        //public List<string> Roles { get; set; }
-        public string AccessToken { get; set; } = string.Empty;
-        public string RefreshToken { get; set; } = string.Empty;
+        public string CsrfToken { get; set; } = string.Empty;
     }
+
     public class TokenResponseDto
     {
         public string AccessToken { get; set; } = string.Empty;
         public string RefreshToken { get; set; } = string.Empty;
+    }
+
+    public class CsrfResponseDto
+    {
+        public string CsrfToken { get; set; } = string.Empty;
     }
 
     public class MeResponseDto
