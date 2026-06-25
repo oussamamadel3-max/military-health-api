@@ -1,4 +1,4 @@
-using Application.Common.Results;
+namespace Application.Common.Results;
 
 public class Result<T> : Result
 {
@@ -8,14 +8,11 @@ public class Result<T> : Result
         Value = value;
     }
 
-    public T? Value { get; set; }
+    public T? Value { get; init; }
 
-    // ✅ Success مع قيمة
     public static Result<T> Success(T value, IEnumerable<string>? warnings = null)
-        => new Result<T>(true, null, value, warnings);
+        => new(true, null, value, warnings);
 
-    // ✅ Failure مع أخطاء (وقيمة اختيارية)
     public static Result<T> Failure(IEnumerable<string> errors, T? value = default!, IEnumerable<string>? warnings = null)
-        => new Result<T>(false, errors, value, warnings);
+        => new(false, errors, value, warnings);
 }
-

@@ -1,7 +1,7 @@
+using API.Infrastructure;
 using Application.Common.Results;
 using Microsoft.AspNetCore.Hosting;
 using System.Net;
-using System.Text.Json;
 
 namespace API.Middleware;
 
@@ -69,7 +69,7 @@ public class ErrorHandlingMiddleware
         var errorResponse = Result.Failure(errors, warnings: warnings);
 
         return context.Response.WriteAsJsonAsync(errorResponse,
-            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+            ApiJsonSerializerOptions.CamelCase);
     }
 }
 

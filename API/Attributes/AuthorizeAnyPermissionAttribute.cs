@@ -1,3 +1,4 @@
+using API.Extensions;
 using Application.Interfaces.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
@@ -31,7 +32,7 @@ namespace API.Attributes
             var userId = context.HttpContext.User?.FindFirst("sub")?.Value;
             if (userId == null)
             {
-                context.Result = new ForbidResult();
+                context.Result = ApiResults.Unauthorized("غير مصرح.");
                 return;
             }
 
@@ -46,7 +47,7 @@ namespace API.Attributes
             }
 
             if (!hasAny)
-                context.Result = new ForbidResult();
+                context.Result = ApiResults.Forbidden("ليس لديك الصلاحية المطلوبة.");
         }
     }
 }

@@ -1,3 +1,4 @@
+using API.Infrastructure;
 using Application.Common.Results;
 using Microsoft.Extensions.Caching.Memory;
 using System.Net;
@@ -73,10 +74,7 @@ namespace API.Middleware
                     context.Response.Headers["Retry-After"] = ((int)retryAfter.TotalSeconds).ToString();
 
                 var response = Result.Failure(new List<string> { rawMessage });
-                var json = JsonSerializer.Serialize(response, new JsonSerializerOptions
-                {
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-                });
+                var json = JsonSerializer.Serialize(response, ApiJsonSerializerOptions.CamelCase);
 
                 await context.Response.WriteAsync(json);
             }

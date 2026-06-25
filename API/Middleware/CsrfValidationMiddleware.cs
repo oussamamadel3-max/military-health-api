@@ -1,3 +1,5 @@
+using API.Extensions;
+using Application.Common.Results;
 using Application.Interfaces.Services;
 using Infrastructure.Services.Auth;
 using System.Security.Claims;
@@ -45,15 +47,17 @@ namespace API.Middleware
 
             if (string.IsNullOrWhiteSpace(userId))
             {
-                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                await context.Response.WriteAsJsonAsync(new { message = "غير مصرح." });
+                await context.Response.WriteResultAsync(
+                    StatusCodes.Status401Unauthorized,
+                    Result.Failure(new[] { "غير مصرح." }));
                 return;
             }
 
             if (!context.Request.Headers.TryGetValue(CsrfHeaderName, out var headerValues))
             {
-                context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                await context.Response.WriteAsJsonAsync(new { message = "رمز CSRF مفقود." });
+                await context.Response.WriteResultAsync(
+                    StatusCodes.Status403Forbidden,
+                    Result.Failure(new[] { "رمز CSRF مفقود." }));
                 return;
             }
 
@@ -62,8 +66,9 @@ namespace API.Middleware
 
             if (!csrfService.Validate(userId, csrfToken ?? string.Empty, signature))
             {
-                context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                await context.Response.WriteAsJsonAsync(new { message = "رمز CSRF غير صالح." });
+                await context.Response.WriteResultAsync(
+                    StatusCodes.Status403Forbidden,
+                    Result.Failure(new[] { "رمز CSRF غير صالح." }));
                 return;
             }
 

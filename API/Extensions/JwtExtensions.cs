@@ -1,7 +1,9 @@
+using Application.Common.Results;
 using Application.Dtos.AuthDtos;
 using Application.Interfaces.Repositories;
 using Infrastructure.Services.Auth;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using System.Security.Claims;
@@ -65,7 +67,6 @@ namespace API.Extensions
                             return;
                         }
 
-                        // التحقق من SecurityStamp
                         var tokenSecurityStamp = context.Principal?.FindFirst("security_stamp")?.Value;
                         var userSecurityStamp = user.SecurityStamp;
 
@@ -73,10 +74,24 @@ namespace API.Extensions
                             string.IsNullOrEmpty(userSecurityStamp) ||
                             tokenSecurityStamp != userSecurityStamp)
                         {
-                            // SecurityStamp غير متطابق - إجبار تسجيل الخروج
                             context.Fail("Token has been invalidated. Please login again.");
                             return;
                         }
+                    },
+                    OnChallenge = async context =>
+                    {
+                        context.HandleResponse();
+                        await ApiResults.WriteResultAsync(
+                            context.Response,
+                            StatusCodes.Status401Unauthorized,
+                            Result.Failure(new[] { "غير مصرح." }));
+                    },
+                    OnForbidden = async context =>
+                    {
+                        await ApiResults.WriteResultAsync(
+                            context.Response,
+                            StatusCodes.Status403Forbidden,
+                            Result.Failure(new[] { "ليس لديك الصلاحية المطلوبة." }));
                     }
                 };
             });

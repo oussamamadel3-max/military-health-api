@@ -1,3 +1,4 @@
+using Application.Common.Results;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Application.ModelsDto.AuditLogDtos;
@@ -17,57 +18,32 @@ public class AuditLogController : ControllerBase
         _auditLogRepository = auditLogRepository;
     }
 
-    // استرجاع سجل حسب المعرف
     [HttpGet("[action]/{id}")]
     [AuthorizePermission("AuditLog.Read")]
-    public async Task<IActionResult> Get(long id)
-    {
-        var result = await _service.GetByIdAsync(id);
-        if (!result.Succeeded || result.Value == null)
-            return NotFound(new { Errors = result.Errors });
-
-        return Ok(result.Value);
-    }
+    public async Task<Result<AuditLogDetailsDto>> Get(long id)
+        => await _service.GetByIdAsync(id);
 
     [HttpGet("[action]")]
     [AuthorizePermission("AuditLog.Read")]
-    public async Task<ActionResult<List<string>>> GetAuditEntities()
+    public async Task<Result<List<string>>> GetAuditEntities()
     {
         var entityNames = await _auditLogRepository.GetEntityTypeNamesAsync();
-        return Ok(entityNames);
+        return Result<List<string>>.Success(entityNames.ToList());
     }
-
 
     [HttpPost("[action]")]
     [AuthorizePermission("AuditLog.Read")]
-    public async Task<IActionResult> GetAllFiltered(
+    public async Task<Result<PaginatedList<AuditLogListDto>>> GetAllFiltered(
         [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
         [FromQuery][Range(1, 500)] int pageSize = 10,
         [FromForm] AuditLogFilter? filter = null)
     {
         filter ??= new AuditLogFilter();
-
-        var result = await _service.GetAllFilteredAsync(pageNumber, pageSize, filter);
-
-        if (!result.Succeeded || result.Value == null)
-            return BadRequest(new { Errors = result.Errors });
-
-        return Ok(result.Value);
+        return await _service.GetAllFilteredAsync(pageNumber, pageSize, filter);
     }
-
-
 
     [HttpGet("[action]")]
     [AuthorizePermission("AuditLog.Read")]
-    public async Task<ActionResult<Result<AuditLogSummaryDto>>> GetAuditLogSummary()
-    {
-        var result = await _service.GetSummaryAsync();
-        if (result.Failed)
-            return BadRequest(result.Errors);
-
-        return Ok(result);
-    }
-
-
+    public async Task<Result<AuditLogSummaryDto>> GetAuditLogSummary()
+        => await _service.GetSummaryAsync();
 }
-

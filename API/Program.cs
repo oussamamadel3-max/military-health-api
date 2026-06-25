@@ -1,4 +1,5 @@
 using API.Extensions;
+using API.Filters;
 using API.Middleware;
 using Infrastructure.Persistence;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -14,7 +15,10 @@ builder.WebHost.ConfigureKestrel(options => options.AddServerHeader = false);
  * إضافة Controllers الخاصة بالـ API
  * + ضبط JSON ليكون camelCase (مهم لتوافق Angular)
  */
-builder.Services.AddControllers()
+builder.Services.AddControllers(options =>
+    {
+        options.Filters.Add<ResultActionFilter>();
+    })
     .AddJsonOptions(options =>
     {
         options.JsonSerializerOptions.PropertyNamingPolicy =

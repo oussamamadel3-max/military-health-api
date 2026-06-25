@@ -1,4 +1,5 @@
 using API.Validation;
+using Application.Common.Results;
 using Application.Interfaces.Services;
 using Application.Dtos;
 using Microsoft.AspNetCore.Authorization;
@@ -141,7 +142,7 @@ namespace API.Controllers
         public async Task<IActionResult> DownloadZip(string entityType, long entityId)
         {
             if (!AttachmentRouteConstraints.IsValidEntityType(entityType))
-                return BadRequest(new { message = "نوع الكيان غير صالح." });
+                return BadRequest(Result.Failure(new[] { "نوع الكيان غير صالح." }));
 
             var res = await _service.DownloadZipForEntityAsync(entityId, entityType);
             if (!res.Succeeded)
