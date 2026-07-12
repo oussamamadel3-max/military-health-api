@@ -22,7 +22,13 @@ namespace API.Extensions
                 {
                     Version = "v2",
                     Title = "Identity Project API",
-                    Description = "Backend REST API for identity, authentication, and reporting."
+                    Description =
+                        "Backend REST API for identity, authentication, and reporting.\n\n" +
+                        "**Swagger (Development)**\n" +
+                        "1. Call `POST /api/Auth/Login` with username and password.\n" +
+                        "2. Open DevTools → Application → Cookies and copy `access_token`.\n" +
+                        "3. Click **Authorize**, enter `Bearer <access_token>` (include the word Bearer).\n" +
+                        "4. Test any endpoint. CSRF is disabled in Development via appsettings.Development.json."
                 });
 
                 options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
@@ -32,7 +38,7 @@ namespace API.Extensions
                     Scheme = "Bearer",
                     BearerFormat = "JWT",
                     In = ParameterLocation.Header,
-                    Description = "Enter 'Bearer' [space] and then your valid token"
+                    Description = "Development: paste `Bearer` + space + value of the `access_token` cookie after Login."
                 });
 
                 options.AddSecurityRequirement(new OpenApiSecurityRequirement
