@@ -1,7 +1,7 @@
 using API.Extensions;
 using Application.Common.Results;
 using Application.Interfaces.Services;
-using Infrastructure.Services.Auth;
+using Application.Services.AuthServices;
 using System.Security.Claims;
 
 namespace API.Middleware

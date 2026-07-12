@@ -2,7 +2,7 @@ using API.Extensions;
 using Application.Common.Results;
 using Application.Dtos.AuthDtos;
 using Application.Interfaces.Services;
-using Infrastructure.Services.Auth;
+using Application.Services.AuthServices;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;

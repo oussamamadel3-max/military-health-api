@@ -1,7 +1,7 @@
 using Application.Common.Results;
 using Application.Dtos.AuthDtos;
 using Application.Interfaces.Repositories;
-using Infrastructure.Services.Auth;
+using Application.Services.AuthServices;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
