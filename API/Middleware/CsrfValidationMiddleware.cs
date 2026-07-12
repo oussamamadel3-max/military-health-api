@@ -1,5 +1,6 @@
 using API.Extensions;
 using Application.Common.Results;
+using Application.Dtos.AuthDtos;
 using Application.Interfaces.Services;
 using Application.Services.AuthServices;
 using System.Security.Claims;
@@ -34,9 +35,14 @@ namespace API.Middleware
         public async Task InvokeAsync(
             HttpContext context,
             ICsrfService csrfService,
-            AuthCookieService cookieService)
+            AuthCookieService cookieService,
+            IWebHostEnvironment environment,
+            IConfiguration configuration)
         {
-            if (ShouldSkip(context))
+            var disableCsrf = environment.IsDevelopment()
+                && configuration.GetValue<bool>($"{AuthDevelopmentSettings.SectionName}:{nameof(AuthDevelopmentSettings.DisableCsrfValidation)}");
+
+            if (disableCsrf || ShouldSkip(context))
             {
                 await _next(context);
                 return;

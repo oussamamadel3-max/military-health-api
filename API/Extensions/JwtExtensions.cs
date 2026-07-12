@@ -3,7 +3,9 @@ using Application.Dtos.AuthDtos;
 using Application.Interfaces.Repositories;
 using Application.Services.AuthServices;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using System.Security.Claims;
@@ -45,7 +47,23 @@ namespace API.Extensions
                     OnMessageReceived = context =>
                     {
                         if (context.Request.Cookies.TryGetValue(AuthCookieNames.AccessToken, out var token))
+                        {
                             context.Token = token;
+                            return Task.CompletedTask;
+                        }
+
+                        var environment = context.HttpContext.RequestServices.GetRequiredService<IWebHostEnvironment>();
+                        var configuration = context.HttpContext.RequestServices.GetRequiredService<IConfiguration>();
+                        var allowBearer = environment.IsDevelopment()
+                            && configuration.GetValue<bool>($"{AuthDevelopmentSettings.SectionName}:{nameof(AuthDevelopmentSettings.AllowBearerTokenInDevelopment)}");
+
+                        if (allowBearer)
+                        {
+                            var authHeader = context.Request.Headers.Authorization.FirstOrDefault();
+                            if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                                context.Token = authHeader["Bearer ".Length..].Trim();
+                        }
+
                         return Task.CompletedTask;
                     },
                     OnTokenValidated = async context =>
