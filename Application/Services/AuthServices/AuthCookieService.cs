@@ -31,7 +31,7 @@ public class AuthCookieService
         var refreshExpires = DateTimeOffset.UtcNow.AddDays(_jwtSettings.RefreshTokenExpirationInDays);
 
         response.Cookies.Append(AuthCookieNames.AccessToken, accessToken, BuildCookieOptions(accessExpires, secure, path: "/"));
-        response.Cookies.Append(AuthCookieNames.RefreshToken, refreshToken, BuildCookieOptions(refreshExpires, secure, path: "/api/Auth"));
+        response.Cookies.Append(AuthCookieNames.RefreshToken, refreshToken, BuildCookieOptions(refreshExpires, secure, path: "/"));
     }
 
     public void SetCsrfSignatureCookie(HttpResponse response, string signature)
@@ -45,7 +45,7 @@ public class AuthCookieService
     {
         var secure = !_environment.IsDevelopment();
         response.Cookies.Delete(AuthCookieNames.AccessToken, new CookieOptions { Path = "/", Secure = secure });
-        response.Cookies.Delete(AuthCookieNames.RefreshToken, new CookieOptions { Path = "/api/Auth", Secure = secure });
+        response.Cookies.Delete(AuthCookieNames.RefreshToken, new CookieOptions { Path = "/", Secure = secure });
         response.Cookies.Delete(AuthCookieNames.CsrfSignature, new CookieOptions { Path = "/", Secure = secure });
     }
 

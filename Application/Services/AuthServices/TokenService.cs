@@ -5,6 +5,7 @@ using Application.Interfaces.Services;
 using Domain.Entities.Auth;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using System.Collections.Concurrent;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
@@ -13,6 +14,10 @@ namespace Application.Services.AuthServices
 {
     public class TokenService : ITokenService
     {
+        private static readonly ConcurrentDictionary<string, SemaphoreSlim> RefreshLocks = new();
+        private static readonly ConcurrentDictionary<string, (TokenResponseDto Result, DateTime ExpiresAt)> RefreshResultsCache = new();
+        private static readonly TimeSpan RefreshCacheTtl = TimeSpan.FromSeconds(30);
+
         private readonly IUserRepository _userRepository;
         private readonly IRoleRepository _roleRepository;
         private readonly IRefreshTokenRepository _refreshTokenRepository;
@@ -163,31 +168,71 @@ namespace Application.Services.AuthServices
         #region    استخدام Refresh Token للحصول على Access Token جديد و Refresh Token جديد
         public async Task<TokenResponseDto> RefreshAccessTokenAsync(string refreshToken)
         {
-            var now = DateTime.Now;
-            var dbToken = await _refreshTokenRepository.GetValidByTokenAsync(refreshToken, now);
+            if (TryGetCachedRefreshResult(refreshToken, out var cachedResult))
+                return cachedResult;
 
-            if (dbToken == null)
-                throw new Exception("رمز التحديث غير صالح أو منتهي الصلاحية");
-
-            var user = await _userRepository.FindByIdAsync(dbToken.UserId);
-            if (user == null || !user.IsActive)
-                throw new Exception("المستخدم غير موجود أو غير نشط");
-            _refreshTokenRepository.Remove(dbToken); // حذف القديم مباشرة
-
-            // توليد Access + Refresh جديدين
-            var tokenResult = await GenerateTokensAsync(dbToken.UserId);
-
-            // ملاحظة: GenerateTokensAsync يضيف بالفعل Refresh Token جديد للـ DB
-            // لذلك لا داعي لإضافة سجل جديد هنا
-
-            await _unitOfWork.SaveChangesAsync();
-
-            // إرجاع كلا التوكنين للعميل
-            return new TokenResponseDto
+            var refreshLock = RefreshLocks.GetOrAdd(refreshToken, _ => new SemaphoreSlim(1, 1));
+            await refreshLock.WaitAsync();
+            try
             {
-                AccessToken = tokenResult.AccessToken,
-                RefreshToken = tokenResult.RefreshToken
-            };
+                if (TryGetCachedRefreshResult(refreshToken, out cachedResult))
+                    return cachedResult;
+
+                var now = DateTime.Now;
+                var dbToken = await _refreshTokenRepository.GetValidByTokenAsync(refreshToken, now);
+
+                if (dbToken == null)
+                {
+                    if (TryGetCachedRefreshResult(refreshToken, out cachedResult))
+                        return cachedResult;
+
+                    throw new Exception("رمز التحديث غير صالح أو منتهي الصلاحية");
+                }
+
+                var user = await _userRepository.FindByIdAsync(dbToken.UserId);
+                if (user == null || !user.IsActive)
+                    throw new Exception("المستخدم غير موجود أو غير نشط");
+
+                _refreshTokenRepository.MarkRevoked(dbToken);
+
+                var tokenResult = await GenerateTokensAsync(dbToken.UserId);
+                await _unitOfWork.SaveChangesAsync();
+
+                var response = new TokenResponseDto
+                {
+                    AccessToken = tokenResult.AccessToken,
+                    RefreshToken = tokenResult.RefreshToken
+                };
+
+                CacheRefreshResult(refreshToken, response);
+                return response;
+            }
+            finally
+            {
+                refreshLock.Release();
+                RefreshLocks.TryRemove(refreshToken, out _);
+            }
+        }
+
+        private static bool TryGetCachedRefreshResult(string refreshToken, out TokenResponseDto result)
+        {
+            result = null!;
+            if (!RefreshResultsCache.TryGetValue(refreshToken, out var cached))
+                return false;
+
+            if (cached.ExpiresAt <= DateTime.UtcNow)
+            {
+                RefreshResultsCache.TryRemove(refreshToken, out _);
+                return false;
+            }
+
+            result = cached.Result;
+            return true;
+        }
+
+        private static void CacheRefreshResult(string refreshToken, TokenResponseDto result)
+        {
+            RefreshResultsCache[refreshToken] = (result, DateTime.UtcNow.Add(RefreshCacheTtl));
         }
         #endregion
 
