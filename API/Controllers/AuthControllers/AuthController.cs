@@ -1,6 +1,6 @@
-using API.Extensions;
-using Application.Common.Results;
+using API.Infrastructure;
 using Application.Dtos.AuthDtos;
+using Application.Exceptions;
 using Application.Interfaces.Services;
 using Application.Services.AuthServices;
 using Microsoft.AspNetCore.Authorization;
@@ -33,97 +33,70 @@ namespace API.Controllers.AuthControllers
 
         [EnableRateLimiting("login")]
         [HttpPost("[action]")]
-        public async Task<ActionResult<Result<LoginResponseDto>>> Login([FromBody] RequestToken requestToken)
+        public async Task<IResult> Login([FromBody] RequestToken requestToken)
         {
-            var result = await _authService.LoginAsync(requestToken);
-
-            if (!result.Succeeded || result.Value == null)
-                return ApiResults.Unauthorized(
-                    result.Errors.Length > 0 ? result.Errors : new[] { "بيانات الدخول غير صحيحة" });
-
-            var tokens = result.Value;
+            var tokens = await _authService.LoginAsync(requestToken);
             _cookieService.SetAuthCookies(Response, tokens.AccessToken, tokens.RefreshToken);
 
-            var userId = ExtractUserIdFromAccessToken(tokens.AccessToken);
-            if (string.IsNullOrWhiteSpace(userId))
-                return ApiResults.Unauthorized("تعذر إنشاء الجلسة.");
+            var userId = ExtractUserIdFromAccessToken(tokens.AccessToken)
+                ?? throw new InvalidSessionException("تعذر إنشاء الجلسة.");
 
             _csrfService.IssueCsrf(Response, userId, out var csrfToken);
 
-            return Ok(Result<LoginResponseDto>.Success(new LoginResponseDto { CsrfToken = csrfToken }));
+            return ApiResponse.Success("تم تسجيل الدخول بنجاح.", new LoginResponseDto { CsrfToken = csrfToken });
         }
 
         [Authorize]
         [HttpGet("me")]
-        public async Task<ActionResult<Result<MeResponseDto>>> Me()
+        public async Task<IResult> Me()
         {
-            var userId =
-                User.FindFirstValue(ClaimTypes.NameIdentifier)
-                ?? User.FindFirstValue("sub");
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)
+                ?? User.FindFirstValue("sub")
+                ?? throw new UnauthenticatedUserException();
 
-            if (string.IsNullOrWhiteSpace(userId))
-                return ApiResults.Unauthorized("غير مصرح.");
-
-            var res = await _authService.GetMeAsync(userId);
-
-            if (!res.Succeeded || res.Value == null)
-                return ApiResults.Unauthorized(
-                    res.Errors.Length > 0 ? res.Errors : new[] { "غير مصرح." });
-
-            return Ok(res);
+            var meData = await _authService.GetMeAsync(userId);
+            return ApiResponse.Success("User profile retrieved successfully", meData);
         }
 
         [Authorize]
         [HttpGet("csrf")]
-        public ActionResult<Result<CsrfResponseDto>> GetCsrf()
+        public IResult GetCsrf()
         {
-            var userId =
-                User.FindFirstValue(ClaimTypes.NameIdentifier)
-                ?? User.FindFirstValue("sub");
-
-            if (string.IsNullOrWhiteSpace(userId))
-                return ApiResults.Unauthorized("غير مصرح.");
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)
+                ?? User.FindFirstValue("sub")
+                ?? throw new UnauthenticatedUserException();
 
             _csrfService.IssueCsrf(Response, userId, out var csrfToken);
-            return Ok(Result<CsrfResponseDto>.Success(new CsrfResponseDto { CsrfToken = csrfToken }));
+            return ApiResponse.Success("CSRF token generated", new CsrfResponseDto { CsrfToken = csrfToken });
         }
 
         [HttpPost("[action]")]
-        public async Task<ActionResult<Result<CsrfResponseDto>>> Refresh()
+        public async Task<IResult> Refresh()
         {
-            var refreshToken = _cookieService.TryGetRefreshToken(Request);
-            if (string.IsNullOrWhiteSpace(refreshToken))
-                return ApiResults.Unauthorized("فشل تجديد الجلسة.");
+            var refreshToken = _cookieService.TryGetRefreshToken(Request)
+                ?? throw new InvalidSessionException();
 
-            try
-            {
-                var tokens = await _tokenService.RefreshAccessTokenAsync(refreshToken);
-                _cookieService.SetAuthCookies(Response, tokens.AccessToken, tokens.RefreshToken);
+            var tokens = await _tokenService.RefreshAccessTokenAsync(refreshToken);
+            _cookieService.SetAuthCookies(Response, tokens.AccessToken, tokens.RefreshToken);
 
-                var userId = ExtractUserIdFromAccessToken(tokens.AccessToken);
-                if (string.IsNullOrWhiteSpace(userId))
-                    return ApiResults.Unauthorized("فشل تجديد الجلسة.");
+            var userId = ExtractUserIdFromAccessToken(tokens.AccessToken)
+                ?? throw new InvalidSessionException();
 
-                _csrfService.IssueCsrf(Response, userId, out var csrfToken);
+            _csrfService.IssueCsrf(Response, userId, out var csrfToken);
 
-                return Ok(Result<CsrfResponseDto>.Success(new CsrfResponseDto { CsrfToken = csrfToken }));
-            }
-            catch
-            {
-                return ApiResults.Unauthorized("فشل تجديد الجلسة.");
-            }
+            return ApiResponse.Success("Session refreshed successfully", new CsrfResponseDto { CsrfToken = csrfToken });
         }
 
         [Authorize]
         [HttpPost("[action]")]
-        public async Task<ActionResult<Result<string>>> Logout()
+        public async Task<IResult> Logout()
         {
             var refreshToken = _cookieService.TryGetRefreshToken(Request);
             if (!string.IsNullOrWhiteSpace(refreshToken))
                 await _tokenService.RevokeRefreshTokenAsync(refreshToken);
 
             _cookieService.ClearAuthCookies(Response);
-            return Ok(Result<string>.Success("تم تسجيل الخروج بنجاح."));
+            return ApiResponse.Success("تم تسجيل الخروج بنجاح.");
         }
 
         private static string? ExtractUserIdFromAccessToken(string accessToken)

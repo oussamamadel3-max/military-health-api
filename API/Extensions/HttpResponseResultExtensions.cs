@@ -1,13 +1,2 @@
-using Application.Common.Results;
-
+// Superseded by API.Infrastructure.ApiResponse.cs
 namespace API.Extensions;
-
-internal static class HttpResponseResultExtensions
-{
-    public static Task WriteResultAsync(
-        this HttpResponse response,
-        int statusCode,
-        Result result,
-        CancellationToken cancellationToken = default)
-        => ApiResults.WriteResultAsync(response, statusCode, result, cancellationToken);
-}

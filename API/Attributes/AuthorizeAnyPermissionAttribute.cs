@@ -1,11 +1,10 @@
-using API.Extensions;
+using Application.Exceptions;
 using Application.Interfaces.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 
 namespace API.Attributes
 {
-    // 1️⃣ تعريف Attribute جديد يقبل مجموعة صلاحيات
     public class AuthorizeAnyPermissionAttribute : TypeFilterAttribute
     {
         public AuthorizeAnyPermissionAttribute(params string[] permissions)
@@ -15,7 +14,6 @@ namespace API.Attributes
         }
     }
 
-    // 2️⃣ تعريف الفلتر الذي يتحقق من وجود أي صلاحية
     public class AuthorizeAnyPermissionFilter : IAsyncAuthorizationFilter
     {
         private readonly string[] _permissions;
@@ -32,8 +30,7 @@ namespace API.Attributes
             var userId = context.HttpContext.User?.FindFirst("sub")?.Value;
             if (userId == null)
             {
-                context.Result = ApiResults.Unauthorized("غير مصرح.");
-                return;
+                throw new UnauthenticatedUserException();
             }
 
             bool hasAny = false;
@@ -47,8 +44,9 @@ namespace API.Attributes
             }
 
             if (!hasAny)
-                context.Result = ApiResults.Forbidden("ليس لديك الصلاحية المطلوبة.");
+            {
+                throw new ForbiddenPermissionException();
+            }
         }
     }
 }
-

@@ -1,6 +1,7 @@
 using API.Infrastructure;
-using Application.Common.Results;
+using Domain.Exceptions;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using System.Net;
 
 namespace API.Middleware;
@@ -33,43 +34,76 @@ public class ErrorHandlingMiddleware
         }
     }
 
-    private Task HandleExceptionAsync(HttpContext context, Exception exception)
+    private async Task HandleExceptionAsync(HttpContext context, Exception exception)
     {
-        var statusCode = HttpStatusCode.InternalServerError;
-        var errors = new List<string>();
-        var warnings = new List<string>();
-        var originalErrorMessage = exception.Message;
+        IResult response;
 
         switch (exception)
         {
-            case BadImageFormatException:
-                errors.Add("حدث خطأ فني في إعدادات الخادم. يرجى إبلاغ فريق الدعم الفني فوراً.");
-                statusCode = HttpStatusCode.InternalServerError;
+            // =========================================================================
+            // 1. Custom Business Exceptions (Domain & Application Logic Errors)
+            // =========================================================================
+            case BusinessException bizEx:
+                response = ApiResponse.Error(
+                    message: bizEx.Message,
+                    code: bizEx.ErrorCode,
+                    meta: bizEx.Meta,
+                    status: bizEx.Status);
+
+                _logger.LogWarning(
+                    "BUSINESS EXCEPTION: Code={ErrorCode}, Status={Status}, Message={Message}",
+                    bizEx.ErrorCode, bizEx.Status, bizEx.Message);
                 break;
 
+            // =========================================================================
+            // 2. Unauthorized Access Exception
+            // =========================================================================
+            case UnauthorizedAccessException:
+                response = ApiResponse.Error(
+                    message: "غير مسموح بالوصول لهذا المورد.",
+                    code: "UNAUTHORIZED_ACCESS",
+                    status: (int)HttpStatusCode.Unauthorized);
+                break;
+
+            // =========================================================================
+            // 3. Resource Not Found Exception
+            // =========================================================================
+            case KeyNotFoundException:
+                response = ApiResponse.Error(
+                    message: "المورد المطلوب غير موجود.",
+                    code: "RESOURCE_NOT_FOUND",
+                    status: (int)HttpStatusCode.NotFound);
+                break;
+
+            // =========================================================================
+            // 4. BadImageFormatException (Preserved system error handler)
+            // =========================================================================
+            case BadImageFormatException:
+                response = ApiResponse.Error(
+                    message: "حدث خطأ فني في إعدادات الخادم. يرجى إبلاغ فريق الدعم الفني فوراً.",
+                    code: "SERVER_CONFIG_ERROR",
+                    status: (int)HttpStatusCode.InternalServerError);
+                break;
+
+            // =========================================================================
+            // 5. Default Fallback (Unexpected System Server Errors - 500)
+            // =========================================================================
             default:
-                errors.Add("عذراً، حدث خطأ غير متوقع أثناء معالجة طلبك. (يرجى الاتصال بالدعم)");
-                statusCode = HttpStatusCode.InternalServerError;
+                var friendlyMessage = "عذراً، حدث خطأ غير متوقع أثناء معالجة طلبك. (يرجى الاتصال بالدعم)";
+                var meta = _environment.IsDevelopment() ? new { originalError = exception.Message } : null;
+
+                response = ApiResponse.Error(
+                    message: friendlyMessage,
+                    code: "UNEXPECTED_SERVER_ERROR",
+                    meta: meta,
+                    status: (int)HttpStatusCode.InternalServerError);
+
+                _logger.LogError(exception,
+                    "UNHANDLED SYSTEM EXCEPTION: Message={Message}", exception.Message);
                 break;
         }
 
-        _logger.LogWarning(exception,
-            "UNHANDLED WARNING (Original): {OriginalMessage}. HTTP Status: {StatusCode}",
-            originalErrorMessage, (int)statusCode);
-
-        _logger.LogError("CLIENT ERROR: Returning status {StatusCode} with message: {FriendlyMessage}",
-            (int)statusCode, errors.FirstOrDefault() ?? "No specific error message.");
-
-        if (statusCode == HttpStatusCode.InternalServerError && _environment.IsDevelopment())
-            warnings.Add($"Original Error: {originalErrorMessage}");
-
-        context.Response.ContentType = "application/json";
-        context.Response.StatusCode = (int)statusCode;
-
-        var errorResponse = Result.Failure(errors, warnings: warnings);
-
-        return context.Response.WriteAsJsonAsync(errorResponse,
-            ApiJsonSerializerOptions.CamelCase);
+        await response.ExecuteAsync(context);
     }
 }
 

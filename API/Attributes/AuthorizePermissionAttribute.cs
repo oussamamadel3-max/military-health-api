@@ -1,6 +1,4 @@
-﻿using API.Extensions;
-using Application.Common.Results;
-using Microsoft.AspNetCore.Mvc;
+using Application.Exceptions;
 using Microsoft.AspNetCore.Mvc.Filters;
 
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = true)]
@@ -19,8 +17,7 @@ public class AuthorizePermissionAttribute : Attribute, IAuthorizationFilter
 
         if (user?.Identity == null || !user.Identity.IsAuthenticated)
         {
-            context.Result = ApiResults.Unauthorized("غير مصرح.");
-            return;
+            throw new UnauthenticatedUserException();
         }
 
         var permissions = user.Claims
@@ -30,7 +27,7 @@ public class AuthorizePermissionAttribute : Attribute, IAuthorizationFilter
 
         if (!permissions.Contains(_requiredPermission))
         {
-            context.Result = ApiResults.Forbidden("ليس لديك الصلاحية المطلوبة.");
+            throw new ForbiddenPermissionException();
         }
     }
 }

@@ -1,6 +1,5 @@
-using API.Extensions;
-using Application.Common.Results;
-using Application.Dtos.AuthDtos;
+using API.Infrastructure;
+using Application.Exceptions;
 using Application.Interfaces.Services;
 using Application.Services.AuthServices;
 using System.Security.Claims;
@@ -9,23 +8,8 @@ namespace API.Middleware
 {
     public class CsrfValidationMiddleware
     {
-        public const string CsrfHeaderName = "X-CSRF-TOKEN";
-
-        private static readonly HashSet<string> SafeMethods = new(StringComparer.OrdinalIgnoreCase)
-        {
-            HttpMethods.Get,
-            HttpMethods.Head,
-            HttpMethods.Options,
-            HttpMethods.Trace,
-        };
-
-        private static readonly string[] ExemptPathPrefixes =
-        {
-            "/api/auth/login",
-            "/api/auth/refresh",
-        };
-
         private readonly RequestDelegate _next;
+        private const string CsrfHeaderName = "X-CSRF-TOKEN";
 
         public CsrfValidationMiddleware(RequestDelegate next)
         {
@@ -35,14 +19,26 @@ namespace API.Middleware
         public async Task InvokeAsync(
             HttpContext context,
             ICsrfService csrfService,
-            AuthCookieService cookieService,
-            IWebHostEnvironment environment,
-            IConfiguration configuration)
+            AuthCookieService cookieService)
         {
-            var disableCsrf = environment.IsDevelopment()
-                && configuration.GetValue<bool>($"{AuthDevelopmentSettings.SectionName}:{nameof(AuthDevelopmentSettings.DisableCsrfValidation)}");
+            var method = context.Request.Method;
 
-            if (disableCsrf || ShouldSkip(context))
+            // 1) افحص الشروط الاستثنائية التي لا تتطلب CSRF
+            if (HttpMethods.IsGet(method) ||
+                HttpMethods.IsHead(method) ||
+                HttpMethods.IsOptions(method) ||
+                HttpMethods.IsTrace(method))
+            {
+                await _next(context);
+                return;
+            }
+
+            var path = context.Request.Path.Value ?? string.Empty;
+
+            // مسارات Auth مستثناة من CSRF (Login, Refresh, Logout)
+            if (path.StartsWith("/api/Auth/login", StringComparison.OrdinalIgnoreCase) ||
+                path.StartsWith("/api/Auth/refresh", StringComparison.OrdinalIgnoreCase) ||
+                path.StartsWith("/api/Auth/logout", StringComparison.OrdinalIgnoreCase))
             {
                 await _next(context);
                 return;
@@ -52,50 +48,18 @@ namespace API.Middleware
                 ?? context.User.FindFirstValue("sub");
 
             if (string.IsNullOrWhiteSpace(userId))
-            {
-                await context.Response.WriteResultAsync(
-                    StatusCodes.Status401Unauthorized,
-                    Result.Failure(new[] { "غير مصرح." }));
-                return;
-            }
+                throw new UnauthenticatedUserException();
 
             if (!context.Request.Headers.TryGetValue(CsrfHeaderName, out var headerValues))
-            {
-                await context.Response.WriteResultAsync(
-                    StatusCodes.Status403Forbidden,
-                    Result.Failure(new[] { "رمز CSRF مفقود." }));
-                return;
-            }
+                throw new CsrfTokenMissingException();
 
             var csrfToken = headerValues.FirstOrDefault();
             var signature = cookieService.TryGetCsrfSignature(context.Request);
 
             if (!csrfService.Validate(userId, csrfToken ?? string.Empty, signature))
-            {
-                await context.Response.WriteResultAsync(
-                    StatusCodes.Status403Forbidden,
-                    Result.Failure(new[] { "رمز CSRF غير صالح." }));
-                return;
-            }
+                throw new CsrfTokenInvalidException();
 
             await _next(context);
-        }
-
-        private static bool ShouldSkip(HttpContext context)
-        {
-            if (SafeMethods.Contains(context.Request.Method))
-                return true;
-
-            var path = context.Request.Path.Value ?? string.Empty;
-            var normalized = path.TrimEnd('/').ToLowerInvariant();
-
-            foreach (var prefix in ExemptPathPrefixes)
-            {
-                if (normalized.StartsWith(prefix, StringComparison.Ordinal))
-                    return true;
-            }
-
-            return false;
         }
     }
 }

@@ -1,3 +1,4 @@
+using API.Infrastructure;
 using Application.Common.Results;
 using Application.Dtos.AuthDtos;
 using Application.Interfaces.Repositories;
@@ -99,17 +100,13 @@ namespace API.Extensions
                     OnChallenge = async context =>
                     {
                         context.HandleResponse();
-                        await ApiResults.WriteResultAsync(
-                            context.Response,
-                            StatusCodes.Status401Unauthorized,
-                            Result.Failure(new[] { "غير مصرح." }));
+                        await ApiResponse.Error("غير مصرح.", "UNAUTHORIZED_ACCESS", status: 401)
+                                         .ExecuteAsync(context.HttpContext);
                     },
                     OnForbidden = async context =>
                     {
-                        await ApiResults.WriteResultAsync(
-                            context.Response,
-                            StatusCodes.Status403Forbidden,
-                            Result.Failure(new[] { "ليس لديك الصلاحية المطلوبة." }));
+                        await ApiResponse.Error("ليس لديك الصلاحية المطلوبة.", "FORBIDDEN_ACCESS", status: 403)
+                                         .ExecuteAsync(context.HttpContext);
                     }
                 };
             });

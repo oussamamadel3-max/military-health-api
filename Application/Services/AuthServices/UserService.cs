@@ -5,6 +5,7 @@ using Application.Common.Utilities;
 using Application.Common.Localization;
 using Application.Common.Results;
 using Application.Common.Permissions;
+using Application.Exceptions;
 using Application.Dtos.AuthDtos;
 using Domain.Entities.Auth;
 using Microsoft.AspNetCore.Identity;
@@ -67,13 +68,13 @@ public class UserService : IUserService
         if (string.IsNullOrWhiteSpace(createdUser.username)) errors.Add("اسم المستخدم مطلوب.");
         if (string.IsNullOrWhiteSpace(createdUser.email)) errors.Add("البريد الإلكتروني مطلوب.");
         if (string.IsNullOrWhiteSpace(createdUser.password)) errors.Add("كلمة المرور مطلوبة.");
-        if (errors.Count > 0) return Result<CreateUserDto>.Failure(errors, null);
+        if (errors.Count > 0) throw new InvalidUserDataException("بيانات المستخدم غير صالحة.", new { errors });
 
-        // منع التكرار
+        // منع التكرار (رمي استثناءات مخصصة)
         if (await _userManager.FindByNameAsync(createdUser.username) is not null)
-            return Result<CreateUserDto>.Failure(new[] { "اسم المستخدم موجود مسبقاً." }, null);
+            throw new UsernameAlreadyExistsException(createdUser.username);
         if (await _userManager.FindByEmailAsync(createdUser.email) is not null)
-            return Result<CreateUserDto>.Failure(new[] { "البريد الإلكتروني موجود مسبقاً." }, null);
+            throw new EmailAlreadyExistsException(createdUser.email);
 
         // جلب الأدوار الفعالة (كما عندك)
         var rawRoles = createdUser.roles.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim())

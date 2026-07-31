@@ -1,5 +1,5 @@
-using Application.Common.Results;
 using Application.Dtos.AuthDtos;
+using Application.Exceptions;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Domain.Entities.Auth;
@@ -18,7 +18,6 @@ namespace Application.Services.AuthServices
         private readonly IRoleRepository _roleRepository;
         private readonly IPermissionRepository _permissionRepository;
 
-        private const string GenericFailMsg = "بيانات الدخول غير صحيحة";
         private static readonly TimeSpan FailDelay = TimeSpan.FromMilliseconds(250);
         private static readonly string DummyHash =
             new PasswordHasher<User>().HashPassword(null!, "Dummy@123456");
@@ -41,57 +40,47 @@ namespace Application.Services.AuthServices
             _permissionRepository = permissionRepository;
         }
 
-        public async Task<Result<TokenGenerationResultDto>> LoginAsync(RequestToken requestToken)
+        public async Task<TokenGenerationResultDto> LoginAsync(RequestToken requestToken)
         {
             var username = (requestToken.UserName ?? string.Empty).Trim();
             var password = requestToken.PassWord ?? string.Empty;
 
-            // 1) ابحث عن المستخدم، لكن لا ترجع رسالة مختلفة
             var user = await _userManager.FindByNameAsync(username);
 
             if (user == null)
             {
-                // ✅ Dummy verify لتوحيد الزمن (تقريباً)
                 _passwordHasher.VerifyHashedPassword(null!, DummyHash, password);
-
                 await Task.Delay(FailDelay);
-                return Result<TokenGenerationResultDto>.Failure(new List<string> { GenericFailMsg }, null);
+                throw new InvalidCredentialsException();
             }
 
-            // 2) إذا الحساب مقفول (Lockout) لا تكشف، نفس الرسالة
             if (await _userManager.IsLockedOutAsync(user))
             {
                 await Task.Delay(FailDelay);
-                return Result<TokenGenerationResultDto>.Failure(new List<string> { GenericFailMsg }, null);
+                throw new UserAccountLockedException();
             }
 
-            // 3) تحقق كلمة المرور مع lockoutOnFailure=true
             var signIn = await _signInManager.CheckPasswordSignInAsync(
                 user, password, lockoutOnFailure: true);
 
-            // فشل كلمة مرور => نفس الرسالة (وتم احتساب محاولة فاشلة تلقائياً)
             if (!signIn.Succeeded)
             {
                 await Task.Delay(FailDelay);
-                return Result<TokenGenerationResultDto>.Failure(new List<string> { GenericFailMsg }, null);
+                throw new InvalidCredentialsException();
             }
 
-            // 4) تحقق من التفعيل (لا تكشف أيضاً)
             if (!user.IsActive)
             {
                 await Task.Delay(FailDelay);
-                return Result<TokenGenerationResultDto>.Failure(new List<string> { GenericFailMsg }, null);
+                throw new UserAccountDisabledException();
             }
 
-            // ✅ نجاح: صفّر عداد الفشل (احتياط)
             await _userManager.ResetAccessFailedCountAsync(user);
 
-            // 5) توليد التوكن
-            var tokenResult = await _tokenService.GenerateTokensAsync(user.Id);
-            return Result<TokenGenerationResultDto>.Success(tokenResult);
+            return await _tokenService.GenerateTokensAsync(user.Id);
         }
 
-        public async Task<Result<MeResponseDto>> GetMeAsync(string userId)
+        public async Task<MeResponseDto> GetMeAsync(string userId)
         {
             var user = await _userRepository.QueryUsers(asNoTracking: true)
                 .Where(u => u.Id == userId)
@@ -105,16 +94,12 @@ namespace Application.Services.AuthServices
                 })
                 .FirstOrDefaultAsync();
 
-            if (user == null)
-                return Result<MeResponseDto>.Failure(new[] { "غير مسموح." }, null);
-
-            if (!user.IsActive)
-                return Result<MeResponseDto>.Failure(new[] { "غير مسموح." }, null);
+            if (user == null || !user.IsActive)
+                throw new UnauthenticatedUserException();
 
             var associations = await _userRepository.GetRoleAssociationsAsync(userId, asNoTracking: true);
             var roleIds = associations.Select(ura => ura.RoleId).Distinct().ToList();
 
-            // Roles
             var roles = await _roleRepository.QueryRoles()
                 .Where(r => roleIds.Contains(r.Id))
                 .Select(r => r.Name!)
@@ -122,10 +107,7 @@ namespace Application.Services.AuthServices
                 .Distinct()
                 .ToListAsync();
 
-            // Role Permissions
             var rolePerms = await _permissionRepository.GetPermissionNamesViaRolesAsync(userId);
-
-            // Direct Permissions
             var directPerms = await _userRepository.GetDirectPermissionNamesAsync(userId, activeOnly: false);
 
             var permissions = directPerms
@@ -134,7 +116,7 @@ namespace Application.Services.AuthServices
                 .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            var dto = new MeResponseDto
+            return new MeResponseDto
             {
                 UserId = user.Id,
                 UserName = user.UserName ?? "",
@@ -143,8 +125,6 @@ namespace Application.Services.AuthServices
                 Roles = roles.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
                 Permissions = permissions
             };
-
-            return Result<MeResponseDto>.Success(dto);
         }
     }
 }

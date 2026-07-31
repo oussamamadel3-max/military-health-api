@@ -15,10 +15,7 @@ builder.WebHost.ConfigureKestrel(options => options.AddServerHeader = false);
  * إضافة Controllers الخاصة بالـ API
  * + ضبط JSON ليكون camelCase (مهم لتوافق Angular)
  */
-builder.Services.AddControllers(options =>
-    {
-        options.Filters.Add<ResultActionFilter>();
-    })
+builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
         options.JsonSerializerOptions.PropertyNamingPolicy =
