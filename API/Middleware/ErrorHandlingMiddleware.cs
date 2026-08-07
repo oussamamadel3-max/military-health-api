@@ -2,6 +2,7 @@ using API.Infrastructure;
 using Domain.Exceptions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 using System.Net;
 
 namespace API.Middleware;
@@ -76,7 +77,40 @@ public class ErrorHandlingMiddleware
                 break;
 
             // =========================================================================
-            // 4. BadImageFormatException (Preserved system error handler)
+            // 4. Argument & Invalid Operation Exceptions (Input / State Validation)
+            // =========================================================================
+            case ArgumentException argEx:
+                response = ApiResponse.Error(
+                    message: "المدخلات غير صالحة أو مفقودة.",
+                    code: "INVALID_ARGUMENT",
+                    status: (int)HttpStatusCode.BadRequest);
+
+                _logger.LogWarning(argEx, "ARGUMENT EXCEPTION: Message={Message}", argEx.Message);
+                break;
+
+            case InvalidOperationException invOpEx:
+                response = ApiResponse.Error(
+                    message: "تعذر تنفيذ العملية في الحالة الحالية.",
+                    code: "INVALID_OPERATION",
+                    status: (int)HttpStatusCode.BadRequest);
+
+                _logger.LogWarning(invOpEx, "INVALID OPERATION EXCEPTION: Message={Message}", invOpEx.Message);
+                break;
+
+            // =========================================================================
+            // 5. Database Update Constraint Exceptions
+            // =========================================================================
+            case DbUpdateException dbEx:
+                response = ApiResponse.Error(
+                    message: "حدث خطأ أثناء حفظ البيانات في قاعدة البيانات.",
+                    code: "DATABASE_UPDATE_ERROR",
+                    status: (int)HttpStatusCode.BadRequest);
+
+                _logger.LogError(dbEx, "DATABASE UPDATE EXCEPTION: Message={Message}", dbEx.Message);
+                break;
+
+            // =========================================================================
+            // 6. BadImageFormatException (Preserved system error handler)
             // =========================================================================
             case BadImageFormatException:
                 response = ApiResponse.Error(
@@ -86,7 +120,7 @@ public class ErrorHandlingMiddleware
                 break;
 
             // =========================================================================
-            // 5. Default Fallback (Unexpected System Server Errors - 500)
+            // 7. Default Fallback (Unexpected System Server Errors - 500)
             // =========================================================================
             default:
                 var friendlyMessage = "عذراً، حدث خطأ غير متوقع أثناء معالجة طلبك. (يرجى الاتصال بالدعم)";

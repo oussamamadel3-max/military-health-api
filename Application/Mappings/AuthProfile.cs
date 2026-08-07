@@ -8,7 +8,16 @@ namespace Application.Mappings
     {
         public AuthProfile()
         {
-            // Role
+            // User Mappings
+            CreateMap<User, UserDto>().ReverseMap();
+            CreateMap<CreateUserDto, User>()
+                .ForMember(dest => dest.Id, opt => opt.Ignore())
+                .ForMember(dest => dest.SecurityStamp, opt => opt.Ignore())
+                .ForMember(dest => dest.CreationDate, opt => opt.MapFrom(_ => DateTime.Now));
+            CreateMap<UpdateUserDto, User>()
+                .ForMember(dest => dest.Id, opt => opt.Ignore());
+
+            // Role Mappings
             CreateMap<Role, RoleDto>().ReverseMap();
             CreateMap<Role, RoleDetailsDto>().ReverseMap();
             CreateMap<RoleStatusUpdateDto, Role>().ReverseMap();
@@ -38,12 +47,11 @@ namespace Application.Mappings
                 .ForMember(dest => dest.RolePermissions, opt => opt.Ignore())
                 .ForMember(dest => dest.RoleFieldPermissions, opt => opt.Ignore());
 
-            // Permission => PermissionWithRolesDto
+            // Permission Mappings
             CreateMap<Permission, PermissionWithRolesDto>()
                 .ForMember(dest => dest.AssignedRoleIds, opt => opt.MapFrom(src => src.RolePermissions.Select(rp => rp.RoleId)))
                 .ForMember(dest => dest.AssignedRolesCount, opt => opt.MapFrom(src => src.RolePermissions.Count));
 
-            // Permission => PermissionWithRolesResultDto
             CreateMap<Permission, PermissionWithRolesResultDto>()
                 .ForMember(dest => dest.Roles, opt => opt.MapFrom(src => src.RolePermissions.Select(rp => rp.Role)))
                 .ForMember(dest => dest.Permissions, opt => opt.MapFrom(src => src));

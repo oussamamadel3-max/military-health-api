@@ -1,6 +1,6 @@
-using Application.Interfaces.Services;
-using Application.Common.Results;
+using API.Infrastructure;
 using Application.Dtos.DashboardDtos;
+using Application.Interfaces.Services;
 using Microsoft.AspNetCore.Mvc;
 
 namespace API.Controllers
@@ -14,10 +14,11 @@ namespace API.Controllers
 
         [HttpGet]
         [AuthorizePermission("Dashboard.Read")]
-        public async Task<Result<DashboardStatsDto>> Get([FromQuery] DashboardFilter filter)
+        public async Task<IResult> Get([FromQuery] DashboardFilter filter)
         {
             filter ??= new DashboardFilter();
-            return await _service.GetAsync(filter);
+            var stats = await _service.GetAsync(filter);
+            return ApiResponse.Success("تم جلب إحصائيات لوحة التحكم بنجاح.", stats);
         }
     }
 }

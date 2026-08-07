@@ -5,6 +5,7 @@ using Application.Interfaces.Services;
 using Application.Common.Utilities;
 using Application.Common.Results;
 using Application.Dtos.AuthDtos;
+using Application.Exceptions;
 using Domain.Entities.Auth;
 using Application.Common.Permissions;
 using Microsoft.AspNetCore.Identity;
@@ -48,9 +49,15 @@ namespace Application.Services.AuthServices
         }
 
         #region         الانشاء
-        public async Task<Result<RoleDto>> CreateRoleAsync(CreateRoleDto newRole)
+        public async Task<RoleDto> CreateRoleAsync(CreateRoleDto newRole)
         {
-            var errorList = new List<string>();
+            var roleName = (newRole.Name ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(roleName))
+                throw new InvalidRoleDataException("اسم الدور مطلوب.");
+
+            var roleExists = await _roleManager.RoleExistsAsync(roleName);
+            if (roleExists)
+                throw new RoleAlreadyExistsException(roleName);
 
             var role = _mapper.Map<Role>(newRole);
 
@@ -61,28 +68,28 @@ namespace Application.Services.AuthServices
 
             if (!identityResult.Succeeded)
             {
-                errorList.AddRange(identityResult.Errors.Select(e => e.Description));
-                return Result<RoleDto>.Failure(errorList, null);
+                var errors = identityResult.Errors.Select(e => e.Description);
+                throw new InvalidRoleDataException(string.Join(", ", errors));
             }
 
-            var roleDto = _mapper.Map<RoleDto>(role);
-
-            return Result<RoleDto>.Success(roleDto);
+            return _mapper.Map<RoleDto>(role);
         }
         #endregion
 
 
         #region         التعديل
-        public async Task<Result<string>> UpdateRoleAsync(string id, UpdateRoleDto updatedRole)
+        public async Task UpdateRoleAsync(string id, UpdateRoleDto updatedRole)
         {
-            var errorList = new List<string>();
+            var role = await _roleManager.FindByIdAsync(id)
+                ?? throw new RoleNotFoundException("الدور غير موجود.");
 
-            var role = await _roleManager.FindByIdAsync(id);
-            if (role == null)
-            {
-                errorList.Add("الدور غير موجود.");
-                return Result<string>.Failure(errorList, null);
-            }
+            var newRoleName = (updatedRole.Name ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(newRoleName))
+                throw new InvalidRoleDataException("اسم الدور مطلوب.");
+
+            var existingRoleWithSameName = await _roleManager.FindByNameAsync(newRoleName);
+            if (existingRoleWithSameName != null && existingRoleWithSameName.Id != role.Id)
+                throw new RoleAlreadyExistsException(newRoleName);
 
             _mapper.Map(updatedRole, role);
 
@@ -92,63 +99,48 @@ namespace Application.Services.AuthServices
             var identityResult = await _roleManager.UpdateAsync(role);
             if (!identityResult.Succeeded)
             {
-                errorList.AddRange(identityResult.Errors.Select(e => e.Description));
-                return Result<string>.Failure(errorList, null);
+                var errors = identityResult.Errors.Select(e => e.Description);
+                throw new InvalidRoleDataException(string.Join(", ", errors));
             }
-
-            return Result<string>.Success("تم تحديث الدور بنجاح.");
         }
         #endregion
 
 
         #region         الحذف
-        public async Task<Result<string>> DeleteRoleAsync(string id)
+        public async Task DeleteRoleAsync(string id)
         {
-            var errorList = new List<string>();
+            var role = await _roleManager.FindByIdAsync(id)
+                ?? throw new RoleNotFoundException("الدور غير موجود.");
 
-            var role = await _roleManager.FindByIdAsync(id);
-
-            if (role == null)
+            var result = await _roleManager.DeleteAsync(role);
+            if (!result.Succeeded)
             {
-                errorList.Add("الدور غير موجود");
-                return Result<string>.Failure(errorList, null);
+                var errors = result.Errors.Select(e => e.Description);
+                throw new InvalidRoleDataException(string.Join(", ", errors));
             }
-
-            await _roleManager.DeleteAsync(role);
-
-            return Result<string>.Success("تم الحذف بنجاح");
         }
         #endregion
 
 
         #region      جلب حسب المعرف 
-        public async Task<Result<RoleDto>> GetById(string id)
+        public async Task<RoleDto> GetById(string id)
         {
-            var errorList = new List<string>();
+            var role = await _roleManager.Roles.FirstOrDefaultAsync(r => r.Id == id)
+                ?? throw new RoleNotFoundException("الدور غير موجود.");
 
-            var role = _roleManager.Roles
-                .FirstOrDefault(r => r.Id == id);
-
-            if (role == null)
+            var roleDto = new RoleDto
             {
-                await Task.Delay(1);
-                errorList.Add("الدور غير موجود");
-                return Result<RoleDto>.Failure(errorList, null);
-            }
+                Id = role.Id,
+                Name = role.Name ?? string.Empty
+            };
 
-            var roleDto = new RoleDto();
-
-            roleDto.Name = role.Name ?? string.Empty;
-
-            roleDto.Id = role.Id;
-
-            return Result<RoleDto>.Success(roleDto);
+            return roleDto;
         }
         #endregion
 
 
         #region          جلب الصلاحيات مع تفاصيلها 
-        public async Task<Result<PaginatedList<RoleDetailsDto>>> GetRolesWithDetailsAsync(int pageNumber, int pageSize, string? name = null, bool? isActive = null)
+        public async Task<PaginatedList<RoleDetailsDto>> GetRolesWithDetailsAsync(int pageNumber, int pageSize, string? name = null, bool? isActive = null)
         {
             if (pageNumber < 1) pageNumber = 1;
             if (pageSize < 1) pageSize = 10;
@@ -177,8 +169,7 @@ namespace Application.Services.AuthServices
 
             if (roles.Count == 0)
             {
-                var empty = new PaginatedList<RoleDetailsDto>(new List<RoleDetailsDto>(), totalRecords, pageNumber, pageSize);
-                return Result<PaginatedList<RoleDetailsDto>>.Success(empty);
+                return new PaginatedList<RoleDetailsDto>(new List<RoleDetailsDto>(), totalRecords, pageNumber, pageSize);
             }
 
             var roleIds = roles.Select(r => r.Id).ToList();
@@ -225,25 +216,17 @@ namespace Application.Services.AuthServices
                 return dto;
             }).ToList();
 
-            var result = new PaginatedList<RoleDetailsDto>(roleDtos, totalRecords, pageNumber, pageSize);
-            return Result<PaginatedList<RoleDetailsDto>>.Success(result);
+            return new PaginatedList<RoleDetailsDto>(roleDtos, totalRecords, pageNumber, pageSize);
         }
 
         #endregion
 
 
         #region         اسناد مستخدم الى دور 
-        public async Task<Result<string>> AssignUserToRole(string userId, List<string> roleIds)
+        public async Task AssignUserToRole(string userId, List<string> roleIds)
         {
-            var errorList = new List<string>();
-
-            var user = await _userManager.FindByIdAsync(userId);
-
-            if (user == null)
-            {
-                errorList.Add("المستخدم غير موجود");
-                return Result<string>.Failure(errorList, null);
-            }
+            var user = await _userManager.FindByIdAsync(userId)
+                ?? throw new UserNotFoundException("المستخدم غير موجود.");
 
             var currentRoles = await _userManager.GetRolesAsync(user);
 
@@ -256,10 +239,7 @@ namespace Application.Services.AuthServices
             var inactiveRoleIds = roleIds.Except(activeRoleIds).ToList();
 
             if (inactiveRoleIds.Any())
-            {
-                errorList.Add($"الأدوار التالية غير نشطة: {string.Join(", ", inactiveRoleIds)}");
-                return Result<string>.Failure(errorList, null);
-            }
+                throw new InvalidRoleDataException($"الأدوار التالية غير نشطة: {string.Join(", ", inactiveRoleIds)}");
 
             var updatedRoleNames = activeRoles
                 .Select(r => r.Name)
@@ -280,21 +260,18 @@ namespace Application.Services.AuthServices
             {
                 await _userManager.RemoveFromRolesAsync(user, removedRoles);
             }
-
-            return Result<string>.Success("Save role request");
         }
         #endregion
 
 
         #region         اسناد صلاحية الى دور 
-        public async Task<Result<string>> SyncPermissionsForRoleAsync(AssignPermissionsDto dto)
+        public async Task<string> SyncPermissionsForRoleAsync(AssignPermissionsDto dto)
         {
             if (string.IsNullOrWhiteSpace(dto.RoleId))
-                return Result<string>.Failure(new[] { "RoleId مطلوب." }, null);
+                throw new InvalidRoleDataException("RoleId مطلوب.");
 
-            var role = await _roleManager.FindByIdAsync(dto.RoleId);
-            if (role == null)
-                return Result<string>.Failure(new[] { "الدور غير موجود." }, null);
+            var role = await _roleManager.FindByIdAsync(dto.RoleId)
+                ?? throw new RoleNotFoundException("الدور غير موجود.");
 
             role.UpdatedAt = DateTime.Now;
             role.UpdatedBy = _currentUserService.UserId;
@@ -308,8 +285,7 @@ namespace Application.Services.AuthServices
 
             var missingOrInactive = requestedIds.Except(activeValidIds).ToList();
             if (missingOrInactive.Any())
-                return Result<string>.Failure(
-                    new[] { $"صلاحيات غير موجودة أو غير نشطة: {string.Join(", ", missingOrInactive)}" }, null);
+                throw new InvalidRoleDataException($"صلاحيات غير موجودة أو غير نشطة: {string.Join(", ", missingOrInactive)}");
 
             var existingRolePerms = await _roleRepository.GetRolePermissionsAsync(dto.RoleId);
 
@@ -348,9 +324,9 @@ namespace Application.Services.AuthServices
 
                 await tx.CommitAsync();
 
-                return Result<string>.Success($"تم تحديث الصلاحيات بنجاح. (إضافة: {toAdd.Count} | حذف: {toRemove.Count})");
+                return $"تم تحديث الصلاحيات بنجاح. (إضافة: {toAdd.Count} | حذف: {toRemove.Count})";
             }
-            catch
+            catch (DbUpdateException)
             {
                 await tx.RollbackAsync();
                 throw;
@@ -361,23 +337,15 @@ namespace Application.Services.AuthServices
 
 
         #region          انشاء دور مع الصلاحيات
-        public async Task<Result<RoleDetailsDto>> CreateRoleWithPermissionsAsync(CreateRoleWithPermissionsDto dto)
+        public async Task<RoleDetailsDto> CreateRoleWithPermissionsAsync(CreateRoleWithPermissionsDto dto)
         {
-            var errors = new List<string>();
-
             var roleName = (dto.Name ?? string.Empty).Trim();
             if (string.IsNullOrWhiteSpace(roleName))
-            {
-                errors.Add("اسم الدور مطلوب.");
-                return Result<RoleDetailsDto>.Failure(errors, null);
-            }
+                throw new InvalidRoleDataException("اسم الدور مطلوب.");
 
             var existingRole = await _roleManager.FindByNameAsync(roleName);
             if (existingRole != null)
-            {
-                errors.Add("الدور موجود مسبقاً، لا يمكن إضافته مرة أخرى.");
-                return Result<RoleDetailsDto>.Failure(errors, null);
-            }
+                throw new RoleAlreadyExistsException(roleName);
 
             var inputIds = dto.PermissionIds ?? Enumerable.Empty<Guid>();
             var requestedDistinct = inputIds.Distinct().ToList();
@@ -387,10 +355,7 @@ namespace Application.Services.AuthServices
 
             var inactiveIds = requestedDistinct.Except(validIds).ToList();
             if (inactiveIds.Any())
-            {
-                errors.Add($"الصلاحيات التالية غير نشطة: {string.Join(", ", inactiveIds)}");
-                return Result<RoleDetailsDto>.Failure(errors, null);
-            }
+                throw new InvalidRoleDataException($"الصلاحيات التالية غير نشطة: {string.Join(", ", inactiveIds)}");
 
             var invalidSkipped = requestedDistinct.Count - validIds.Count;
 
@@ -406,9 +371,9 @@ namespace Application.Services.AuthServices
                 var identityResult = await _roleManager.CreateAsync(role);
                 if (!identityResult.Succeeded)
                 {
-                    errors.AddRange(identityResult.Errors.Select(e => e.Description));
+                    var errors = identityResult.Errors.Select(e => e.Description);
                     await tx.RollbackAsync();
-                    return Result<RoleDetailsDto>.Failure(errors, null);
+                    throw new InvalidRoleDataException(string.Join(", ", errors));
                 }
 
                 var toAdd = validIds;
@@ -430,12 +395,10 @@ namespace Application.Services.AuthServices
 
                 await tx.CommitAsync();
             }
-            catch (DbUpdateException dbEx)
+            catch (DbUpdateException)
             {
                 await tx.RollbackAsync();
-                errors.Add("فشل في حفظ البيانات. يرجى المحاولة لاحقاً.");
-                errors.Add(dbEx.GetBaseException().Message);
-                return Result<RoleDetailsDto>.Failure(errors, null);
+                throw;
             }
 
             var roleDetails = _mapper.Map<RoleDetailsDto>(role);
@@ -451,33 +414,28 @@ namespace Application.Services.AuthServices
 
             roleDetails.PermissionsCount = roleDetails.Permissions.Count;
 
-            var addedCount = roleDetails.PermissionsCount;
-            var skippedCount = invalidSkipped + inputDuplicatesSkipped;
-            _ = $"تم إنشاء الدور بنجاح. تمت إضافة {addedCount} صلاحية. " +
-                         $"تم تجاوز {skippedCount} (غير موجودة أو مكررة في الإدخال).";
-
-            return Result<RoleDetailsDto>.Success(roleDetails);
+            return roleDetails;
         }
 
         #endregion
 
 
         #region             جلب عدد الادوار الفعالة 
-        public async Task<Result<string>> GetActiveRolesCount()
+        public async Task<string> GetActiveRolesCount()
         {
             var count = await _roleManager.Roles
                 .Where(r => r.IsActive)
                 .CountAsync();
 
-            return Result<string>.Success(count.ToString());
+            return count.ToString();
         }
         #endregion
 
 
         #region     جلب كل الصلاحيات الفعالة  
-        public async Task<Result<List<DropdownRoleDto>>> GetDropdownRolesAsync()
+        public async Task<List<DropdownRoleDto>> GetDropdownRolesAsync()
         {
-            var roles = await _roleRepository.QueryRoles()
+            return await _roleRepository.QueryRoles()
                 .Where(r => r.IsActive)
                 .OrderBy(r => r.Name)
                 .Select(r => new DropdownRoleDto
@@ -486,15 +444,12 @@ namespace Application.Services.AuthServices
                     name = AuthDisplayNames.RoleAr(r.Name ?? string.Empty)
                 })
                 .ToListAsync();
-
-            return Result<List<DropdownRoleDto>>.Success(roles);
         }
 
-        public async Task<Result<RoleStatusUpdateDto>> ToggleRoleStatusAsync(Guid roleId)
+        public async Task<RoleStatusUpdateDto> ToggleRoleStatusAsync(Guid roleId)
         {
-            var role = await _roleRepository.GetByIdAsync(roleId.ToString());
-            if (role == null)
-                return Result<RoleStatusUpdateDto>.Failure(new List<string> { $"الدور غير موجود." }, null);
+            var role = await _roleRepository.GetByIdAsync(roleId.ToString())
+                ?? throw new RoleNotFoundException("الدور غير موجود.");
 
             role.IsActive = !role.IsActive;
             role.UpdatedAt = DateTime.Now;
@@ -503,9 +458,7 @@ namespace Application.Services.AuthServices
             _roleRepository.Update(role);
             await _unitOfWork.SaveChangesAsync();
 
-            var dto = _mapper.Map<RoleStatusUpdateDto>(role);
-
-            return Result<RoleStatusUpdateDto>.Success(dto);
+            return _mapper.Map<RoleStatusUpdateDto>(role);
         }
 
         #endregion

@@ -1,12 +1,12 @@
-using Application.Common.Results;
+using API.Infrastructure;
 using Application.Common.Utilities;
 using Application.Dtos.AuthDtos;
 using Application.Interfaces.Services;
 using Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using System.ComponentModel.DataAnnotations;
-
 
 namespace API.Controllers.AuthControllers
 {
@@ -22,12 +22,8 @@ namespace API.Controllers.AuthControllers
             _fieldPermissionService = fieldPermissionService;
         }
 
-        // =====================================================
-        // CRUD
-        // =====================================================
-
         [HttpGet("[action]")]
-        public async Task<Result<PaginatedList<FieldPermissionDto>>> GetFieldPermissions(
+        public async Task<IResult> GetFieldPermissions(
             [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
             [FromQuery][Range(1, 500)] int pageSize = 10,
             [FromQuery] string? roleId = null,
@@ -46,88 +42,60 @@ namespace API.Controllers.AuthControllers
             };
 
             var result = await _fieldPermissionService.GetFieldPermissionsAsync(pageNumber, pageSize, filter);
-            if (!result.Succeeded || result.Value == null)
-                return Result<PaginatedList<FieldPermissionDto>>.Failure(result.Errors, null);
-
-            return Result<PaginatedList<FieldPermissionDto>>.Success(result.Value);
+            return ApiResponse.Success("تم جلب صلاحيات الحقول بنجاح.", result);
         }
 
         [HttpGet("[action]/{id}")]
-        public async Task<Result<FieldPermissionDto>> GetById(Guid id)
+        public async Task<IResult> GetById(Guid id)
         {
             var result = await _fieldPermissionService.GetByIdAsync(id);
-            if (!result.Succeeded || result.Value == null)
-                return Result<FieldPermissionDto>.Failure(result.Errors, null);
-
-            return Result<FieldPermissionDto>.Success(result.Value);
+            return ApiResponse.Success("تم جلب صلاحية الحقل بنجاح.", result);
         }
 
         [HttpPost("[action]")]
-        public async Task<Result<CreateFieldPermissionsResultDto>> Create([FromBody] CreateFieldPermissionDto dto)
+        public async Task<IResult> Create([FromBody] CreateFieldPermissionDto dto)
         {
             var result = await _fieldPermissionService.CreateAsync(dto);
-            if (!result.Succeeded || result.Value == null)
-                return Result<CreateFieldPermissionsResultDto>.Failure(result.Errors, null);
-
-            return Result<CreateFieldPermissionsResultDto>.Success(result.Value);
+            return ApiResponse.Success("تم إنشاء صلاحيات الحقول بنجاح.", result);
         }
 
         [HttpPut("[action]/{id}")]
-        public async Task<Result<string>> Update(Guid id, [FromBody] UpdateFieldPermissionDto dto)
+        public async Task<IResult> Update(Guid id, [FromBody] UpdateFieldPermissionDto dto)
         {
-            var result = await _fieldPermissionService.UpdateAsync(id, dto);
-            if (!result.Succeeded || result.Value == null)
-                return Result<string>.Failure(result.Errors, null);
-
-            return Result<string>.Success(result.Value);
+            await _fieldPermissionService.UpdateAsync(id, dto);
+            return ApiResponse.Success("تم تعديل صلاحيات الحقل بنجاح.");
         }
 
         [HttpDelete("[action]/{id}")]
-        public async Task<Result<string>> Delete(Guid id)
+        public async Task<IResult> Delete(Guid id)
         {
-            var result = await _fieldPermissionService.DeleteAsync(id);
-            if (!result.Succeeded || result.Value == null)
-                return Result<string>.Failure(result.Errors, null);
-
-            return Result<string>.Success(result.Value);
+            await _fieldPermissionService.DeleteAsync(id);
+            return ApiResponse.Success("تم حذف صلاحية الحقل بنجاح.");
         }
 
         [HttpPatch("[action]/{id}")]
-        public async Task<Result<string>> ChangeAccessType(Guid id, [FromBody] ChangeFieldPermissionAccessTypeDto dto)
+        public async Task<IResult> ChangeAccessType(Guid id, [FromBody] ChangeFieldPermissionAccessTypeDto dto)
         {
-            var result = await _fieldPermissionService.ChangeAccessTypeAsync(id, dto);
-            if (!result.Succeeded || result.Value == null)
-                return Result<string>.Failure(result.Errors, null);
-
-            return Result<string>.Success(result.Value);
+            await _fieldPermissionService.ChangeAccessTypeAsync(id, dto);
+            return ApiResponse.Success("تم تغيير نوع الوصول بنجاح.");
         }
 
-        // =====================================================
-        // Reflection: Entities & Fields
-        // =====================================================
-
         [HttpGet("[action]")]
-        public async Task<Result<List<EntityInfoDto>>> GetEntities()
+        public async Task<IResult> GetEntities()
         {
             var result = await _fieldPermissionService.GetEntitiesAsync();
-            if (!result.Succeeded || result.Value == null)
-                return Result<List<EntityInfoDto>>.Failure(result.Errors, null);
-
-            return Result<List<EntityInfoDto>>.Success(result.Value);
+            return ApiResponse.Success("تم جلب قائمة الكيانات بنجاح.", result);
         }
 
         [HttpGet("[action]/{entityName}")]
-        public async Task<Result<List<FieldInfoDto>>> GetFields(string entityName)
+        public async Task<IResult> GetFields(string entityName)
         {
             var result = await _fieldPermissionService.GetFieldsAsync(entityName);
-            if (!result.Succeeded || result.Value == null)
-                return Result<List<FieldInfoDto>>.Failure(result.Errors, null);
-
-            return Result<List<FieldInfoDto>>.Success(result.Value);
+            return ApiResponse.Success("تم جلب قائمة الحقول بنجاح.", result);
         }
 
         [HttpGet("[action]")]
-        public Task<Result<List<FieldAccessTypeDto>>> GetAccessTypes()
+        public IResult GetAccessTypes()
         {
             var list = Enum.GetValues(typeof(FieldAccessType))
                            .Cast<FieldAccessType>()
@@ -138,7 +106,7 @@ namespace API.Controllers.AuthControllers
                            })
                            .ToList();
 
-            return Task.FromResult(Result<List<FieldAccessTypeDto>>.Success(list));
+            return ApiResponse.Success("تم جلب أنواع الوصول بنجاح.", list);
         }
     }
 }

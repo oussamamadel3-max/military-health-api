@@ -17,17 +17,6 @@ public class UnauthenticatedUserException : BusinessException
     }
 }
 
-public class ForbiddenPermissionException : BusinessException
-{
-    public ForbiddenPermissionException(string message = "ليس لديك الصلاحية المطلوبة.")
-        : base(
-            message: message,
-            errorCode: "FORBIDDEN_ACCESS",
-            status: 403)
-    {
-    }
-}
-
 public class CsrfTokenMissingException : BusinessException
 {
     public CsrfTokenMissingException(string message = "رمز CSRF مفقود.")
@@ -94,46 +83,6 @@ public class UserAccountLockedException : BusinessException
             message: message,
             errorCode: "AUTH_ACCOUNT_LOCKED",
             status: 401)
-    {
-    }
-}
-
-// ==========================================
-// Register / User Creation Custom Exceptions
-// ==========================================
-
-public class UsernameAlreadyExistsException : BusinessException
-{
-    public UsernameAlreadyExistsException(string username = "")
-        : base(
-            message: string.IsNullOrWhiteSpace(username) ? "اسم المستخدم موجود مسبقاً." : $"اسم المستخدم '{username}' موجود مسبقاً.",
-            errorCode: "USER_USERNAME_EXISTS",
-            status: 400,
-            meta: new { username })
-    {
-    }
-}
-
-public class EmailAlreadyExistsException : BusinessException
-{
-    public EmailAlreadyExistsException(string email = "")
-        : base(
-            message: string.IsNullOrWhiteSpace(email) ? "البريد الإلكتروني موجود مسبقاً." : $"البريد الإلكتروني '{email}' موجود مسبقاً.",
-            errorCode: "USER_EMAIL_EXISTS",
-            status: 400,
-            meta: new { email })
-    {
-    }
-}
-
-public class InvalidUserDataException : BusinessException
-{
-    public InvalidUserDataException(string message, object? meta = null)
-        : base(
-            message: message,
-            errorCode: "USER_INVALID_DATA",
-            status: 422,
-            meta: meta)
     {
     }
 }

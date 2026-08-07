@@ -2,6 +2,7 @@ using Application.Common.Results;
 using Application.Common.Utilities;
 using Application.Dtos;
 using Application.Dtos.DocumentDtos;
+using Application.Exceptions;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
@@ -62,34 +63,91 @@ public class DocumentService : IDocumentService
         return document.UserId == scope.UserId;
     }
 
-    public async Task<Result<List<DocumentDto>>> CreateAsync(CreateDocumentManyDto dto)
+    public async Task<List<DocumentDto>> CreateAsync(CreateDocumentManyDto dto)
     {
+        var userId = CurrentUserId;
+        var roleIds = CurrentRoleIds;
+        var jwt = JwtFieldPerms;
+
+        var scope = await _actorScope.GetScopeAsync(userId);
+        if (scope.Actor is null)
+            throw new UserNotFoundException("المستخدم الحالي غير موجود.");
+
+        var fpErrors = await PermissionHelperUtilities.ValidateFieldPermissionsFromJwtAsync(
+            dto, jwt, "Document", _fieldPerms, userId, roleIds);
+        if (fpErrors.Any())
+            throw new InvalidDocumentDataException(string.Join(", ", fpErrors));
+
+        var currentMax = await _documents.GetMaxDocumentNumberAsync();
+
+        var entity = new Document
+        {
+            Title = _textSanitizer.SanitizePlainText(dto.Title) ?? string.Empty,
+            Description = _textSanitizer.SanitizePlainText(dto.Description) ?? string.Empty,
+            UserId = userId,
+            DocumentNumber = currentMax + 1
+        };
+        entity.Description ??= string.Empty;
+        _documents.Add(entity);
+
+        const int maxRetries = 5;
+        for (int attempt = 1; attempt <= maxRetries; attempt++)
+        {
+            try
+            {
+                await _unitOfWork.SaveChangesAsync();
+                break;
+            }
+            catch (DbUpdateException dbEx) when (IsUniqueConstraintViolation(dbEx))
+            {
+                if (attempt == maxRetries)
+                    throw new InvalidDocumentDataException("تعذر توليد رقم وثيقة فريد بعد عدة محاولات. حاول مجددًا.");
+
+                var newMax = await _documents.GetMaxDocumentNumberAsync();
+                entity.DocumentNumber = newMax + 1;
+            }
+        }
+
+        if (dto.AttachmentIds != null && dto.AttachmentIds.Count > 0)
+        {
+            foreach (var attId in dto.AttachmentIds.Distinct())
+                await _attachmentService.LinkToEntityAsync(attId, entity.DocumentId, "Document");
+        }
+
+        var outDto = _mapper.Map<DocumentDto>(entity);
+        outDto = await _fieldPerms.ApplyFieldPermissionsAsync(outDto, userId, roleIds, "Document", jwt);
+        return new List<DocumentDto> { outDto };
+    }
+
+    public async Task UpdateAsync(long documentId, UpdateDocumentDto dto)
+    {
+        var userId = CurrentUserId ?? string.Empty;
+        var roleIds = CurrentRoleIds;
+        var jwt = JwtFieldPerms;
+
+        var entity = await _documents.GetByIdAsync(documentId, trackChanges: true)
+            ?? throw new DocumentNotFoundException("الوثيقة غير موجودة.");
+
+        var scope = await _actorScope.GetScopeAsync(userId);
+        if (scope.Actor is null)
+            throw new UserNotFoundException("المستخدم الحالي غير موجود.");
+
+        if (!IsWithinScope(scope, entity))
+            throw new ForbiddenPermissionException("لا يمكنك تعديل وثيقة لم تقم بإنشائها.");
+
+        var errors = await PermissionHelperUtilities.ValidateFieldPermissionsFromJwtAsync(
+            dto, jwt, "Document", _fieldPerms, userId, roleIds);
+        if (errors.Any())
+            throw new InvalidDocumentDataException(string.Join(", ", errors));
+
+        _mapper.Map(dto, entity);
+        entity.Title = _textSanitizer.SanitizePlainText(entity.Title) ?? string.Empty;
+        entity.Description = _textSanitizer.SanitizePlainText(entity.Description) ?? string.Empty;
+
+        using var tx = await _unitOfWork.BeginTransactionAsync();
         try
         {
-            var userId = CurrentUserId;
-            var roleIds = CurrentRoleIds;
-            var jwt = JwtFieldPerms;
-
-            var scope = await _actorScope.GetScopeAsync(userId);
-            if (scope.Actor is null)
-                return Result<List<DocumentDto>>.Failure(new[] { "المستخدم الحالي غير موجود." });
-
-            var fpErrors = await PermissionHelperUtilities.ValidateFieldPermissionsFromJwtAsync(
-                dto, jwt, "Document", _fieldPerms, userId, roleIds);
-            if (fpErrors.Any())
-                return Result<List<DocumentDto>>.Failure(fpErrors.ToArray());
-
-            var currentMax = await _documents.GetMaxDocumentNumberAsync();
-
-            var entity = new Document
-            {
-                Title = _textSanitizer.SanitizePlainText(dto.Title) ?? string.Empty,
-                Description = _textSanitizer.SanitizePlainText(dto.Description) ?? string.Empty,
-                UserId = userId,
-                DocumentNumber = currentMax + 1
-            };
-            entity.Description ??= string.Empty;
-            _documents.Add(entity);
+            _documents.Update(entity);
 
             const int maxRetries = 5;
             for (int attempt = 1; attempt <= maxRetries; attempt++)
@@ -102,259 +160,161 @@ public class DocumentService : IDocumentService
                 catch (DbUpdateException dbEx) when (IsUniqueConstraintViolation(dbEx))
                 {
                     if (attempt == maxRetries)
-                        return Result<List<DocumentDto>>.Failure(new[] { "تعذر توليد رقم وثيقة فريد بعد عدة محاولات. حاول مجددًا." });
+                        throw new InvalidDocumentDataException("تعذر حفظ التغييرات بسبب تعارض الترقيم بعد عدة محاولات.");
 
-                    var newMax = await _documents.GetMaxDocumentNumberAsync();
-                    entity.DocumentNumber = newMax + 1;
+                    var retryMax = await _documents.GetMaxDocumentNumberAsync();
+                    entity.DocumentNumber = retryMax + 1;
                 }
             }
 
-            if (dto.AttachmentIds != null && dto.AttachmentIds.Count > 0)
+            var currentIds = await _attachments.GetIdsByDocumentAsync(entity.DocumentId);
+            var currentSet = currentIds.ToHashSet();
+            HashSet<Guid> targetSet = new(currentSet);
+
+            if (dto.ReplaceAttachments == true && dto.AttachmentIds is { Count: > 0 })
+                targetSet = dto.AttachmentIds.Distinct().ToHashSet();
+            else
             {
-                foreach (var attId in dto.AttachmentIds.Distinct())
-                    await _attachmentService.LinkToEntityAsync(attId, entity.DocumentId, "Document");
+                if (dto.AddAttachmentIds is { Count: > 0 })
+                    foreach (var id in dto.AddAttachmentIds.Distinct()) targetSet.Add(id);
+                if (dto.RemoveAttachmentIds is { Count: > 0 })
+                    foreach (var id in dto.RemoveAttachmentIds.Distinct()) targetSet.Remove(id);
             }
 
-            var outDto = _mapper.Map<DocumentDto>(entity);
-            outDto = await _fieldPerms.ApplyFieldPermissionsAsync(outDto, userId, roleIds, "Document", jwt);
-            return Result<List<DocumentDto>>.Success(new List<DocumentDto> { outDto });
-        }
-        catch (Exception ex)
-        {
-            return Result<List<DocumentDto>>.Failure(new[] { $"حدث خطأ أثناء الإنشاء: {ex.Message}" });
-        }
-    }
+            var toUnlink = currentSet.Except(targetSet).ToList();
+            var toLink = targetSet.Except(currentSet).ToList();
 
-    public async Task<Result<string>> UpdateAsync(long documentId, UpdateDocumentDto dto)
-    {
-        try
-        {
-            var userId = CurrentUserId ?? string.Empty;
-            var roleIds = CurrentRoleIds;
-            var jwt = JwtFieldPerms;
-
-            var entity = await _documents.GetByIdAsync(documentId, trackChanges: true);
-            if (entity == null) return Result<string>.Failure(new[] { "الوثيقة غير موجودة." });
-
-            var scope = await _actorScope.GetScopeAsync(userId);
-            if (scope.Actor is null) return Result<string>.Failure(new[] { "المستخدم الحالي غير موجود." });
-
-            if (!IsWithinScope(scope, entity))
-                return Result<string>.Failure(new[] { "لا يمكنك تعديل وثيقة لم تقم بإنشائها." });
-
-            var errors = await PermissionHelperUtilities.ValidateFieldPermissionsFromJwtAsync(
-                dto, jwt, "Document", _fieldPerms, userId, roleIds);
-            if (errors.Any()) return Result<string>.Failure(errors.ToArray());
-
-            _mapper.Map(dto, entity);
-            entity.Title = _textSanitizer.SanitizePlainText(entity.Title) ?? string.Empty;
-            entity.Description = _textSanitizer.SanitizePlainText(entity.Description) ?? string.Empty;
-
-            using var tx = await _unitOfWork.BeginTransactionAsync();
-            try
+            if (toLink.Count > 0)
             {
-                _documents.Update(entity);
+                var candidates = await _attachments.GetByIdsAsync(toLink);
+                var found = candidates.Select(a => a.AttachmentId).ToHashSet();
+                var missing = toLink.Where(id => !found.Contains(id)).ToList();
+                if (missing.Count > 0)
+                    throw new AttachmentNotFoundException($"مرفقات غير موجودة: [{string.Join(", ", missing)}]");
 
-                const int maxRetries = 5;
-                for (int attempt = 1; attempt <= maxRetries; attempt++)
+                var locked = candidates
+                    .Where(a => a.OwnerId != 0 && a.OwnerId != entity.DocumentId)
+                    .Select(a => a.AttachmentId).ToList();
+                if (locked.Count > 0)
+                    throw new InvalidDocumentDataException($"مرفقات مرتبطة بكيان آخر: [{string.Join(", ", locked)}]");
+
+                foreach (var a in candidates)
                 {
-                    try { await _unitOfWork.SaveChangesAsync(); break; }
-                    catch (DbUpdateException dbEx) when (IsUniqueConstraintViolation(dbEx))
-                    {
-                        if (attempt == maxRetries)
-                            return Result<string>.Failure(new[] { "تعذر حفظ التغييرات بسبب تعارض الترقيم بعد عدة محاولات." });
-
-                        var retryMax = await _documents.GetMaxDocumentNumberAsync();
-                        entity.DocumentNumber = retryMax + 1;
-                    }
+                    a.OwnerId = entity.DocumentId;
+                    a.OwnerType = "Document";
+                    a.UpdatedAt = DateTime.UtcNow;
+                    a.UpdatedBy = userId;
                 }
-
-                var currentIds = await _attachments.GetIdsByDocumentAsync(entity.DocumentId);
-                var currentSet = currentIds.ToHashSet();
-                HashSet<Guid> targetSet = new(currentSet);
-
-                if (dto.ReplaceAttachments == true && dto.AttachmentIds is { Count: > 0 })
-                    targetSet = dto.AttachmentIds.Distinct().ToHashSet();
-                else
-                {
-                    if (dto.AddAttachmentIds is { Count: > 0 })
-                        foreach (var id in dto.AddAttachmentIds.Distinct()) targetSet.Add(id);
-                    if (dto.RemoveAttachmentIds is { Count: > 0 })
-                        foreach (var id in dto.RemoveAttachmentIds.Distinct()) targetSet.Remove(id);
-                }
-
-                var toUnlink = currentSet.Except(targetSet).ToList();
-                var toLink = targetSet.Except(currentSet).ToList();
-
-                if (toLink.Count > 0)
-                {
-                    var candidates = await _attachments.GetByIdsAsync(toLink);
-                    var found = candidates.Select(a => a.AttachmentId).ToHashSet();
-                    var missing = toLink.Where(id => !found.Contains(id)).ToList();
-                    if (missing.Count > 0)
-                        return Result<string>.Failure(new[] { $"مرفقات غير موجودة: [{string.Join(", ", missing)}]" });
-
-                    var locked = candidates
-                        .Where(a => a.OwnerId != 0 && a.OwnerId != entity.DocumentId)
-                        .Select(a => a.AttachmentId).ToList();
-                    if (locked.Count > 0)
-                        return Result<string>.Failure(new[] { $"مرفقات مرتبطة بكيان آخر: [{string.Join(", ", locked)}]" });
-
-                    foreach (var a in candidates)
-                    {
-                        a.OwnerId = entity.DocumentId;
-                        a.OwnerType = "Document";
-                        a.UpdatedAt = DateTime.UtcNow;
-                        a.UpdatedBy = userId;
-                    }
-                    _attachments.UpdateRange(candidates);
-                }
-
-                if (toUnlink.Count > 0)
-                {
-                    var willUnlink = (await _attachments.GetByIdsAsync(toUnlink))
-                        .Where(a => a.OwnerType == "Document" && a.OwnerId == entity.DocumentId).ToList();
-
-                    foreach (var a in willUnlink)
-                    {
-                        a.OwnerId = 0;
-                        a.OwnerType = string.Empty;
-                        a.IsProfilePhoto = false;
-                        a.UpdatedAt = DateTime.UtcNow;
-                        a.UpdatedBy = userId;
-                    }
-                    _attachments.UpdateRange(willUnlink);
-                }
-
-                if (toLink.Count > 0 || toUnlink.Count > 0)
-                    await _unitOfWork.SaveChangesAsync();
-
-                await tx.CommitAsync();
-            }
-            catch
-            {
-                await tx.RollbackAsync();
-                throw;
+                _attachments.UpdateRange(candidates);
             }
 
-            return Result<string>.Success("تم تحديث الوثيقة والمرفقات بنجاح.");
-        }
-        catch (Exception ex)
-        {
-            return Result<string>.Failure(new[] { $"حدث خطأ أثناء التعديل: {ex.Message}" });
-        }
-    }
-
-    public async Task<Result<string>> DeleteAsync(long documentId)
-    {
-        try
-        {
-            var userId = CurrentUserId;
-            var scope = await _actorScope.GetScopeAsync(userId);
-
-            var entity = await _documents.GetByIdAsync(documentId, trackChanges: true);
-            if (entity == null)
-                return Result<string>.Failure(new[] { "الوثيقة غير موجودة." });
-
-            if (!IsWithinScope(scope, entity))
-                return Result<string>.Failure(new[] { "لا يمكنك حذف وثيقة لم تقم بإنشائها." });
-
-            _documents.Remove(entity);
-            await _unitOfWork.SaveChangesAsync();
-            return Result<string>.Success("تم حذف الوثيقة بنجاح.");
-        }
-        catch (Exception ex)
-        {
-            return Result<string>.Failure(new[] { $"حدث خطأ أثناء الحذف: {ex.Message}" });
-        }
-    }
-
-    public async Task<Result<DocumentDto>> GetByIdAsync(long documentId)
-    {
-        try
-        {
-            var userId = CurrentUserId;
-            var roleIds = CurrentRoleIds;
-            var jwt = JwtFieldPerms;
-
-            var scope = await _actorScope.GetScopeAsync(userId);
-            if (scope.Actor is null)
-                return Result<DocumentDto>.Failure(new[] { "المستخدم الحالي غير موجود." });
-
-            var entity = await _documents.GetByIdAsync(documentId);
-            if (entity == null || !IsWithinScope(scope, entity))
-                return Result<DocumentDto>.Failure(new[] { "الوثيقة غير موجودة أو خارج نطاق وصولك." });
-
-            var dto = _mapper.Map<DocumentDto>(entity);
-            dto = await _fieldPerms.ApplyFieldPermissionsAsync(dto, userId, roleIds, "Document", jwt);
-
-            var attachmentsEntities = (await _attachments.GetByOwnerAsync(documentId, new[] { "Document" }))
-                .OrderByDescending(a => a.UploadedAt).ToList();
-
-            dto.Attachments = attachmentsEntities.Select(a => new AttachmentLinkDto
+            if (toUnlink.Count > 0)
             {
-                Id = a.AttachmentId,
-                FileUrl = BuildProtectedDownloadUrl(a.AttachmentId),
-                FileName = a.FileName ?? $"{a.AttachmentId}"
-            }).ToList();
+                var willUnlink = (await _attachments.GetByIdsAsync(toUnlink))
+                    .Where(a => a.OwnerType == "Document" && a.OwnerId == entity.DocumentId).ToList();
 
-            return Result<DocumentDto>.Success(dto);
+                foreach (var a in willUnlink)
+                {
+                    a.OwnerId = 0;
+                    a.OwnerType = string.Empty;
+                    a.IsProfilePhoto = false;
+                    a.UpdatedAt = DateTime.UtcNow;
+                    a.UpdatedBy = userId;
+                }
+                _attachments.UpdateRange(willUnlink);
+            }
+
+            if (toLink.Count > 0 || toUnlink.Count > 0)
+                await _unitOfWork.SaveChangesAsync();
+
+            await tx.CommitAsync();
         }
-        catch (Exception ex)
+        catch (DbUpdateException)
         {
-            return Result<DocumentDto>.Failure(new[] { $"حدث خطأ أثناء الجلب: {ex.Message}" });
+            await tx.RollbackAsync();
+            throw;
         }
     }
 
-    public async Task<Result<PaginatedList<DocumentDto>>> GetDocumentsAsync(int pageNumber = 1, int pageSize = 10, string? title = null)
+    public async Task DeleteAsync(long documentId)
     {
-        try
-        {
-            var userId = CurrentUserId;
-            var roleIds = CurrentRoleIds;
-            var jwt = JwtFieldPerms;
+        var userId = CurrentUserId;
+        var scope = await _actorScope.GetScopeAsync(userId);
 
-            var scope = await _actorScope.GetScopeAsync(userId);
-            if (scope.Actor is null)
-                return Result<PaginatedList<DocumentDto>>.Failure(new[] { "المستخدم الحالي غير موجود." });
+        var entity = await _documents.GetByIdAsync(documentId, trackChanges: true)
+            ?? throw new DocumentNotFoundException("الوثيقة غير موجودة.");
 
-            var paged = await _documents.GetPagedAsync(scope, pageNumber, pageSize, title);
-            return await BuildDocumentPageResultAsync(paged, userId, roleIds, jwt, pageSize);
-        }
-        catch (Exception ex)
-        {
-            return Result<PaginatedList<DocumentDto>>.Failure(new[] { $"حدث خطأ أثناء الجلب: {ex.Message}" });
-        }
+        if (!IsWithinScope(scope, entity))
+            throw new ForbiddenPermissionException("لا يمكنك حذف وثيقة لم تقم بإنشائها.");
+
+        _documents.Remove(entity);
+        await _unitOfWork.SaveChangesAsync();
     }
 
-    public async Task<Result<IEnumerable<DropDownDto>>> GetDocumentsDropdownAsync()
+    public async Task<DocumentDto> GetByIdAsync(long documentId)
     {
-        var data = await _documents.GetDropdownAsync();
-        return Result<IEnumerable<DropDownDto>>.Success(data);
+        var userId = CurrentUserId;
+        var roleIds = CurrentRoleIds;
+        var jwt = JwtFieldPerms;
+
+        var scope = await _actorScope.GetScopeAsync(userId);
+        if (scope.Actor is null)
+            throw new UserNotFoundException("المستخدم الحالي غير موجود.");
+
+        var entity = await _documents.GetByIdAsync(documentId);
+        if (entity == null || !IsWithinScope(scope, entity))
+            throw new DocumentNotFoundException("الوثيقة غير موجودة أو خارج نطاق وصولك.");
+
+        var dto = _mapper.Map<DocumentDto>(entity);
+        dto = await _fieldPerms.ApplyFieldPermissionsAsync(dto, userId, roleIds, "Document", jwt);
+
+        var attachmentsEntities = (await _attachments.GetByOwnerAsync(documentId, new[] { "Document" }))
+            .OrderByDescending(a => a.UploadedAt).ToList();
+
+        dto.Attachments = attachmentsEntities.Select(a => new AttachmentLinkDto
+        {
+            Id = a.AttachmentId,
+            FileUrl = BuildProtectedDownloadUrl(a.AttachmentId),
+            FileName = a.FileName ?? $"{a.AttachmentId}"
+        }).ToList();
+
+        return dto;
     }
 
-    public async Task<Result<PaginatedList<DocumentDto>>> SearchAsync(DocumentSearchCriteria c, int pageNumber = 1, int pageSize = 10)
+    public async Task<PaginatedList<DocumentDto>> GetDocumentsAsync(int pageNumber = 1, int pageSize = 10, string? title = null)
     {
-        try
-        {
-            var userId = CurrentUserId;
-            var roleIds = CurrentRoleIds;
-            var jwt = JwtFieldPerms;
+        var userId = CurrentUserId;
+        var roleIds = CurrentRoleIds;
+        var jwt = JwtFieldPerms;
 
-            var scope = await _actorScope.GetScopeAsync(userId);
-            if (scope.Actor is null)
-                return Result<PaginatedList<DocumentDto>>.Failure(new[] { "المستخدم الحالي غير موجود." });
+        var scope = await _actorScope.GetScopeAsync(userId);
+        if (scope.Actor is null)
+            throw new UserNotFoundException("المستخدم الحالي غير موجود.");
 
-            var paged = await _documents.SearchAsync(c, scope, pageNumber, pageSize);
-            return await BuildDocumentPageResultAsync(paged, userId, roleIds, jwt, pageSize, includeAttachments: false);
-        }
-        catch (Exception ex)
-        {
-            return Result<PaginatedList<DocumentDto>>.Failure(new[] { $"حدث خطأ أثناء البحث: {ex.Message}" });
-        }
+        var paged = await _documents.GetPagedAsync(scope, pageNumber, pageSize, title);
+        return await BuildDocumentPageResultAsync(paged, userId, roleIds, jwt, pageSize);
     }
 
-    private async Task<Result<PaginatedList<DocumentDto>>> BuildDocumentPageResultAsync(
+    public async Task<IEnumerable<DropDownDto>> GetDocumentsDropdownAsync()
+    {
+        return await _documents.GetDropdownAsync();
+    }
+
+    public async Task<PaginatedList<DocumentDto>> SearchAsync(DocumentSearchCriteria c, int pageNumber = 1, int pageSize = 10)
+    {
+        var userId = CurrentUserId;
+        var roleIds = CurrentRoleIds;
+        var jwt = JwtFieldPerms;
+
+        var scope = await _actorScope.GetScopeAsync(userId);
+        if (scope.Actor is null)
+            throw new UserNotFoundException("المستخدم الحالي غير موجود.");
+
+        var paged = await _documents.SearchAsync(c, scope, pageNumber, pageSize);
+        return await BuildDocumentPageResultAsync(paged, userId, roleIds, jwt, pageSize, includeAttachments: false);
+    }
+
+    private async Task<PaginatedList<DocumentDto>> BuildDocumentPageResultAsync(
         PaginatedList<Document> paged,
         string userId,
         List<string> roleIds,
@@ -385,8 +345,7 @@ public class DocumentService : IDocumentService
             }
         }
 
-        var result = new PaginatedList<DocumentDto>(permitted, paged.TotalCount, paged.PageNumber, pageSize);
-        return Result<PaginatedList<DocumentDto>>.Success(result);
+        return new PaginatedList<DocumentDto>(permitted, paged.TotalCount, paged.PageNumber, pageSize);
     }
 
     private async Task<List<Attachment>> GetAttachmentsForDocumentsAsync(IReadOnlyList<long> documentIds)

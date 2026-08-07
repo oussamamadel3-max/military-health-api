@@ -4,6 +4,7 @@ using Application.Common.Results;
 using Application.Common.Utilities;
 using Application.Dtos.AuthDtos;
 using Application.Dtos.DocumentDtos;
+using Application.Exceptions;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
@@ -22,7 +23,6 @@ namespace Application.Services.AuthServices
         private static readonly Assembly DomainEntitiesAssembly = typeof(Document).Assembly;
         private static readonly Assembly ApplicationDtosAssembly = typeof(DocumentDto).Assembly;
         private static Dictionary<string, string>? _dtoFieldDisplayCache;
-
         private static Dictionary<string, Dictionary<string, string>>? _entityDtoFieldsCache;
 
         private readonly IFieldPermissionRepository _fieldPermissionRepository;
@@ -48,11 +48,9 @@ namespace Application.Services.AuthServices
             _userManager = userManager;
         }
 
-        // =====================================================
-        // CRUD للـ FieldPermissions
-        // =====================================================
+        #region CRUD للـ FieldPermissions
 
-        public async Task<Result<PaginatedList<FieldPermissionDto>>> GetFieldPermissionsAsync(int page, int size, FieldPermissionFilterDto? filter = null)
+        public async Task<PaginatedList<FieldPermissionDto>> GetFieldPermissionsAsync(int page, int size, FieldPermissionFilterDto? filter = null)
         {
             var query = _fieldPermissionRepository.Query(asNoTracking: true);
 
@@ -154,11 +152,10 @@ namespace Application.Services.AuthServices
                     .ToList()
             }).ToList();
 
-            var list = new PaginatedList<FieldPermissionDto>(result, totalCount, page, size);
-            return Result<PaginatedList<FieldPermissionDto>>.Success(list);
+            return new PaginatedList<FieldPermissionDto>(result, totalCount, page, size);
         }
 
-        public async Task<Result<FieldPermissionDto>> GetByIdAsync(Guid id)
+        public async Task<FieldPermissionDto> GetByIdAsync(Guid id)
         {
             var baseData = await _fieldPermissionRepository.Query(asNoTracking: true)
                 .Where(x => x.Id == id)
@@ -178,10 +175,8 @@ namespace Application.Services.AuthServices
                         .Select(ufp => ufp.UserId)
                         .ToList()
                 })
-                .FirstOrDefaultAsync();
-
-            if (baseData == null)
-                return Result<FieldPermissionDto>.Failure(new[] { "Not found" });
+                .FirstOrDefaultAsync()
+                ?? throw new RoleNotFoundException("صلاحية الحقل غير موجودة.");
 
             var rolesDict = new Dictionary<string, RoleInfoDto>();
             if (baseData.RoleIds.Any())
@@ -207,7 +202,7 @@ namespace Application.Services.AuthServices
                     });
             }
 
-            var item = new FieldPermissionDto
+            return new FieldPermissionDto
             {
                 Id = baseData.Id,
                 Description = baseData.Description ?? string.Empty,
@@ -226,11 +221,9 @@ namespace Application.Services.AuthServices
                     .Select(uid => usersDict[uid])
                     .ToList()
             };
-
-            return Result<FieldPermissionDto>.Success(item);
         }
 
-        public async Task<Result<CreateFieldPermissionsResultDto>> CreateAsync(CreateFieldPermissionDto dto)
+        public async Task<CreateFieldPermissionsResultDto> CreateAsync(CreateFieldPermissionDto dto)
         {
             var roleIds = NormalizeIds(dto.RoleIds);
             var userIds = NormalizeIds(dto.UserIds);
@@ -241,10 +234,9 @@ namespace Application.Services.AuthServices
                 .ToList();
 
             if (!fields.Any())
-                return Result<CreateFieldPermissionsResultDto>.Failure(new[] { "يجب تحديد حقل واحد على الأقل." });
+                throw new InvalidRoleDataException("يجب تحديد حقل واحد على الأقل.");
 
             var entityName = dto.EntityName.Trim();
-
             var existingPermissions = await _fieldPermissionRepository.GetExistingFieldNamesAsync(entityName);
 
             var duplicateFields = fields
@@ -254,8 +246,7 @@ namespace Application.Services.AuthServices
             if (duplicateFields.Any())
             {
                 var existingFields = string.Join(", ", duplicateFields);
-                return Result<CreateFieldPermissionsResultDto>.Failure(
-                    new[] { $"صلاحيات الحقول التالية موجودة مسبقاً في كيان {entityName}: {existingFields}" });
+                throw new InvalidRoleDataException($"صلاحيات الحقول التالية موجودة مسبقاً في كيان {entityName}: {existingFields}");
             }
 
             var metadata = GetEntityMetadata(entityName);
@@ -343,28 +334,24 @@ namespace Application.Services.AuthServices
 
                 await transaction.CommitAsync();
 
-                var resultDto = new CreateFieldPermissionsResultDto
+                return new CreateFieldPermissionsResultDto
                 {
                     EntityName = entityName,
                     AccessType = dto.AccessType,
                     Permissions = createdDtos
                 };
-
-                return Result<CreateFieldPermissionsResultDto>.Success(resultDto);
             }
-            catch (Exception ex)
+            catch
             {
                 await transaction.RollbackAsync();
-                return Result<CreateFieldPermissionsResultDto>.Failure(
-                    new[] { $"حدث خطأ أثناء إنشاء صلاحيات الحقول: {ex.Message}" });
+                throw;
             }
         }
 
-        public async Task<Result<string>> UpdateAsync(Guid id, UpdateFieldPermissionDto dto)
+        public async Task UpdateAsync(Guid id, UpdateFieldPermissionDto dto)
         {
-            var entity = await _fieldPermissionRepository.FindByIdAsync(id);
-            if (entity == null)
-                return Result<string>.Failure(new[] { "Not found" });
+            var entity = await _fieldPermissionRepository.FindByIdAsync(id)
+                ?? throw new RoleNotFoundException("صلاحية الحقل غير موجودة.");
 
             var oldUserLinks = await _fieldPermissionRepository.GetUserLinksAsync(id);
             var oldUserIds = oldUserLinks.Select(ufp => ufp.UserId).Distinct().ToList();
@@ -402,15 +389,12 @@ namespace Application.Services.AuthServices
                 await SecurityStampHelper.InvalidateUsersWithRoleAsync(
                     _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, roleId);
             }
-
-            return Result<string>.Success("تم التعديل بنجاح");
         }
 
-        public async Task<Result<string>> DeleteAsync(Guid id)
+        public async Task DeleteAsync(Guid id)
         {
-            var entity = await _fieldPermissionRepository.FindByIdAsync(id);
-            if (entity == null)
-                return Result<string>.Failure(new[] { "Not found" });
+            var entity = await _fieldPermissionRepository.FindByIdAsync(id)
+                ?? throw new RoleNotFoundException("صلاحية الحقل غير موجودة.");
 
             var roleLinks = await _fieldPermissionRepository.GetRoleLinksAsync(id);
             var userLinks = await _fieldPermissionRepository.GetUserLinksAsync(id);
@@ -435,19 +419,16 @@ namespace Application.Services.AuthServices
                 await SecurityStampHelper.InvalidateUsersWithRoleAsync(
                     _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, roleId);
             }
-
-            return Result<string>.Success("تم الحذف بنجاح");
         }
 
-        public async Task<Result<string>> ChangeAccessTypeAsync(Guid id, ChangeFieldPermissionAccessTypeDto dto)
+        public async Task ChangeAccessTypeAsync(Guid id, ChangeFieldPermissionAccessTypeDto dto)
         {
-            var entity = await _fieldPermissionRepository.FindByIdAsync(id);
-            if (entity == null)
-                return Result<string>.Failure(new[] { "صلاحية الحقل غير موجودة" });
+            var entity = await _fieldPermissionRepository.FindByIdAsync(id)
+                ?? throw new RoleNotFoundException("صلاحية الحقل غير موجودة.");
 
             var oldAccessType = entity.AccessType;
             if (oldAccessType == dto.AccessType)
-                return Result<string>.Failure(new[] { "نوع الصلاحية الحالي مطابق للنوع الجديد" });
+                throw new InvalidRoleDataException("نوع الصلاحية الحالي مطابق للنوع الجديد.");
 
             entity.AccessType = dto.AccessType;
             var metadata = GetEntityMetadata(entity.EntityName);
@@ -457,19 +438,13 @@ namespace Application.Services.AuthServices
 
             await SecurityStampHelper.InvalidateUsersWithFieldPermissionAsync(
                 _fieldPermissionRepository, _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, id);
-
-            var oldAccessDescription = EnumHelper.GetEnumDescription(oldAccessType);
-            var newAccessDescription = EnumHelper.GetEnumDescription(dto.AccessType);
-            var message = $"تم تغيير نوع الصلاحية من {oldAccessDescription} إلى {newAccessDescription} بنجاح";
-
-            return Result<string>.Success(message);
         }
 
-        // =====================================================
-        // Reflection: جلب الكيانات والحقول
-        // =====================================================
+        #endregion
 
-        public Task<Result<List<EntityInfoDto>>> GetEntitiesAsync()
+        #region Reflection: جلب الكيانات والحقول
+
+        public Task<List<EntityInfoDto>> GetEntitiesAsync()
         {
             var types = GetAllEntityTypes();
             var entities = new Dictionary<string, EntityInfoDto>(StringComparer.OrdinalIgnoreCase);
@@ -493,14 +468,14 @@ namespace Application.Services.AuthServices
                 .OrderBy(e => e.DisplayName, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            return Task.FromResult(Result<List<EntityInfoDto>>.Success(ordered));
+            return Task.FromResult(ordered);
         }
 
-        public Task<Result<List<FieldInfoDto>>> GetFieldsAsync(string entityName)
+        public Task<List<FieldInfoDto>> GetFieldsAsync(string entityName)
         {
             var types = GetEntityTypes(entityName);
             if (types.Count == 0)
-                return Task.FromResult(Result<List<FieldInfoDto>>.Failure(new[] { "Entity not found" }));
+                throw new RoleNotFoundException($"Entity '{entityName}' not found.");
 
             var fieldMap = BuildFieldDisplayMap(types);
 
@@ -513,7 +488,7 @@ namespace Application.Services.AuthServices
                 })
                 .ToList();
 
-            return Task.FromResult(Result<List<FieldInfoDto>>.Success(list));
+            return Task.FromResult(list);
         }
 
         private static List<string> NormalizeIds(IEnumerable<string>? ids)
@@ -786,6 +761,7 @@ namespace Application.Services.AuthServices
             _dtoFieldDisplayCache = result;
             return result;
         }
+        #endregion
 
         private class EntityMetadata
         {

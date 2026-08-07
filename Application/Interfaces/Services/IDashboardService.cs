@@ -26,6 +26,6 @@ namespace Application.Interfaces.Services
 
     public interface IDashboardService
     {
-        Task<Result<DashboardStatsDto>> GetAsync(DashboardFilter filter);
+        Task<DashboardStatsDto> GetAsync(DashboardFilter filter);
     }
 }

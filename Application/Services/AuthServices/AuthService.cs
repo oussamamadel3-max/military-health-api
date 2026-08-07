@@ -5,6 +5,7 @@ using Application.Interfaces.Services;
 using Domain.Entities.Auth;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace Application.Services.AuthServices
 {
@@ -40,7 +41,7 @@ namespace Application.Services.AuthServices
             _permissionRepository = permissionRepository;
         }
 
-        public async Task<TokenGenerationResultDto> LoginAsync(RequestToken requestToken)
+        public async Task<(TokenGenerationResultDto Tokens, string UserId)> LoginAsync(RequestToken requestToken)
         {
             var username = (requestToken.UserName ?? string.Empty).Trim();
             var password = requestToken.PassWord ?? string.Empty;
@@ -57,7 +58,7 @@ namespace Application.Services.AuthServices
             if (await _userManager.IsLockedOutAsync(user))
             {
                 await Task.Delay(FailDelay);
-                throw new UserAccountLockedException();
+                throw new InvalidCredentialsException();
             }
 
             var signIn = await _signInManager.CheckPasswordSignInAsync(
@@ -72,16 +73,20 @@ namespace Application.Services.AuthServices
             if (!user.IsActive)
             {
                 await Task.Delay(FailDelay);
-                throw new UserAccountDisabledException();
+                throw new InvalidCredentialsException();
             }
 
             await _userManager.ResetAccessFailedCountAsync(user);
 
-            return await _tokenService.GenerateTokensAsync(user.Id);
+            var tokens = await _tokenService.GenerateTokensAsync(user.Id);
+            return (tokens, user.Id);
         }
 
-        public async Task<MeResponseDto> GetMeAsync(string userId)
+        public async Task<MeResponseDto> GetMeAsync(string? userId)
         {
+            if (string.IsNullOrWhiteSpace(userId))
+                throw new UnauthenticatedUserException();
+
             var user = await _userRepository.QueryUsers(asNoTracking: true)
                 .Where(u => u.Id == userId)
                 .Select(u => new
@@ -125,6 +130,49 @@ namespace Application.Services.AuthServices
                 Roles = roles.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
                 Permissions = permissions
             };
+        }
+
+        public Task<string> ValidateAndGetUserIdAsync(string? userId)
+        {
+            if (string.IsNullOrWhiteSpace(userId))
+                throw new UnauthenticatedUserException();
+
+            return Task.FromResult(userId);
+        }
+
+        public async Task<(TokenResponseDto Tokens, string UserId)> RefreshSessionAsync(string? refreshToken)
+        {
+            if (string.IsNullOrWhiteSpace(refreshToken))
+                throw new InvalidSessionException("رمز التحديث مفقود.");
+
+            var tokens = await _tokenService.RefreshAccessTokenAsync(refreshToken);
+            var userId = ExtractUserIdFromAccessToken(tokens.AccessToken)
+                ?? throw new InvalidSessionException("تعذر استخراج بيانات المستخدم من التوكن.");
+
+            return (tokens, userId);
+        }
+
+        public async Task LogoutAsync(string? refreshToken)
+        {
+            if (!string.IsNullOrWhiteSpace(refreshToken))
+            {
+                await _tokenService.RevokeRefreshTokenAsync(refreshToken);
+            }
+        }
+
+        private static string? ExtractUserIdFromAccessToken(string accessToken)
+        {
+            try
+            {
+                var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
+                var jwt = handler.ReadJwtToken(accessToken);
+                return jwt.Claims.FirstOrDefault(c =>
+                    c.Type == ClaimTypes.NameIdentifier || c.Type == "sub")?.Value;
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 }

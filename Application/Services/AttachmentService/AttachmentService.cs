@@ -1,5 +1,6 @@
 using Application.Common.Results;
 using Application.Dtos;
+using Application.Exceptions;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
@@ -43,93 +44,77 @@ namespace Application.Services.AttachmentService
         }
 
         #region Upload
-        public async Task<Result<AttachmentReadDto>> UploadAsync(
+        public async Task<AttachmentReadDto> UploadAsync(
             long entityId,
             string entityType,
             IFormFile file,
             string? description = null,
             bool isProfilePhoto = false)
         {
-            try
+            if (file == null || file.Length == 0)
+                throw new InvalidUserDataException("الملف فارغ.");
+
+            if (!_fileStorage.ValidateFile(file, out string err))
+                throw new InvalidUserDataException(err);
+
+            var (path, size) = await _fileStorage.SaveFileAsync(file, entityType, entityId);
+
+            var entity = new Attachment
             {
-                if (file == null || file.Length == 0)
-                    return Result<AttachmentReadDto>.Failure(new[] { "الملف فارغ" });
+                AttachmentId = Guid.NewGuid(),
+                OwnerId = entityId,
+                OwnerType = entityType,
+                FileName = SanitizeDisplayFileName(file.FileName),
+                FileExtension = Path.GetExtension(file.FileName)?.ToLower() ?? "",
+                FilePath = path,
+                FileSize = size,
+                ContentType = file.ContentType,
+                Description = _textSanitizer.SanitizePlainText(description),
+                IsProfilePhoto = isProfilePhoto,
+                UploadedAt = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                CreatedBy = "System",
+                UpdatedBy = "System"
+            };
 
-                if (!_fileStorage.ValidateFile(file, out string err))
-                    return Result<AttachmentReadDto>.Failure(new[] { err });
+            _attachments.Add(entity);
+            await _unitOfWork.SaveChangesAsync();
 
-                var (path, size) = await _fileStorage.SaveFileAsync(file, entityType, entityId);
-
-                var entity = new Attachment
-                {
-                    AttachmentId = Guid.NewGuid(),
-                    OwnerId = entityId,
-                    OwnerType = entityType,
-                    FileName = SanitizeDisplayFileName(file.FileName),
-                    FileExtension = Path.GetExtension(file.FileName)?.ToLower() ?? "",
-                    FilePath = path,
-                    FileSize = size,
-                    ContentType = file.ContentType,
-                    Description = _textSanitizer.SanitizePlainText(description),
-                    IsProfilePhoto = isProfilePhoto,
-                    UploadedAt = DateTime.UtcNow,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow,
-                    CreatedBy = "System",
-                    UpdatedBy = "System"
-                };
-
-                _attachments.Add(entity);
-                await _unitOfWork.SaveChangesAsync();
-
-                return Result<AttachmentReadDto>.Success(MapToDto(entity));
-            }
-            catch (Exception ex)
-            {
-                return Result<AttachmentReadDto>.Failure(new[] { $"خطأ أثناء الرفع: {ex.Message}" });
-            }
+            return MapToDto(entity);
         }
         #endregion
 
         #region GetById
-        public async Task<Result<AttachmentReadDto>> GetByIdAsync(Guid id)
+        public async Task<AttachmentReadDto> GetByIdAsync(Guid id)
         {
-            var entity = await _attachments.FindByIdAsync(id);
-            if (entity == null)
-                return Result<AttachmentReadDto>.Failure(new[] { "المرفق غير موجود" });
+            var entity = await _attachments.FindByIdAsync(id)
+                ?? throw new RoleNotFoundException("المرفق غير موجود.");
 
-            return Result<AttachmentReadDto>.Success(MapToDto(entity));
+            return MapToDto(entity);
         }
         #endregion
 
         #region Delete
-        public async Task<Result<bool>> DeleteAsync(Guid id)
+        public async Task<bool> DeleteAsync(Guid id)
         {
-            try
-            {
-                var entity = await _attachments.GetTrackedByIdAsync(id);
-                if (entity == null)
-                    return Result<bool>.Failure(new[] { "المرفق غير موجود" });
+            var entity = await _attachments.GetTrackedByIdAsync(id)
+                ?? throw new RoleNotFoundException("المرفق غير موجود.");
 
-                await _fileStorage.DeleteFileAsync(entity.FilePath);
+            await _fileStorage.DeleteFileAsync(entity.FilePath);
 
-                _attachments.Remove(entity);
-                await _unitOfWork.SaveChangesAsync();
+            _attachments.Remove(entity);
+            await _unitOfWork.SaveChangesAsync();
 
-                return Result<bool>.Success(true);
-            }
-            catch (Exception ex)
-            {
-                return Result<bool>.Failure(new[] { $"خطأ أثناء حذف المرفق: {ex.Message}" });
-            }
+            return true;
         }
         #endregion
 
         #region GetAttachmentsForEntity
-        public async Task<Result<List<AttachmentReadDto>>> GetAttachmentsForEntityAsync(long entityId, params string[] entityTypes)
+        public async Task<List<AttachmentReadDto>> GetAttachmentsForEntityAsync(long entityId, params string[] entityTypes)
         {
             if (entityTypes == null || entityTypes.Length == 0)
-                return Result<List<AttachmentReadDto>>.Failure(new[] { "نوع الكيان غير مُحدد" });
+                throw new InvalidUserDataException("نوع الكيان غير مُحدد.");
 
             var types = entityTypes.Select(t => t.ToLower()).ToList();
 
@@ -138,17 +123,15 @@ namespace Application.Services.AttachmentService
                 .OrderByDescending(a => a.UploadedAt)
                 .ToList();
 
-            var result = items.Select(MapToDto).ToList();
-            return Result<List<AttachmentReadDto>>.Success(result);
+            return items.Select(MapToDto).ToList();
         }
         #endregion
 
         #region LinkToEntity
-        public async Task<Result<string>> LinkToEntityAsync(Guid attachmentId, long entityId, string entityType)
+        public async Task LinkToEntityAsync(Guid attachmentId, long entityId, string entityType)
         {
-            var entity = await _attachments.GetTrackedByIdAsync(attachmentId);
-            if (entity == null)
-                return Result<string>.Failure(new[] { "المرفق غير موجود" });
+            var entity = await _attachments.GetTrackedByIdAsync(attachmentId)
+                ?? throw new RoleNotFoundException("المرفق غير موجود.");
 
             entity.OwnerId = entityId;
             entity.OwnerType = entityType;
@@ -156,22 +139,18 @@ namespace Application.Services.AttachmentService
 
             _attachments.Update(entity);
             await _unitOfWork.SaveChangesAsync();
-
-            return Result<string>.Success("تم الربط بنجاح");
         }
         #endregion
 
         #region Download one File
-        public async Task<Result<(byte[] Bytes, string ContentType, string FileName)>> DownloadAsync(Guid id)
+        public async Task<(byte[] Bytes, string ContentType, string FileName)> DownloadAsync(Guid id)
         {
-            var att = await _attachments.FindByIdAsync(id);
-
-            if (att == null)
-                return Result<(byte[], string, string)>.Failure(new[] { "المرفق غير موجود" });
+            var att = await _attachments.FindByIdAsync(id)
+                ?? throw new RoleNotFoundException("المرفق غير موجود.");
 
             var abs = _fileStorage.GetFullPath(att.FilePath ?? "");
             if (!File.Exists(abs))
-                return Result<(byte[], string, string)>.Failure(new[] { "الملف الفيزيائي غير موجود على الخادم" });
+                throw new RoleNotFoundException("الملف الفيزيائي غير موجود على الخادم.");
 
             var bytes = await File.ReadAllBytesAsync(abs);
             var ct = string.IsNullOrWhiteSpace(att.ContentType) ? "application/octet-stream" : att.ContentType!;
@@ -179,15 +158,15 @@ namespace Application.Services.AttachmentService
                 ? $"{att.AttachmentId}{att.FileExtension}"
                 : att.FileName!;
 
-            return Result<(byte[], string, string)>.Success((bytes, ct, name));
+            return (bytes, ct, name);
         }
         #endregion
 
         #region Download ZIP for Entity Attachments
-        public async Task<Result<(byte[] Bytes, string ZipName)>> DownloadZipForEntityAsync(long entityId, params string[] entityTypes)
+        public async Task<(byte[] Bytes, string ZipName)> DownloadZipForEntityAsync(long entityId, params string[] entityTypes)
         {
             if (entityTypes == null || entityTypes.Length == 0)
-                return Result<(byte[], string)>.Failure(new[] { "نوع الكيان غير مُحدد" });
+                throw new InvalidUserDataException("نوع الكيان غير مُحدد.");
 
             var types = entityTypes.Select(t => t.ToLower()).ToList();
 
@@ -197,7 +176,7 @@ namespace Application.Services.AttachmentService
                 .ToList();
 
             if (items.Count == 0)
-                return Result<(byte[], string)>.Failure(new[] { "لا يوجد مرفقات لهذه الوثيقة" });
+                throw new RoleNotFoundException("لا يوجد مرفقات لهذه الوثيقة.");
 
             using var ms = new MemoryStream();
             using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
@@ -212,8 +191,6 @@ namespace Application.Services.AttachmentService
                         ? $"{att.AttachmentId}{att.FileExtension}"
                         : att.FileName;
 
-                    safeName = $"{safeName}";
-
                     var entry = zip.CreateEntry(safeName, CompressionLevel.Fastest);
                     await using var entryStream = entry.Open();
                     await using var fs = File.OpenRead(abs);
@@ -222,7 +199,6 @@ namespace Application.Services.AttachmentService
             }
 
             var documentTitle = await _documents.GetTitleAsync(entityId);
-
             if (string.IsNullOrWhiteSpace(documentTitle))
                 documentTitle = $"Document_{entityId}";
 
@@ -230,7 +206,7 @@ namespace Application.Services.AttachmentService
             var safeTitle = SanitizeFileName(documentTitle);
             var zipName = $"{safeTitle}.zip";
 
-            return Result<(byte[], string)>.Success((zipBytes, zipName));
+            return (zipBytes, zipName);
         }
         #endregion
 
@@ -239,11 +215,9 @@ namespace Application.Services.AttachmentService
         private AttachmentReadDto MapToDto(Attachment attachment)
         {
             var dto = _mapper.Map<AttachmentReadDto>(attachment);
-
             dto.FileSizeFormatted = FormatFileSize(attachment.FileSize);
             dto.FilePath = null;
             dto.FileUrl = BuildProtectedDownloadUrl(attachment.AttachmentId);
-
             return dto;
         }
 
@@ -256,7 +230,7 @@ namespace Application.Services.AttachmentService
             return $"{request.Scheme}://{request.Host}/api/attachments/download/{id}";
         }
 
-        private string FormatFileSize(long bytes)
+        private static string FormatFileSize(long bytes)
         {
             string[] sizes = { "B", "KB", "MB", "GB" };
             double len = bytes;

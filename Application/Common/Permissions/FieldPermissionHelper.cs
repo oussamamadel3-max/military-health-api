@@ -154,8 +154,8 @@ namespace Application.Common.Permissions
                     EntityName = entityName
                 };
                 var userResult = await _fieldPermissionService.GetFieldPermissionsAsync(1, 10000, filter);
-                if (userResult.Succeeded && userResult.Value != null)
-                    userPermissions = userResult.Value.Items.ToList();
+                if (userResult != null)
+                    userPermissions = userResult.Items.ToList();
             }
 
             var rolePermissions = new List<FieldPermissionDto>();
@@ -169,8 +169,8 @@ namespace Application.Common.Permissions
                         EntityName = entityName
                     };
                     var roleResult = await _fieldPermissionService.GetFieldPermissionsAsync(1, 10000, filter);
-                    if (roleResult.Succeeded && roleResult.Value != null)
-                        rolePermissions.AddRange(roleResult.Value.Items);
+                    if (roleResult != null)
+                        rolePermissions.AddRange(roleResult.Items);
                 }
             }
 
@@ -207,8 +207,8 @@ namespace Application.Common.Permissions
                     EntityName = entityName
                 };
                 var userResult = await _fieldPermissionService.GetFieldPermissionsAsync(1, 10000, filter);
-                if (userResult.Succeeded && userResult.Value != null)
-                    userPermissions = userResult.Value.Items.ToList();
+                if (userResult != null)
+                    userPermissions = userResult.Items.ToList();
             }
             Console.WriteLine("=== User Permissions ===");
             foreach (var p in userPermissions)
@@ -225,8 +225,8 @@ namespace Application.Common.Permissions
                         EntityName = entityName
                     };
                     var roleResult = await _fieldPermissionService.GetFieldPermissionsAsync(1, 10000, filter);
-                    if (roleResult.Succeeded && roleResult.Value != null)
-                        rolePermissions.AddRange(roleResult.Value.Items);
+                    if (roleResult != null)
+                        rolePermissions.AddRange(roleResult.Items);
                 }
             }
             Console.WriteLine("=== Role Permissions ===");

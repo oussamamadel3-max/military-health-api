@@ -115,128 +115,119 @@ namespace Application.Services.Dashboard
             return q.Where(a => a.UserId == scope.UserId);
         }
 
-        public async Task<Result<DashboardStatsDto>> GetAsync(DashboardFilter f)
+        public async Task<DashboardStatsDto> GetAsync(DashboardFilter f)
         {
-            try
+            var userId = _userCtx.UserId ?? string.Empty;
+            var actorScope = await _actorScopeProvider.GetScopeAsync(userId);
+
+            var (start, endEx, _) = NormalizeRange(f.From, f.To);
+            var startUtc = start?.UtcDateTime;
+            var endUtc = endEx?.UtcDateTime;
+
+            var documentsCount = await _documentRepository.CountScopedAsync(actorScope, startUtc, endUtc);
+
+            var auditQ = ApplyScopeAudit(_auditLogRepository.Query(), actorScope);
+
+            if (start.HasValue || endEx.HasValue)
+                auditQ = ApplyRange(auditQ, start, endEx, a => a.Timestamp);
+
+            var recentRaw = await auditQ
+                .OrderByDescending(a => a.Timestamp)
+                .Select(a => new
+                {
+                    a.LogId,
+                    a.UserId,
+                    a.UserName,
+                    a.ActionType,
+                    a.RecordId,
+                    a.Timestamp
+                })
+                .Take(f.RecentCount <= 0 ? 10 : f.RecentCount)
+                .ToListAsync();
+
+            var recent = recentRaw.Select(a => new RecentActivityDto
             {
-                var userId = _userCtx.UserId ?? string.Empty;
-                var actorScope = await _actorScopeProvider.GetScopeAsync(userId);
+                Id = a.LogId,
+                UserId = a.UserId ?? "",
+                UserName = a.UserName ?? "",
+                Action = a.ActionType ?? "",
+                DocumentId = a.RecordId,
+                DocumentTitle = null,
+                Timestamp = a.Timestamp.UtcDateTime.ToString("o")
+            }).ToList();
 
-                var (start, endEx, _) = NormalizeRange(f.From, f.To);
-                var startUtc = start?.UtcDateTime;
-                var endUtc = endEx?.UtcDateTime;
-
-                var documentsCount = await _documentRepository.CountScopedAsync(actorScope, startUtc, endUtc);
-
-                var auditQ = ApplyScopeAudit(_auditLogRepository.Query(), actorScope);
-
-                if (start.HasValue || endEx.HasValue)
-                    auditQ = ApplyRange(auditQ, start, endEx, a => a.Timestamp);
-
-                var recentRaw = await auditQ
-                    .OrderByDescending(a => a.Timestamp)
-                    .Select(a => new
-                    {
-                        a.LogId,
-                        a.UserId,
-                        a.UserName,
-                        a.ActionType,
-                        a.RecordId,
-                        a.Timestamp
-                    })
-                    .Take(f.RecentCount <= 0 ? 10 : f.RecentCount)
-                    .ToListAsync();
-
-                var recent = recentRaw.Select(a => new RecentActivityDto
-                {
-                    Id = a.LogId,
-                    UserId = a.UserId ?? "",
-                    UserName = a.UserName ?? "",
-                    Action = a.ActionType ?? "",
-                    DocumentId = a.RecordId,
-                    DocumentTitle = null,
-                    Timestamp = a.Timestamp.UtcDateTime.ToString("o")
-                }).ToList();
-
-                var docIds = recent.Where(r => r.DocumentId.HasValue).Select(r => r.DocumentId!.Value).Distinct().ToList();
-                if (docIds.Count > 0)
-                {
-                    var titles = await _documentRepository.GetTitlesScopedAsync(actorScope, docIds);
-
-                    foreach (var r in recent.Where(x => x.DocumentId.HasValue))
-                        if (titles.TryGetValue(r.DocumentId!.Value, out var t)) r.DocumentTitle = t;
-                }
-
-                var topUsersRaw = await (from a in auditQ
-                                         group a by new { a.UserId, a.UserName } into g
-                                         select new
-                                         {
-                                             UserId = g.Key.UserId ?? "",
-                                             UserName = g.Key.UserName ?? "",
-                                             ActionsCount = g.LongCount(),
-                                             LastActivity = g.Max(x => x.Timestamp)
-                                         })
-                    .OrderByDescending(x => x.ActionsCount)
-                    .ThenByDescending(x => x.LastActivity)
-                    .Take(f.TopUsersCount <= 0 ? 5 : f.TopUsersCount)
-                    .ToListAsync();
-
-                var topUsers = topUsersRaw.Select(x => new ActiveUserStatsDto
-                {
-                    UserId = x.UserId,
-                    UserName = x.UserName,
-                    ActionsCount = x.ActionsCount,
-                    LastActivityAt = x.LastActivity.UtcDateTime.ToString("o")
-                }).ToList();
-
-                DateTime growthFromUtc;
-                DateTime growthToUtc;
-
-                if (start.HasValue || endEx.HasValue)
-                {
-                    growthFromUtc = (start ?? DateTimeOffset.UtcNow.AddMonths(-6)).UtcDateTime;
-                    growthToUtc = (endEx ?? DateTimeOffset.UtcNow).UtcDateTime;
-                }
-                else
-                {
-                    var months = Math.Abs(f.GrowthMonths <= 0 ? 6 : f.GrowthMonths);
-                    growthToUtc = DateTime.UtcNow.Date.AddDays(1);
-                    growthFromUtc = DateTime.UtcNow.AddMonths(-months).Date;
-                }
-
-                var growthRaw = await _documentRepository.GetGrowthByMonthScopedAsync(actorScope, growthFromUtc, growthToUtc);
-
-                var growth = growthRaw.Select(x => new DocumentGrowthPointDto
-                {
-                    Period = $"{x.Year:D4}-{x.Month:D2}",
-                    Count = x.Count
-                }).ToList();
-
-                growth = FillMissingMonths(growth, growthFromUtc, growthToUtc);
-
-                var totalBytes = await _attachmentRepository.SumFileSizeForScopedDocumentsAsync(actorScope, startUtc, endUtc);
-
-                var storage = new StorageUsageDto
-                {
-                    TotalBytes = totalBytes,
-                    TotalReadable = FormatBytes(totalBytes),
-                };
-
-                var dto = new DashboardStatsDto
-                {
-                    DocumentsCount = documentsCount,
-                    RecentActivities = recent,
-                    MostActiveUsers = topUsers,
-                    DocumentGrowth = growth,
-                    StorageUsage = storage,
-                };
-
-                return Result<DashboardStatsDto>.Success(dto);
-            }
-            catch (Exception ex)
+            var docIds = recent.Where(r => r.DocumentId.HasValue).Select(r => r.DocumentId!.Value).Distinct().ToList();
+            if (docIds.Count > 0)
             {
-                return Result<DashboardStatsDto>.Failure(new[] { $"Error building dashboard: {ex.Message}" });
+                var titles = await _documentRepository.GetTitlesScopedAsync(actorScope, docIds);
+
+                foreach (var r in recent.Where(x => x.DocumentId.HasValue))
+                    if (titles.TryGetValue(r.DocumentId!.Value, out var t)) r.DocumentTitle = t;
             }
+
+            var topUsersRaw = await (from a in auditQ
+                                     group a by new { a.UserId, a.UserName } into g
+                                     select new
+                                     {
+                                         UserId = g.Key.UserId ?? "",
+                                         UserName = g.Key.UserName ?? "",
+                                         ActionsCount = g.LongCount(),
+                                         LastActivity = g.Max(x => x.Timestamp)
+                                     })
+                .OrderByDescending(x => x.ActionsCount)
+                .ThenByDescending(x => x.LastActivity)
+                .Take(f.TopUsersCount <= 0 ? 5 : f.TopUsersCount)
+                .ToListAsync();
+
+            var topUsers = topUsersRaw.Select(x => new ActiveUserStatsDto
+            {
+                UserId = x.UserId,
+                UserName = x.UserName,
+                ActionsCount = x.ActionsCount,
+                LastActivityAt = x.LastActivity.UtcDateTime.ToString("o")
+            }).ToList();
+
+            DateTime growthFromUtc;
+            DateTime growthToUtc;
+
+            if (start.HasValue || endEx.HasValue)
+            {
+                growthFromUtc = (start ?? DateTimeOffset.UtcNow.AddMonths(-6)).UtcDateTime;
+                growthToUtc = (endEx ?? DateTimeOffset.UtcNow).UtcDateTime;
+            }
+            else
+            {
+                var months = Math.Abs(f.GrowthMonths <= 0 ? 6 : f.GrowthMonths);
+                growthToUtc = DateTime.UtcNow.Date.AddDays(1);
+                growthFromUtc = DateTime.UtcNow.AddMonths(-months).Date;
+            }
+
+            var growthRaw = await _documentRepository.GetGrowthByMonthScopedAsync(actorScope, growthFromUtc, growthToUtc);
+
+            var growth = growthRaw.Select(x => new DocumentGrowthPointDto
+            {
+                Period = $"{x.Year:D4}-{x.Month:D2}",
+                Count = x.Count
+            }).ToList();
+
+            growth = FillMissingMonths(growth, growthFromUtc, growthToUtc);
+
+            var totalBytes = await _attachmentRepository.SumFileSizeForScopedDocumentsAsync(actorScope, startUtc, endUtc);
+
+            var storage = new StorageUsageDto
+            {
+                TotalBytes = totalBytes,
+                TotalReadable = FormatBytes(totalBytes),
+            };
+
+            return new DashboardStatsDto
+            {
+                DocumentsCount = documentsCount,
+                RecentActivities = recent,
+                MostActiveUsers = topUsers,
+                DocumentGrowth = growth,
+                StorageUsage = storage,
+            };
         }
 
         private static string FormatBytes(long bytes)

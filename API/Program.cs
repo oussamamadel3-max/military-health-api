@@ -1,5 +1,4 @@
 using API.Extensions;
-using API.Filters;
 using API.Middleware;
 using Infrastructure.Persistence;
 using Microsoft.AspNetCore.HttpOverrides;

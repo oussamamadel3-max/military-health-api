@@ -8,6 +8,7 @@ public static class ApiResponse
     // 🟢 Success Response (Endpoint IResult)
     public static IResult Success(string message, object? data = null, object? meta = null, int status = 200)
     {
+        // The Results class lives in the Microsoft.AspNetCore.Http namespace.
         return Results.Json(new
         {
             success = true,

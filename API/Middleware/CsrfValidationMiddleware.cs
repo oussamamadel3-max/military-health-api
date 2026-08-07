@@ -2,6 +2,10 @@ using API.Infrastructure;
 using Application.Exceptions;
 using Application.Interfaces.Services;
 using Application.Services.AuthServices;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 using System.Security.Claims;
 
 namespace API.Middleware
@@ -19,11 +23,24 @@ namespace API.Middleware
         public async Task InvokeAsync(
             HttpContext context,
             ICsrfService csrfService,
-            AuthCookieService cookieService)
+            AuthCookieService cookieService,
+            IWebHostEnvironment environment,
+            IConfiguration configuration)
         {
+            // 0) تعطيل فحص الـ CSRF إذا كان مفعل في بيئة التطوير
+            var disableCsrf = environment.IsDevelopment()
+                && (configuration.GetValue<bool>("Auth:DisableCsrfValidation")
+                    || configuration.GetValue<bool>("AuthDevelopmentSettings:DisableCsrfValidation"));
+
+            if (disableCsrf)
+            {
+                await _next(context);
+                return;
+            }
+
             var method = context.Request.Method;
 
-            // 1) افحص الشروط الاستثنائية التي لا تتطلب CSRF
+            // 1) افحص الطرق الاستثنائية القابلة للقراءة فقط التي لا تتطلب CSRF
             if (HttpMethods.IsGet(method) ||
                 HttpMethods.IsHead(method) ||
                 HttpMethods.IsOptions(method) ||
@@ -35,10 +52,9 @@ namespace API.Middleware
 
             var path = context.Request.Path.Value ?? string.Empty;
 
-            // مسارات Auth مستثناة من CSRF (Login, Refresh, Logout)
+            // 2) مسارات Auth المستثناة من CSRF (Login و Refresh فقط، بينما Logout محمي)
             if (path.StartsWith("/api/Auth/login", StringComparison.OrdinalIgnoreCase) ||
-                path.StartsWith("/api/Auth/refresh", StringComparison.OrdinalIgnoreCase) ||
-                path.StartsWith("/api/Auth/logout", StringComparison.OrdinalIgnoreCase))
+                path.StartsWith("/api/Auth/refresh", StringComparison.OrdinalIgnoreCase))
             {
                 await _next(context);
                 return;

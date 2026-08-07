@@ -1,7 +1,8 @@
-using Application.Interfaces.Services;
-using Application.Common.Results;
+using API.Infrastructure;
 using Application.Dtos.AuthDtos;
+using Application.Interfaces.Services;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using System.ComponentModel.DataAnnotations;
 
@@ -13,212 +14,125 @@ namespace API.Controllers.AuthControllers
     public class UserController : ControllerBase
     {
         private readonly IUserService _userService;
-        private readonly IUserContextService _userContextService;
 
-        public UserController(IUserService userService, IUserContextService userContextService)
+        public UserController(IUserService userService)
         {
             _userService = userService;
-            _userContextService = userContextService;
         }
 
         [HttpPost("[action]")]
         [AuthorizePermission("UserManagement.Create")]
-        public async Task<Result<CreateUserDto>> Create(CreateUserDto userDto)
+        public async Task<IResult> Create([FromBody] CreateUserDto userDto)
         {
             var createdUser = await _userService.Create(userDto);
-
-            if (createdUser.Value == null || !createdUser.Succeeded)
-            {
-                return Result<CreateUserDto>.Failure(createdUser.Errors, null);
-            }
-
-            return Result<CreateUserDto>.Success(createdUser.Value);
+            return ApiResponse.Success("تم إنشاء المستخدم بنجاح.", createdUser);
         }
 
         [HttpPut("[action]/{id}")]
         [AuthorizePermission("UserManagement.Edit")]
-        public async Task<Result<string>> Update(string id, UpdateUserDto updatedUser)
+        public async Task<IResult> Update(string id, [FromBody] UpdateUserDto updatedUser)
         {
-            var result = await _userService.Update(id, updatedUser);
-
-            if (result.Value == null || !result.Succeeded)
-            {
-                return Result<string>.Failure(result.Errors, null);
-            }
-
-            return Result<string>.Success(result.Value);
+            await _userService.Update(id, updatedUser);
+            return ApiResponse.Success("تم تحديث المستخدم بنجاح.");
         }
 
         [HttpDelete("[action]/{userId}")]
         [AuthorizePermission("UserManagement.Delete")]
-        public async Task<Result<string>> Delete(string userId)
+        public async Task<IResult> Delete(string userId)
         {
-            var result = await _userService.Delete(userId);
-
-            if (result.Value == null || !result.Succeeded)
-            {
-                return Result<string>.Failure(result.Errors, null);
-            }
-
-            return Result<string>.Success(result.Value);
+            await _userService.Delete(userId);
+            return ApiResponse.Success("تم حذف المستخدم بنجاح.");
         }
 
         [HttpGet("[action]")]
         [AuthorizePermission("UserManagement.Read")]
-        public async Task<Result<PaginatedList<UserListItemDto>>> GetUsersList(
+        public async Task<IResult> GetUsersList(
             [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
             [FromQuery][Range(1, 500)] int pageSize = 10,
             [FromQuery] string? q = null,
             [FromQuery] bool? isActive = null)
         {
-            var result = await _userService.GetUsersListAsync(pageNumber, pageSize, q, isActive);
-
-            if (!result.Succeeded || result.Value == null)
-                return Result<PaginatedList<UserListItemDto>>.Failure(result.Errors, null);
-
-            return Result<PaginatedList<UserListItemDto>>.Success(result.Value);
+            var usersList = await _userService.GetUsersListAsync(pageNumber, pageSize, q, isActive);
+            return ApiResponse.Success("تم جلب قائمة المستخدمين بنجاح.", usersList);
         }
-
 
         [HttpGet("[action]/{id}")]
         [AuthorizePermission("UserManagement.Read")]
-        public async Task<Result<UserListItemDto>> GetUser(string id)
+        public async Task<IResult> GetUser(string id)
         {
             var user = await _userService.GetUserAsync(id);
-
-            if (user.Value == null || !user.Succeeded)
-            {
-                return Result<UserListItemDto>.Failure(user.Errors, null);
-            }
-            return Result<UserListItemDto>.Success(user.Value);
+            return ApiResponse.Success("تم جلب بيانات المستخدم بنجاح.", user);
         }
 
         [HttpPatch("[action]/{id}")]
         [AuthorizePermission("UserManagement.Edit")]
-        public async Task<Result<UserListItemDto>> PatchUser(string id, [FromBody] UpdateUserPatchRequest request)
+        public async Task<IResult> PatchUser(string id, [FromBody] UpdateUserPatchRequest request)
         {
-            if (!ModelState.IsValid)
-                return Result<UserListItemDto>.Failure(new[] { "Invalid model state" }, null);
-
-            var result = await _userService.UpdateUserAsync(id, request);
-
-            return result.Succeeded && result.Value != null
-                ? Result<UserListItemDto>.Success(result.Value)
-                : Result<UserListItemDto>.Failure(result.Errors, null);
+            var updatedUser = await _userService.UpdateUserAsync(id, request);
+            return ApiResponse.Success("تم التعديل الجزئي بنجاح.", updatedUser);
         }
-
 
         [HttpPatch("[action]/{id}")]
         [AuthorizePermission("UserManagement.Edit")]
-        public async Task<Result<UpdateUserStatusRequest>> UpdateUserStatus(string id, [FromBody] UpdateUserStatusRequest request)
+        public async Task<IResult> UpdateUserStatus(string id, [FromBody] UpdateUserStatusRequest request)
         {
-            if (!ModelState.IsValid)
-                return Result<UpdateUserStatusRequest>.Failure(new[] { "Invalid model state" }, null);
-
-            var result = await _userService.UpdateUserStatusAsync(id, request);
-
-            return result.Succeeded
-                ? Result<UpdateUserStatusRequest>.Success(result.Value!)
-                : Result<UpdateUserStatusRequest>.Failure(result.Errors, null);
+            var updatedStatus = await _userService.UpdateUserStatusAsync(id, request);
+            return ApiResponse.Success("تم تعديل حالة المستخدم بنجاح.", updatedStatus);
         }
 
-
         [HttpPost("[action]")]
-        public async Task<Result<string>> ChangeMyPassword([FromBody] ChangePasswordRequest dto)
+        public async Task<IResult> ChangeMyPassword([FromBody] ChangePasswordRequest dto)
         {
-
-            var result = await _userService.ChangeOwnPasswordAsync(dto);
-
-            if (result.Value == null || !result.Succeeded)
-            {
-                return Result<string>.Failure(result.Errors, null);
-            }
-
-            return Result<string>.Success(result.Value);
+            await _userService.ChangeOwnPasswordAsync(dto);
+            return ApiResponse.Success("تم تغيير كلمة المرور بنجاح.");
         }
 
         [HttpPost("[action]")]
         [AuthorizePermission("UserManagement.Edit")]
-        public async Task<Result<string>> ChangePasswordUser(AdminChangePasswordRequest dto)
+        public async Task<IResult> ChangePasswordUser([FromBody] AdminChangePasswordRequest dto)
         {
-            var result = await _userService.ResetUserPasswordAsync(dto);
-
-            if (result.Value == null || !result.Succeeded)
-            {
-                return Result<string>.Failure(result.Errors, null);
-            }
-
-            return Result<string>.Success(result.Value);
+            await _userService.ResetUserPasswordAsync(dto);
+            return ApiResponse.Success("تم إعادة تعيين كلمة المرور بنجاح.");
         }
 
         [HttpPost("[action]")]
         [AuthorizePermission("UserManagement.Edit")]
-        public async Task<Result<string>> ToggleRolesForUserAsync([FromBody] AssignRolesDto dto)
+        public async Task<IResult> ToggleRolesForUserAsync([FromBody] AssignRolesDto dto)
         {
-            var result = await _userService.ToggleRolesForUserAsync(dto);
-
-            if (result.Value == null || !result.Succeeded)
-            {
-                return Result<string>.Failure(result.Errors, null);
-            }
-            return Result<string>.Success(result.Value);
+            await _userService.ToggleRolesForUserAsync(dto);
+            return ApiResponse.Success("تم تعديل أدوار المستخدم بنجاح.");
         }
 
         [HttpPost("[action]")]
         [AuthorizePermission("UserManagement.Edit")]
-        public async Task<Result<string>> TogglePermissionsForUserAsync([FromBody] AssignPermissionToUserDto dto)
+        public async Task<IResult> TogglePermissionsForUserAsync([FromBody] AssignPermissionToUserDto dto)
         {
-            var result = await _userService.TogglePermissionsForUserAsync(dto);
-
-            if (result.Value == null || !result.Succeeded)
-            {
-                return Result<string>.Failure(result.Errors, null);
-            }
-
-            return Result<string>.Success(result.Value);
+            await _userService.TogglePermissionsForUserAsync(dto);
+            return ApiResponse.Success("تم تعديل صلاحيات المستخدم بنجاح.");
         }
 
         [HttpPost("[action]")]
         [AuthorizePermission("UserManagement.Edit")]
-        public async Task<Result<string>> RemoveFieldPermissionsFromUser([FromBody] RemoveFieldPermissionsDto dto)
+        public async Task<IResult> RemoveFieldPermissionsFromUser([FromBody] RemoveFieldPermissionsDto dto)
         {
-            var result = await _userService.RemoveFieldPermissionsFromUserAsync(dto);
-
-            if (result.Value == null || !result.Succeeded)
-            {
-                return Result<string>.Failure(result.Errors, null);
-            }
-
-            return Result<string>.Success(result.Value);
+            await _userService.RemoveFieldPermissionsFromUserAsync(dto);
+            return ApiResponse.Success("تم إزالة الصلاحيات الحقلية بنجاح.");
         }
 
         [HttpPut("[action]/{id}")]
         [AuthorizePermission("UserManagement.Edit")]
-        public async Task<Result<string>> UpdateUserWithRoles([FromRoute] string id, [FromBody] UpdateUserWithRolesDto dto)
+        public async Task<IResult> UpdateUserWithRoles([FromRoute] string id, [FromBody] UpdateUserWithRolesDto dto)
         {
-            var result = await _userService.UpdateUserWithRolesAsync(id, dto);
-
-            if (result.Value == null || !result.Succeeded)
-            {
-                return Result<string>.Failure(result.Errors, null);
-            }
-
-            return Result<string>.Success(result.Value);
+            await _userService.UpdateUserWithRolesAsync(id, dto);
+            return ApiResponse.Success("تم تحديث المستخدم والأدوار بنجاح.");
         }
-
 
         [HttpGet("[action]")]
         [AuthorizePermission("UserManagement.Read")]
-        public async Task<Result<List<DropdownUserDto>>> GetDropDownUsers()
+        public async Task<IResult> GetDropDownUsers()
         {
-            var result = await _userService.GetDropDownUsersAsync();
-
-            if (result.Value == null || !result.Succeeded)
-            {
-                return Result<List<DropdownUserDto>>.Failure(result.Errors, null);
-            }
-            return Result<List<DropdownUserDto>>.Success(result.Value);
+            var dropDownUsers = await _userService.GetDropDownUsersAsync();
+            return ApiResponse.Success("تم جلب قائمة المستخدمين بنجاح.", dropDownUsers);
         }
     }
 }
-

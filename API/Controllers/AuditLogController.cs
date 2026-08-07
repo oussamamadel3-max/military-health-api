@@ -1,4 +1,4 @@
-using Application.Common.Results;
+using API.Infrastructure;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Application.ModelsDto.AuditLogDtos;
@@ -20,30 +20,37 @@ public class AuditLogController : ControllerBase
 
     [HttpGet("[action]/{id}")]
     [AuthorizePermission("AuditLog.Read")]
-    public async Task<Result<AuditLogDetailsDto>> Get(long id)
-        => await _service.GetByIdAsync(id);
+    public async Task<IResult> Get(long id)
+    {
+        var result = await _service.GetByIdAsync(id);
+        return ApiResponse.Success("تم جلب تفاصيل سجل التدقيق بنجاح.", result);
+    }
 
     [HttpGet("[action]")]
     [AuthorizePermission("AuditLog.Read")]
-    public async Task<Result<List<string>>> GetAuditEntities()
+    public async Task<IResult> GetAuditEntities()
     {
         var entityNames = await _auditLogRepository.GetEntityTypeNamesAsync();
-        return Result<List<string>>.Success(entityNames.ToList());
+        return ApiResponse.Success("تم جلب أسماء كيانات السجل بنجاح.", entityNames.ToList());
     }
 
     [HttpPost("[action]")]
     [AuthorizePermission("AuditLog.Read")]
-    public async Task<Result<PaginatedList<AuditLogListDto>>> GetAllFiltered(
+    public async Task<IResult> GetAllFiltered(
         [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
         [FromQuery][Range(1, 500)] int pageSize = 10,
         [FromForm] AuditLogFilter? filter = null)
     {
         filter ??= new AuditLogFilter();
-        return await _service.GetAllFilteredAsync(pageNumber, pageSize, filter);
+        var result = await _service.GetAllFilteredAsync(pageNumber, pageSize, filter);
+        return ApiResponse.Success("تم جلب سجلات التدقيق بنجاح.", result);
     }
 
     [HttpGet("[action]")]
     [AuthorizePermission("AuditLog.Read")]
-    public async Task<Result<AuditLogSummaryDto>> GetAuditLogSummary()
-        => await _service.GetSummaryAsync();
+    public async Task<IResult> GetAuditLogSummary()
+    {
+        var result = await _service.GetSummaryAsync();
+        return ApiResponse.Success("تم جلب ملخص سجل التدقيق بنجاح.", result);
+    }
 }

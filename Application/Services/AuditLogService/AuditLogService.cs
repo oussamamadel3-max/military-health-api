@@ -1,5 +1,6 @@
 using Application.Common.Results;
 using Application.Common.Utilities;
+using Application.Exceptions;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
@@ -30,24 +31,23 @@ namespace Application.Services
         }
 
         #region استرجاع سجل حسب المعرف (يستخدم AuditLogDetailsDto)
-        public async Task<Result<AuditLogDetailsDto>> GetByIdAsync(long id)
+        public async Task<AuditLogDetailsDto> GetByIdAsync(long id)
         {
             var scope = await GetActorScopeAsync();
 
             var scoped = ApplyScope(_auditLogs.Query(), scope)
                          .Where(a => a.LogId == id);
 
-            var entity = await scoped.FirstOrDefaultAsync();
-            if (entity == null)
-                return Result<AuditLogDetailsDto>.Failure(new List<string> { "Not found" }, null);
+            var entity = await scoped.FirstOrDefaultAsync()
+                ?? throw new ReportNotFoundException("سجل التدقيق غير موجود.");
 
-            return Result<AuditLogDetailsDto>.Success(_mapper.Map<AuditLogDetailsDto>(entity));
+            return _mapper.Map<AuditLogDetailsDto>(entity);
         }
 
         #endregion
 
         #region استرجاع جميع السجلات مع دعم pagination (يستخدم AuditLogListDto)
-        public async Task<Result<PaginatedList<AuditLogListDto>>> GetAllAsync(int pageNumber, int pageSize)
+        public async Task<PaginatedList<AuditLogListDto>> GetAllAsync(int pageNumber, int pageSize)
         {
             if (pageNumber < 1) pageNumber = 1;
             if (pageSize < 1) pageSize = 10;
@@ -65,13 +65,13 @@ namespace Application.Services
                 .ToListAsync();
 
             var mapped = _mapper.Map<List<AuditLogListDto>>(items);
-            return Result<PaginatedList<AuditLogListDto>>.Success(new(mapped, total, pageNumber, pageSize));
+            return new PaginatedList<AuditLogListDto>(mapped, total, pageNumber, pageSize);
         }
 
         #endregion
 
         #region    استرجاع حميع السجلات مع فلترة و pagination
-        public async Task<Result<PaginatedList<AuditLogListDto>>> GetAllFilteredAsync(int pageNumber, int pageSize, AuditLogFilter auditLogFilter)
+        public async Task<PaginatedList<AuditLogListDto>> GetAllFilteredAsync(int pageNumber, int pageSize, AuditLogFilter auditLogFilter)
         {
             if (pageNumber < 1) pageNumber = 1;
             if (pageSize < 1) pageSize = 10;
@@ -128,8 +128,7 @@ namespace Application.Services
 
             var mapped = _mapper.Map<List<AuditLogListDto>>(list);
 
-            return Result<PaginatedList<AuditLogListDto>>.Success(
-                new PaginatedList<AuditLogListDto>(mapped, total, pageNumber, pageSize));
+            return new PaginatedList<AuditLogListDto>(mapped, total, pageNumber, pageSize);
         }
 
         private static void ApplyDateRange(ref IQueryable<AuditLog> q, DateTimeOffset? from, DateTimeOffset? to)
@@ -160,7 +159,7 @@ namespace Application.Services
         #endregion
 
         #region   جلب ملخص إحصائي للسجلات
-        public async Task<Result<AuditLogSummaryDto>> GetSummaryAsync()
+        public async Task<AuditLogSummaryDto> GetSummaryAsync()
         {
             var scope = await GetActorScopeAsync();
 
@@ -176,13 +175,13 @@ namespace Application.Services
             long deleted = grouped.FirstOrDefault(x => x.ActionType == "Deleted")?.Count ?? 0;
             long total = added + modified + deleted;
 
-            return Result<AuditLogSummaryDto>.Success(new AuditLogSummaryDto
+            return new AuditLogSummaryDto
             {
                 Total = total,
                 Added = added,
                 Modified = modified,
                 Deleted = deleted
-            });
+            };
         }
 
         #endregion

@@ -1,0 +1,56 @@
+1- var userId = _userContextService.UserId ?? throw new UnauthenticatedUserException();
+why throwing exception in controller?
+
+
+2 -  errorList = new List<string>();
+
+            var role = _roleManager.Roles
+                .FirstOrDefault(r => r.Id == id);
+
+            if (role == null)
+            {
+                await Task.Delay(1);
+                errorList.Add("الدور غير موجود");
+                return Result<RoleDto>.Failure(errorList, null);
+            }
+
+            var roleDto = new RoleDto();
+
+            roleDto.Name = role.Name ?? string.Empty;
+
+            roleDto.Id = role.Id;
+
+            return Result<RoleDto>.Success(roleDto);
+
+            why you remove the task.delay?
+            I think its security stuff.
+
+
+3 -             catch (DbUpdateException)
+            {
+                await tx.RollbackAsync();
+                throw;
+            }
+            what does it throw?
+
+
+4 -         [HttpPost("[action]")]
+        [AuthorizePermission("UserManagement.Create")]
+        public async Task<IResult> SyncPermissionsForRole([FromBody] AssignPermissionsDto dto)
+        {
+            await _roleService.SyncPermissionsForRoleAsync(dto);
+            return ApiResponse.Success("تم مزامنة صلاحيات الدور بنجاح.");
+
+
+in roles controller, the previous result was returning data, not only message
+check it please, 
+
+
+5 - for all files, keep the comments, I approve many of them in mistake, they are importnant
+
+
+
+
+6 - why in some services, theres no exceptions?
+
+7 - why all custom exception in Auth?
