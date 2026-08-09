@@ -1,22 +1,22 @@
-# Tasks Checklist
+# قائمة المهام (Tasks Checklist)
 
-- [x] **Task 1: Result & Generic Result Refinement**
-  - **Details**: دراسة ملف الـResult & Generic Result وحسم الهيكلية الجديدة للمشروع.
+- [x] **المهمة 1: تحسين هيكلية ملف الـ Result و الـ Generic Result**
+  - **التفاصيل**: دراسة ملف الـ Result & Generic Result وحسم الهيكلية الجديدة للمشروع.
 
-- [x] **Task 2: Rate Limiting & Infrastructure Study** *(For Understanding & Study)*
-  - **Details**: API: دراسة وفهم ملف الـRate Limiting ومكونات مجلد Infrastructure (دراسة وتحليل فقط، بدون تطبيق كود).
+- [x] **المهمة 2: دراسة ملف تحديد معدل الطلبات وبنية مجلد Infrastructure** *(للفهم والدراسة فقط)*
+  - **التفاصيل**: API: دراسة وفهم ملف الـ Rate Limiting ومكونات مجلد Infrastructure (دراسة وتحليل فقط، بدون تطبيق كود).
 
-- [x] **Task 3: Application/Service Layer DB Context Audit**
-  - **Details**: Check the application/service layer & check that no file is directly using `DbContext`.
+- [x] **المهمة 3: فحص استخدام سياق قاعدة البيانات (DbContext) في طبقة التطبيق والخدمات**
+  - **التفاصيل**: التحقق من طبقة التطبيق/الخدمات والتأكد من عدم استخدام `DbContext` بشكل مباشر في أي ملف.
 
-- [x] **Task 4: Security Checks (CSRF, JWT & XSS)** *(For Understanding & Audit)*
-  - **Details**: دراسة وفهم آليات الأمان المطبقة في النظام (CSRF, JWT & XSS) (دراسة وتحليل فني فقط، بدون تطبيق كود).
+- [x] **المهمة 4: فحص إجراءات الأمان (CSRF، JWT و XSS)** *(للفهم والتدقيق فقط)*
+  - **التفاصيل**: دراسة وفهم آليات الأمان المطبقة في النظام (CSRF, JWT & XSS) (دراسة وتحليل فني فقط، بدون تطبيق كود).
 
-- [x] **Task 5: Modularize Mapping Profiles**
-  - **Details**: Split `mapProfile.cs` into separate profile files (e.g., `RoleProfile.cs`, `documentsProfile.cs`).
+- [x] **المهمة 5: تقسيم ملفات تعريف الخرائط (Mapping Profiles)**
+  - **التفاصيل**: تقسيم ملف `mapProfile.cs` إلى ملفات تعريف خرائط منفصلة ومستقلة (على سبيل المثال: `RoleProfile.cs` و `documentsProfile.cs`).
 
-- [x] **Task 6: Manual Mapping Audit**
-  - **Details**: Check that there is no manual mapping (converting manually without using `mapProfile.cs`).
+- [x] **المهمة 6: فحص عمليات التحويل اليدوي (Manual Mapping)**
+  - **التفاصيل**: التأكد من عدم وجود عمليات تحويل يدوية بين النماذج (التحويل يدوياً دون استخدام ملفات الـ Mapping).
 
-- [x] **Task 7: Split Entites Data Annotations into separate files**
-  - **Details**: Split entity data annotations into separate files.
+- [x] **المهمة 7: فصل تعليقات الكيانات (Data Annotations) إلى ملفات مستقلة**
+  - **التفاصيل**: فصل إعدادات قاعدة البيانات و Data Annotations الخاصة بالكيانات إلى ملفات تكوين مستقلة.
