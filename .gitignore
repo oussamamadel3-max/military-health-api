@@ -361,3 +361,9 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Application file storage (FileStorage:RootPath / UploadPath)
+storage/
+storage/uploads/
+API/storage/
+API/storage/uploads/
