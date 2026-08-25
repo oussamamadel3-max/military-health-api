@@ -719,6 +719,9 @@ public class UserService : IUserService
                 await _unitOfWork.SaveChangesAsync();
             }
 
+            await SecurityStampHelper.InvalidateUserTokensAsync(
+                _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id);
+
             await tx.CommitAsync();
         }
         catch
@@ -784,6 +787,9 @@ public class UserService : IUserService
                 _userRepository.AddUserPermissions(addRows);
                 await _unitOfWork.SaveChangesAsync();
             }
+
+            await SecurityStampHelper.InvalidateUserTokensAsync(
+                _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id);
 
             await tx.CommitAsync();
         }
