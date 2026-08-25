@@ -326,7 +326,7 @@ namespace Application.Services.AuthServices
 
                 return $"تم تحديث الصلاحيات بنجاح. (إضافة: {toAdd.Count} | حذف: {toRemove.Count})";
             }
-            catch (DbUpdateException)
+            catch
             {
                 await tx.RollbackAsync();
                 throw;
@@ -395,7 +395,7 @@ namespace Application.Services.AuthServices
 
                 await tx.CommitAsync();
             }
-            catch (DbUpdateException)
+            catch
             {
                 await tx.RollbackAsync();
                 throw;

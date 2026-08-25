@@ -229,7 +229,7 @@ public class DocumentService : IDocumentService
 
             await tx.CommitAsync();
         }
-        catch (DbUpdateException)
+        catch
         {
             await tx.RollbackAsync();
             throw;
