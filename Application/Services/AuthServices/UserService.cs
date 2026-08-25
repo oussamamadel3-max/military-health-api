@@ -798,6 +798,9 @@ public class UserService : IUserService
     #region إزالة الصلاحيات الحقلية من مستخدم
     public async Task RemoveFieldPermissionsFromUserAsync(RemoveFieldPermissionsDto dto)
     {
+        if (dto.FieldPermissionIds == null || dto.FieldPermissionIds.Count == 0)
+            throw new InvalidUserDataException("لم يتم تحديد أي صلاحيات حقول.");
+
         var user = await _userManager.FindByIdAsync(dto.UserId)
             ?? throw new UserNotFoundException(dto.UserId);
 
@@ -807,12 +810,18 @@ public class UserService : IUserService
         if (!actorScope.IsSuperAdmin && !actorScope.IsBranchManager)
             throw new ForbiddenPermissionException("غير مسموح بإزالة الصلاحيات الحقلية إلا لمدير الفرع أو SuperAdmin.");
 
-        var rowsToRemove = await _fieldPermissionRepository.GetUserLinksAsync(dto.FieldPermissionIds.FirstOrDefault());
-        if (!rowsToRemove.Any())
+        var userFieldPermissions = (await _userRepository.GetUserFieldPermissionsAsync(dto.UserId))
+            .Where(ufp => dto.FieldPermissionIds.Contains(ufp.FieldPermissionId))
+            .ToList();
+
+        if (!userFieldPermissions.Any())
             return;
 
-        _fieldPermissionRepository.RemoveUserLinks(rowsToRemove);
+        _userRepository.RemoveUserFieldPermissions(userFieldPermissions);
         await _unitOfWork.SaveChangesAsync();
+
+        await SecurityStampHelper.InvalidateUserTokensAsync(
+            _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, dto.UserId);
     }
     #endregion
 
