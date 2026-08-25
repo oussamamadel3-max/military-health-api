@@ -719,6 +719,8 @@ public class UserService : IUserService
                 await _unitOfWork.SaveChangesAsync();
             }
 
+            await SyncRoleDerivedPermissionsAsync(user.Id);
+
             await SecurityStampHelper.InvalidateUserTokensAsync(
                 _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id);
 
@@ -834,17 +836,69 @@ public class UserService : IUserService
     #region تحديث المستخدم بالأدوار
     public async Task UpdateUserWithRolesAsync(string userId, UpdateUserWithRolesDto updatedUser)
     {
+        if (string.IsNullOrWhiteSpace(userId))
+            throw new InvalidUserDataException("معرف المستخدم غير صالح.");
+
         var user = await _userManager.FindByIdAsync(userId)
             ?? throw new UserNotFoundException(userId);
 
-        var patchReq = new UpdateUserPatchRequest
+        using var transaction = await _unitOfWork.BeginTransactionAsync();
+        try
         {
-            username = updatedUser.UserName,
-            email = updatedUser.Email,
-            roles = updatedUser.RoleIds?.Select(r => new RoleLiteDto(r, string.Empty)).ToList()
-        };
+            var safeUserName = _textSanitizer.SanitizePlainText(updatedUser.UserName) ?? updatedUser.UserName;
+            var safeEmail = _textSanitizer.SanitizePlainText(updatedUser.Email) ?? updatedUser.Email;
+            user.UserName = safeUserName;
+            user.NormalizedUserName = safeUserName.ToUpperInvariant();
+            user.Email = safeEmail;
+            user.NormalizedEmail = safeEmail.ToUpperInvariant();
 
-        await UpdateUserAsync(userId, patchReq);
+            var updateRes = await _userManager.UpdateAsync(user);
+            if (!updateRes.Succeeded)
+                throw new InvalidUserDataException(string.Join(", ", updateRes.Errors.Select(e => e.Description)));
+
+            if (updatedUser.RoleIds?.Any() == true)
+            {
+                var foundRoleIds = await _roleRepository.GetActiveRoleIdsAsync(updatedUser.RoleIds);
+                var notFound = updatedUser.RoleIds.Except(foundRoleIds).ToList();
+
+                if (notFound.Any())
+                    throw new InvalidUserDataException($"الأدوار التالية غير موجودة: {string.Join(", ", notFound)}");
+
+                var currentRoleIds = await _userRepository.GetActiveRoleIdsAsync(userId);
+
+                var rolesToAdd = foundRoleIds.Except(currentRoleIds).ToList();
+                var rolesToRemove = currentRoleIds.Except(foundRoleIds).ToList();
+
+                if (rolesToAdd.Any())
+                {
+                    var newAssociations = rolesToAdd.Select(rid => new UserRoleAssociation
+                    {
+                        Id = Guid.NewGuid(),
+                        UserId = userId,
+                        RoleId = rid
+                    }).ToList();
+
+                    _userRepository.AddRoleAssociations(newAssociations);
+                }
+
+                if (rolesToRemove.Any())
+                {
+                    var toRemove = await _userRepository.QueryRoleAssociations(asNoTracking: false)
+                        .Where(ura => ura.UserId == userId && rolesToRemove.Contains(ura.RoleId))
+                        .ToListAsync();
+
+                    _userRepository.RemoveRoleAssociations(toRemove);
+                }
+            }
+
+            await _unitOfWork.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
     }
     #endregion
 
@@ -862,6 +916,53 @@ public class UserService : IUserService
             .ToListAsync();
     }
     #endregion
+
+    private async Task SyncRoleDerivedPermissionsAsync(string userId)
+    {
+        var finalRoleIds = await _userRepository.GetActiveRoleIdsAsync(userId);
+
+        var finalRolePermissionIds = await _roleRepository.GetActivePermissionIdsForRolesAsync(finalRoleIds);
+
+        var existingUserPermissionIds = await _userRepository.GetDirectPermissionIdsAsync(userId);
+
+        var toAddPerms = finalRolePermissionIds
+            .Except(existingUserPermissionIds)
+            .Select(pid => new UserPermission { UserId = userId, PermissionId = pid })
+            .ToList();
+        if (toAddPerms.Any())
+            _userRepository.AddUserPermissions(toAddPerms);
+
+        var stillNeededPerms = new HashSet<Guid>(finalRolePermissionIds);
+        var userPermsToRemove = await _userRepository.GetUserPermissionsAsync(userId);
+        userPermsToRemove = userPermsToRemove
+            .Where(up => up.PermissionId != null && !stillNeededPerms.Contains(up.PermissionId!.Value))
+            .ToList();
+        if (userPermsToRemove.Any())
+            _userRepository.RemoveUserPermissions(userPermsToRemove);
+
+        await _unitOfWork.SaveChangesAsync();
+
+        var finalFieldPermIds = await _roleRepository.GetFieldPermissionIdsForRolesAsync(finalRoleIds);
+
+        var existingUserFieldPermIds = await _userRepository.GetDirectFieldPermissionIdsAsync(userId);
+
+        var toAddFieldPerms = finalFieldPermIds
+            .Except(existingUserFieldPermIds)
+            .Select(fid => new UserFieldPermission { UserId = userId, FieldPermissionId = fid })
+            .ToList();
+        if (toAddFieldPerms.Any())
+            _userRepository.AddUserFieldPermissions(toAddFieldPerms);
+
+        var stillNeededFieldPerms = new HashSet<Guid>(finalFieldPermIds);
+        var userFieldPermsToRemove = await _userRepository.GetUserFieldPermissionsAsync(userId);
+        userFieldPermsToRemove = userFieldPermsToRemove
+            .Where(ufp => !stillNeededFieldPerms.Contains(ufp.FieldPermissionId))
+            .ToList();
+        if (userFieldPermsToRemove.Any())
+            _userRepository.RemoveUserFieldPermissions(userFieldPermsToRemove);
+
+        await _unitOfWork.SaveChangesAsync();
+    }
 
     private async Task<(User actor, bool isSuperAdmin, bool isBranchManager)> GetActorAsync()
     {
