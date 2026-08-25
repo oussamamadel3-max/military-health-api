@@ -98,13 +98,22 @@ public class ErrorHandlingMiddleware
                 break;
 
             // =========================================================================
-            // 5. Database Update Constraint Exceptions
+            // 5. Database Update Exceptions
             // =========================================================================
+            case DbUpdateException dbEx when IsUniqueConstraintViolation(dbEx):
+                response = ApiResponse.Error(
+                    message: "تعارض في البيانات: القيمة موجودة مسبقاً.",
+                    code: "DATABASE_CONFLICT",
+                    status: (int)HttpStatusCode.Conflict);
+
+                _logger.LogWarning(dbEx, "DATABASE CONFLICT: Message={Message}", dbEx.Message);
+                break;
+
             case DbUpdateException dbEx:
                 response = ApiResponse.Error(
                     message: "حدث خطأ أثناء حفظ البيانات في قاعدة البيانات.",
-                    code: "DATABASE_UPDATE_ERROR",
-                    status: (int)HttpStatusCode.BadRequest);
+                    code: "DATABASE_ERROR",
+                    status: (int)HttpStatusCode.InternalServerError);
 
                 _logger.LogError(dbEx, "DATABASE UPDATE EXCEPTION: Message={Message}", dbEx.Message);
                 break;
@@ -138,6 +147,13 @@ public class ErrorHandlingMiddleware
         }
 
         await response.ExecuteAsync(context);
+    }
+
+    private static bool IsUniqueConstraintViolation(DbUpdateException ex)
+    {
+        if (ex.InnerException is Microsoft.Data.SqlClient.SqlException sqlEx)
+            return sqlEx.Number == 2601 || sqlEx.Number == 2627;
+        return false;
     }
 }
 
