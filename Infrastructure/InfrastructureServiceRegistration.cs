@@ -9,6 +9,7 @@ using Application.Services.Dashboard;
 using Application.Services.FileStorageService;
 using Application.Services.Reports;
 using Application.Services.Sanitization;
+using Application.Services.Core;
 using Infrastructure.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -33,6 +34,9 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IDocumentRepository, DocumentRepository>();
         services.AddScoped<IAttachmentRepository, AttachmentRepository>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
+        services.AddScoped<IOrgUnitTypeRepository, OrgUnitTypeRepository>();
+        services.AddScoped<IOrgUnitRepository, OrgUnitRepository>();
+        services.AddScoped<IUserOrgScopeRepository, UserOrgScopeRepository>();
         #endregion
 
         #region Auth HTTP services
@@ -61,6 +65,11 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IDashboardService, DashboardService>();
         services.AddScoped<IExportService, ExportService>();
         services.AddScoped<IReportsService, ReportsService>();
+        services.AddScoped<IOrgUnitTypeService, OrgUnitTypeService>();
+        services.AddScoped<IOrgUnitService, OrgUnitService>();
+        services.AddScoped<IUserOrgScopeService, UserOrgScopeService>();
+        services.AddScoped<IOrgScopeResolver, OrgScopeResolver>();
+        services.AddScoped<IOrgAccessService, OrgAccessService>();
         #endregion
 
         return services;

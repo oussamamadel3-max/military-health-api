@@ -9,6 +9,7 @@ public interface IPermissionRepository
     Task<List<Permission>> GetAllOrderedAsync(CancellationToken cancellationToken = default);
     Task<List<Permission>> GetWithRolesAsync(string? nameFilter, bool? isActive, CancellationToken cancellationToken = default);
     Task<List<Guid>> GetActiveIdsAsync(IEnumerable<Guid> ids, CancellationToken cancellationToken = default);
+    Task<Guid?> FindActivePermissionIdByNameAsync(string name, CancellationToken cancellationToken = default);
     Task<List<string>> GetPermissionNamesViaRolesAsync(string userId, CancellationToken cancellationToken = default);
     void Add(Permission permission);
     void Update(Permission permission);

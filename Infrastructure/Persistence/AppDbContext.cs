@@ -2,6 +2,7 @@ using Application.Interfaces.Services;
 using Application.Dtos.AuthDtos;
 using Domain.Entities;
 using Domain.Entities.Auth;
+using Domain.Entities.Core;
 using Domain.Interfaces;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -41,6 +42,9 @@ public class AppDbContext : DbContext
 
     public DbSet<Document> Documents { get; set; } = null!;
     public DbSet<Attachment> Attachments { get; set; } = null!;
+    public DbSet<OrgUnitType> OrgUnitTypes { get; set; } = null!;
+    public DbSet<OrgUnit> OrgUnits { get; set; } = null!;
+    public DbSet<UserOrgScope> UserOrgScopes { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
