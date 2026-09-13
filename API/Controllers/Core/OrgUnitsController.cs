@@ -50,4 +50,11 @@ public class OrgUnitsController : ControllerBase
         await _service.SetStatusAsync(id, dto.Status);
         return ApiResponse.Success("تم تحديث حالة الوحدة التنظيمية بنجاح.");
     }
+
+    [HttpDelete("{id:guid}"), AuthorizePermission("OrgStructure.Delete")]
+    public async Task<IResult> Delete(Guid id)
+    {
+        await _service.DeleteAsync(id);
+        return ApiResponse.Success("تم حذف الوحدة التنظيمية بنجاح.");
+    }
 }

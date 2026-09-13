@@ -70,6 +70,10 @@ public class OrgUnitRepository : RepositoryBase<OrgUnit, Guid>, IOrgUnitReposito
     public Task<bool> AnyAsync(CancellationToken ct = default) => DbSet.AnyAsync(ct);
     public Task<bool> HasActiveChildrenAsync(Guid id, CancellationToken ct = default) =>
         DbSet.AnyAsync(x => x.ParentOrgUnitId == id && x.Status == CoreStatuses.Active, ct);
+    public Task<bool> HasAnyChildrenAsync(Guid id, CancellationToken ct = default) =>
+        DbSet.AnyAsync(x => x.ParentOrgUnitId == id, ct);
+    public Task<bool> HasUserOrgScopesAsync(Guid id, CancellationToken ct = default) =>
+        Context.UserOrgScopes.AnyAsync(x => x.OrgUnitId == id, ct);
     public Task<bool> CodeExistsAsync(string code, Guid? excludeId, CancellationToken ct = default) =>
         DbSet.AnyAsync(x => x.Code == code && (!excludeId.HasValue || x.OrgUnitId != excludeId), ct);
     public Task<bool> SiblingNameExistsAsync(Guid? parentId, string name, Guid? excludeId, CancellationToken ct = default) =>

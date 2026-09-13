@@ -1,3 +1,4 @@
+using Application.Common;
 using Domain.Entities.Auth;
 using Domain.Entities.Core;
 using Infrastructure.Persistence;
@@ -165,6 +166,42 @@ namespace Infrastructure.Persistence
                 await context.SaveChangesAsync();
             }
 
+            async Task<OrgUnit> EnsureOrgUnitAsync(string code, string nameAr, Guid typeId, Guid? parentId)
+            {
+                var existing = await context.OrgUnits.FirstOrDefaultAsync(x => x.Code == code);
+                if (existing != null)
+                    return existing;
+
+                var entity = new OrgUnit
+                {
+                    OrgUnitId = Guid.NewGuid(),
+                    Code = code,
+                    NameAr = nameAr,
+                    OrgUnitTypeId = typeId,
+                    ParentOrgUnitId = parentId,
+                    Status = CoreStatuses.Active
+                };
+                context.OrgUnits.Add(entity);
+                await context.SaveChangesAsync();
+                return entity;
+            }
+
+            async Task EnsureOrgUnitsAsync()
+            {
+                var hq = await context.OrgUnitTypes.FirstAsync(x => x.Code == "HQ");
+                var directorate = await context.OrgUnitTypes.FirstAsync(x => x.Code == "DIRECTORATE");
+                var department = await context.OrgUnitTypes.FirstAsync(x => x.Code == "DEPARTMENT");
+                var branch = await context.OrgUnitTypes.FirstAsync(x => x.Code == "BRANCH");
+
+                var root = await EnsureOrgUnitAsync("MOD_ROOT", "وزارة الدفاع", hq.OrgUnitTypeId, null);
+                var trainingDir = await EnsureOrgUnitAsync(
+                    "TRAINING_DIR", "مديرية التدريب", directorate.OrgUnitTypeId, root.OrgUnitId);
+                await EnsureOrgUnitAsync(
+                    "PLANNING_DEPT", "قسم التخطيط التدريبي", department.OrgUnitTypeId, trainingDir.OrgUnitId);
+                await EnsureOrgUnitAsync(
+                    "RIYADH_BRANCH", "فرع البرمجيات", branch.OrgUnitTypeId, root.OrgUnitId);
+            }
+
 
             // ============================
             // 2) الأدوار
@@ -221,6 +258,7 @@ namespace Infrastructure.Persistence
             // إنشاء جميع الصلاحيات العامة
             await EnsurePermissionsSetAsync(publicPermsOnly);
             await EnsureOrgUnitTypesAsync();
+            await EnsureOrgUnitsAsync();
 
             // ============================
             // 5) المستخدمون

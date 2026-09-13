@@ -83,6 +83,17 @@ public class OrgUnitService : IOrgUnitService
         await _unitOfWork.SaveChangesAsync();
     }
 
+    public async Task DeleteAsync(Guid id)
+    {
+        var entity = await _units.GetByIdAsync(id, true) ?? throw new OrgUnitNotFoundException();
+        if (await _units.HasAnyChildrenAsync(id))
+            throw new InvalidOrgStructureDataException("لا يمكن حذف وحدة تنظيمية لديها وحدات فرعية.");
+        if (await _units.HasUserOrgScopesAsync(id))
+            throw new InvalidOrgStructureDataException("لا يمكن حذف وحدة تنظيمية مرتبطة بنطاقات مستخدمين.");
+        _units.Remove(entity);
+        await _unitOfWork.SaveChangesAsync();
+    }
+
     private async Task ValidateAsync(string name, Guid typeId, Guid? parentId, string status, string? code, Guid? excludeId)
     {
         var errors = new List<string>();

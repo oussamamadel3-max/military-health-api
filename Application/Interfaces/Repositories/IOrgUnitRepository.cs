@@ -14,6 +14,8 @@ public interface IOrgUnitRepository : IRepository<OrgUnit, Guid>
     Task<bool> ExistsAsync(Guid id, bool excludeArchived = false, CancellationToken ct = default);
     Task<bool> AnyAsync(CancellationToken ct = default);
     Task<bool> HasActiveChildrenAsync(Guid id, CancellationToken ct = default);
+    Task<bool> HasAnyChildrenAsync(Guid id, CancellationToken ct = default);
+    Task<bool> HasUserOrgScopesAsync(Guid id, CancellationToken ct = default);
     Task<bool> CodeExistsAsync(string code, Guid? excludeId, CancellationToken ct = default);
     Task<bool> SiblingNameExistsAsync(Guid? parentId, string name, Guid? excludeId, CancellationToken ct = default);
     Task<IReadOnlyList<(Guid Id, Guid? ParentId)>> GetNonArchivedParentLinksAsync(CancellationToken ct = default);

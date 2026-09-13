@@ -14,4 +14,5 @@ public interface IOrgUnitService
     Task<OrgUnitDto> CreateAsync(CreateOrgUnitDto dto);
     Task UpdateAsync(Guid id, UpdateOrgUnitDto dto);
     Task SetStatusAsync(Guid id, string status);
+    Task DeleteAsync(Guid id);
 }
