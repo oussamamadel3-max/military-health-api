@@ -4,6 +4,7 @@ using Application.Interfaces.Services;
 using Application.Dtos.DashboardDtos;
 using Application.Common.Results;
 using Domain.Entities;
+using MapsterMapper;
 using Microsoft.EntityFrameworkCore;
 
 namespace Application.Services.Dashboard
@@ -15,19 +16,22 @@ namespace Application.Services.Dashboard
         private readonly IAttachmentRepository _attachmentRepository;
         private readonly IActorScopeProvider _actorScopeProvider;
         private readonly IUserContextService _userCtx;
+        private readonly IMapper _mapper;
 
         public DashboardService(
             IDocumentRepository documentRepository,
             IAuditLogRepository auditLogRepository,
             IAttachmentRepository attachmentRepository,
             IActorScopeProvider actorScopeProvider,
-            IUserContextService userCtx)
+            IUserContextService userCtx,
+            IMapper mapper)
         {
             _documentRepository = documentRepository;
             _auditLogRepository = auditLogRepository;
             _attachmentRepository = attachmentRepository;
             _actorScopeProvider = actorScopeProvider;
             _userCtx = userCtx;
+            _mapper = mapper;
         }
 
         // ======== Date Range Helper (Europe/Istanbul -> UTC DateTimeOffset) ========
@@ -131,30 +135,12 @@ namespace Application.Services.Dashboard
             if (start.HasValue || endEx.HasValue)
                 auditQ = ApplyRange(auditQ, start, endEx, a => a.Timestamp);
 
-            var recentRaw = await auditQ
+            var recentLogs = await auditQ
                 .OrderByDescending(a => a.Timestamp)
-                .Select(a => new
-                {
-                    a.LogId,
-                    a.UserId,
-                    a.UserName,
-                    a.ActionType,
-                    a.RecordId,
-                    a.Timestamp
-                })
                 .Take(f.RecentCount <= 0 ? 10 : f.RecentCount)
                 .ToListAsync();
 
-            var recent = recentRaw.Select(a => new RecentActivityDto
-            {
-                Id = a.LogId,
-                UserId = a.UserId ?? "",
-                UserName = a.UserName ?? "",
-                Action = a.ActionType ?? "",
-                DocumentId = a.RecordId,
-                DocumentTitle = null,
-                Timestamp = a.Timestamp.UtcDateTime.ToString("o")
-            }).ToList();
+            var recent = _mapper.Map<List<RecentActivityDto>>(recentLogs);
 
             var docIds = recent.Where(r => r.DocumentId.HasValue).Select(r => r.DocumentId!.Value).Distinct().ToList();
             if (docIds.Count > 0)

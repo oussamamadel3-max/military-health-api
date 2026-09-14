@@ -11,6 +11,7 @@ using Application.Interfaces.Services;
 using Domain.Entities;
 using Domain.Entities.Auth;
 using Domain.Enums;
+using MapsterMapper;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using System.Reflection;
@@ -31,6 +32,7 @@ namespace Application.Services.AuthServices
         private readonly IRefreshTokenRepository _refreshTokenRepository;
         private readonly IUnitOfWork _unitOfWork;
         private readonly UserManager<User> _userManager;
+        private readonly IMapper _mapper;
 
         public FieldPermissionService(
             IFieldPermissionRepository fieldPermissionRepository,
@@ -38,7 +40,8 @@ namespace Application.Services.AuthServices
             IRoleRepository roleRepository,
             IRefreshTokenRepository refreshTokenRepository,
             IUnitOfWork unitOfWork,
-            UserManager<User> userManager)
+            UserManager<User> userManager,
+            IMapper mapper)
         {
             _fieldPermissionRepository = fieldPermissionRepository;
             _userRepository = userRepository;
@@ -46,6 +49,7 @@ namespace Application.Services.AuthServices
             _refreshTokenRepository = refreshTokenRepository;
             _unitOfWork = unitOfWork;
             _userManager = userManager;
+            _mapper = mapper;
         }
 
         #region CRUD للـ FieldPermissions
@@ -111,45 +115,42 @@ namespace Application.Services.AuthServices
             var rolesDict = new Dictionary<string, RoleInfoDto>();
             if (allRoleIds.Any())
             {
-                rolesDict = await _roleRepository.QueryRoles()
+                var roles = await _roleRepository.QueryRoles()
                     .Where(r => allRoleIds.Contains(r.Id))
-                    .ToDictionaryAsync(r => r.Id, r => new RoleInfoDto
-                    {
-                        Id = r.Id,
-                        Name = r.Name ?? string.Empty
-                    });
+                    .ToListAsync();
+                rolesDict = roles.ToDictionary(r => r.Id, r => _mapper.Map<RoleInfoDto>(r));
             }
 
             var usersDict = new Dictionary<string, UserInfoDto>();
             if (allUserIds.Any())
             {
-                usersDict = await _userRepository.QueryUsers()
+                var users = await _userRepository.QueryUsers()
                     .Where(u => allUserIds.Contains(u.Id))
-                    .ToDictionaryAsync(u => u.Id, u => new UserInfoDto
-                    {
-                        Id = u.Id,
-                        Name = !string.IsNullOrWhiteSpace(u.FullName) ? u.FullName : (u.UserName ?? string.Empty)
-                    });
+                    .ToListAsync();
+                usersDict = users.ToDictionary(u => u.Id, u => _mapper.Map<UserInfoDto>(u));
             }
 
-            var result = baseData.Select(d => new FieldPermissionDto
+            var result = baseData.Select(d =>
             {
-                Id = d.Id,
-                Description = d.Description ?? string.Empty,
-                EntityName = d.EntityName,
-                FieldName = d.FieldName,
-                AccessType = d.AccessType,
-                AccessTypeDescription = EnumHelper.GetEnumDescription(d.AccessType),
-                Roles = d.RoleIds
+                var dto = _mapper.Map<FieldPermissionDto>(new FieldPermission
+                {
+                    Id = d.Id,
+                    Description = d.Description,
+                    EntityName = d.EntityName,
+                    FieldName = d.FieldName,
+                    AccessType = d.AccessType
+                });
+                dto.Roles = d.RoleIds
                     .Distinct()
                     .Where(rid => rolesDict.ContainsKey(rid))
                     .Select(rid => rolesDict[rid])
-                    .ToList(),
-                Users = d.UserIds
+                    .ToList();
+                dto.Users = d.UserIds
                     .Distinct()
                     .Where(uid => usersDict.ContainsKey(uid))
                     .Select(uid => usersDict[uid])
-                    .ToList()
+                    .ToList();
+                return dto;
             }).ToList();
 
             return new PaginatedList<FieldPermissionDto>(result, totalCount, page, size);
@@ -157,70 +158,42 @@ namespace Application.Services.AuthServices
 
         public async Task<FieldPermissionDto> GetByIdAsync(Guid id)
         {
-            var baseData = await _fieldPermissionRepository.Query(asNoTracking: true)
-                .Where(x => x.Id == id)
-                .Select(fp => new
-                {
-                    fp.Id,
-                    fp.Description,
-                    fp.EntityName,
-                    fp.FieldName,
-                    fp.AccessType,
-                    RoleIds = fp.RoleFieldPermissions
-                        .Where(rfp => rfp.Role != null)
-                        .Select(rfp => rfp.RoleId)
-                        .ToList(),
-                    UserIds = fp.UserFieldPermissions
-                        .Where(ufp => ufp.User != null)
-                        .Select(ufp => ufp.UserId)
-                        .ToList()
-                })
-                .FirstOrDefaultAsync()
+            var entity = await _fieldPermissionRepository.FindByIdAsync(id)
                 ?? throw new RoleNotFoundException("صلاحية الحقل غير موجودة.");
 
+            var roleLinks = await _fieldPermissionRepository.GetRoleLinksAsync(id);
+            var userLinks = await _fieldPermissionRepository.GetUserLinksAsync(id);
+            var roleIds = roleLinks.Select(r => r.RoleId).Distinct().ToList();
+            var userIds = userLinks.Select(u => u.UserId).Distinct().ToList();
+
             var rolesDict = new Dictionary<string, RoleInfoDto>();
-            if (baseData.RoleIds.Any())
+            if (roleIds.Any())
             {
-                rolesDict = await _roleRepository.QueryRoles()
-                    .Where(r => baseData.RoleIds.Contains(r.Id))
-                    .ToDictionaryAsync(r => r.Id, r => new RoleInfoDto
-                    {
-                        Id = r.Id,
-                        Name = r.Name ?? string.Empty
-                    });
+                var roles = await _roleRepository.QueryRoles()
+                    .Where(r => roleIds.Contains(r.Id))
+                    .ToListAsync();
+                rolesDict = roles.ToDictionary(r => r.Id, r => _mapper.Map<RoleInfoDto>(r));
             }
 
             var usersDict = new Dictionary<string, UserInfoDto>();
-            if (baseData.UserIds.Any())
+            if (userIds.Any())
             {
-                usersDict = await _userRepository.QueryUsers()
-                    .Where(u => baseData.UserIds.Contains(u.Id))
-                    .ToDictionaryAsync(u => u.Id, u => new UserInfoDto
-                    {
-                        Id = u.Id,
-                        Name = !string.IsNullOrWhiteSpace(u.FullName) ? u.FullName : (u.UserName ?? string.Empty)
-                    });
+                var users = await _userRepository.QueryUsers()
+                    .Where(u => userIds.Contains(u.Id))
+                    .ToListAsync();
+                usersDict = users.ToDictionary(u => u.Id, u => _mapper.Map<UserInfoDto>(u));
             }
 
-            return new FieldPermissionDto
-            {
-                Id = baseData.Id,
-                Description = baseData.Description ?? string.Empty,
-                EntityName = baseData.EntityName,
-                FieldName = baseData.FieldName,
-                AccessType = baseData.AccessType,
-                AccessTypeDescription = EnumHelper.GetEnumDescription(baseData.AccessType),
-                Roles = baseData.RoleIds
-                    .Distinct()
-                    .Where(rid => rolesDict.ContainsKey(rid))
-                    .Select(rid => rolesDict[rid])
-                    .ToList(),
-                Users = baseData.UserIds
-                    .Distinct()
-                    .Where(uid => usersDict.ContainsKey(uid))
-                    .Select(uid => usersDict[uid])
-                    .ToList()
-            };
+            var dto = _mapper.Map<FieldPermissionDto>(entity);
+            dto.Roles = roleIds
+                .Where(rid => rolesDict.ContainsKey(rid))
+                .Select(rid => rolesDict[rid])
+                .ToList();
+            dto.Users = userIds
+                .Where(uid => usersDict.ContainsKey(uid))
+                .Select(uid => usersDict[uid])
+                .ToList();
+            return dto;
         }
 
         public async Task<CreateFieldPermissionsResultDto> CreateAsync(CreateFieldPermissionDto dto)
@@ -275,35 +248,20 @@ namespace Application.Services.AuthServices
                     await SetRoleAssignmentsAsync(entity, roleIds);
                     await SetUserAssignmentsAsync(entity, userIds);
 
-                    var rolesInfo = await _roleRepository.QueryRoles()
+                    var roles = await _roleRepository.QueryRoles()
                         .Where(r => roleIds.Contains(r.Id))
-                        .Select(r => new RoleInfoDto
-                        {
-                            Id = r.Id,
-                            Name = r.Name ?? string.Empty
-                        })
                         .ToListAsync();
+                    var rolesInfo = _mapper.Map<List<RoleInfoDto>>(roles);
 
-                    var usersInfo = await _userRepository.QueryUsers()
+                    var users = await _userRepository.QueryUsers()
                         .Where(u => userIds.Contains(u.Id))
-                        .Select(u => new UserInfoDto
-                        {
-                            Id = u.Id,
-                            Name = !string.IsNullOrWhiteSpace(u.FullName) ? u.FullName : (u.UserName ?? string.Empty)
-                        })
                         .ToListAsync();
+                    var usersInfo = _mapper.Map<List<UserInfoDto>>(users);
 
-                    createdDtos.Add(new FieldPermissionDto
-                    {
-                        Id = entity.Id,
-                        Description = entity.Description,
-                        EntityName = entity.EntityName,
-                        FieldName = entity.FieldName,
-                        AccessType = entity.AccessType,
-                        AccessTypeDescription = EnumHelper.GetEnumDescription(entity.AccessType),
-                        Roles = rolesInfo,
-                        Users = usersInfo
-                    });
+                    var createdDto = _mapper.Map<FieldPermissionDto>(entity);
+                    createdDto.Roles = rolesInfo;
+                    createdDto.Users = usersInfo;
+                    createdDtos.Add(createdDto);
                 }
 
                 await _unitOfWork.SaveChangesAsync();
@@ -359,7 +317,7 @@ namespace Application.Services.AuthServices
             var oldRoleLinks = await _fieldPermissionRepository.GetRoleLinksAsync(id);
             var oldRoleIds = oldRoleLinks.Select(rfp => rfp.RoleId).Distinct().ToList();
 
-            entity.AccessType = dto.AccessType;
+            _mapper.Map(dto, entity);
             var metadata = GetEntityMetadata(entity.EntityName);
             entity.Description = BuildDescription(metadata.DisplayName, metadata.FieldDisplayMap, entity.FieldName, entity.AccessType);
 

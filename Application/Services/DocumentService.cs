@@ -6,7 +6,7 @@ using Application.Exceptions;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
-using AutoMapper;
+using MapsterMapper;
 using Domain.Entities;
 using Application.Common.Permissions;
 using Microsoft.AspNetCore.Http;
@@ -271,12 +271,10 @@ public class DocumentService : IDocumentService
         var attachmentsEntities = (await _attachments.GetByOwnerAsync(documentId, new[] { "Document" }))
             .OrderByDescending(a => a.UploadedAt).ToList();
 
-        dto.Attachments = attachmentsEntities.Select(a => new AttachmentLinkDto
-        {
-            Id = a.AttachmentId,
-            FileUrl = BuildProtectedDownloadUrl(a.AttachmentId),
-            FileName = a.FileName ?? $"{a.AttachmentId}"
-        }).ToList();
+        var attachmentLinks = _mapper.Map<List<AttachmentLinkDto>>(attachmentsEntities);
+        foreach (var link in attachmentLinks)
+            link.FileUrl = BuildProtectedDownloadUrl(link.Id);
+        dto.Attachments = attachmentLinks;
 
         return dto;
     }
@@ -297,7 +295,8 @@ public class DocumentService : IDocumentService
 
     public async Task<IEnumerable<DropDownDto>> GetDocumentsDropdownAsync()
     {
-        return await _documents.GetDropdownAsync();
+        var docs = await _documents.GetDropdownAsync();
+        return _mapper.Map<List<DropDownDto>>(docs);
     }
 
     public async Task<PaginatedList<DocumentDto>> SearchAsync(DocumentSearchCriteria c, int pageNumber = 1, int pageSize = 10)
@@ -333,12 +332,13 @@ public class DocumentService : IDocumentService
                 var atts = await GetAttachmentsForDocumentsAsync(docIds);
                 var map = atts.GroupBy(x => x.OwnerId).ToDictionary(
                     g => g.Key,
-                    g => g.Select(x => new AttachmentLinkDto
+                    g =>
                     {
-                        Id = x.AttachmentId,
-                        FileUrl = BuildProtectedDownloadUrl(x.AttachmentId),
-                        FileName = x.FileName ?? $"{x.AttachmentId}"
-                    }).ToList());
+                        var links = _mapper.Map<List<AttachmentLinkDto>>(g.ToList());
+                        foreach (var link in links)
+                            link.FileUrl = BuildProtectedDownloadUrl(link.Id);
+                        return links;
+                    });
 
                 foreach (var d in permitted)
                     d.Attachments = map.TryGetValue(d.DocumentId, out var list) ? list : new List<AttachmentLinkDto>();

@@ -9,6 +9,7 @@ using Application.Dtos.ReportDtos;
 using Application.Exceptions;
 using Application.ModelsDto.AuditLogDtos;
 using Domain.Entities;
+using MapsterMapper;
 using Microsoft.EntityFrameworkCore;
 
 namespace Application.Services.Reports
@@ -21,6 +22,7 @@ namespace Application.Services.Reports
         private readonly IUserContextService _userCtx;
         private readonly IExportService _export;
         private readonly IDashboardService _dashboard;
+        private readonly IMapper _mapper;
 
         public ReportsService(
             IDocumentRepository documentRepository,
@@ -28,7 +30,8 @@ namespace Application.Services.Reports
             IActorScopeProvider actorScopeProvider,
             IUserContextService userCtx,
             IExportService export,
-            IDashboardService dashboard)
+            IDashboardService dashboard,
+            IMapper mapper)
         {
             _documentRepository = documentRepository;
             _auditLogRepository = auditLogRepository;
@@ -36,6 +39,7 @@ namespace Application.Services.Reports
             _userCtx = userCtx;
             _export = export;
             _dashboard = dashboard;
+            _mapper = mapper;
         }
 
         #region Export Documents
@@ -45,13 +49,7 @@ namespace Application.Services.Reports
             var actorScope = await _actorScopeProvider.GetScopeAsync(userId);
 
             var docs = await _documentRepository.ListAsync(actorScope, c);
-            var rows = docs.Select(d => new DocumentReportRowDto
-            {
-                DocumentNumber = d.DocumentNumber,
-                Title = d.Title ?? "",
-                CreatedAt = d.CreatedAt,
-                CreatedBy = d.User?.UserName ?? ""
-            }).ToList();
+            var rows = _mapper.Map<List<DocumentReportRowDto>>(docs);
 
             string? periodText = null;
             if (c.CreatedFrom.HasValue || c.CreatedTo.HasValue)
@@ -134,14 +132,8 @@ namespace Application.Services.Reports
 
             q = q.OrderByDescending(a => a.Timestamp);
 
-            var rows = await q.Select(a => new AuditLogReportRowDto
-            {
-                Timestamp = a.Timestamp,
-                UserName = a.UserName ?? "",
-                ActionType = a.ActionType ?? "",
-                TableName = a.TableName ?? "",
-                DocumentId = a.RecordId
-            }).ToListAsync();
+            var list = await q.ToListAsync();
+            var rows = _mapper.Map<List<AuditLogReportRowDto>>(list);
 
             var opt = new ExportOptions
             {

@@ -1,14 +1,20 @@
 using Application.Dtos;
-using AutoMapper;
+using Application.Dtos.DocumentDtos;
 using Domain.Entities;
+using Mapster;
 
 namespace Application.Mappings
 {
-    public class AttachmentProfile : Profile
+    public class AttachmentProfile : IRegister
     {
-        public AttachmentProfile()
+        public void Register(TypeAdapterConfig config)
         {
-            CreateMap<Attachment, AttachmentReadDto>();
+            config.NewConfig<Attachment, AttachmentReadDto>();
+
+            config.NewConfig<Attachment, AttachmentLinkDto>()
+                .Map(dest => dest.Id, src => src.AttachmentId)
+                .Map(dest => dest.FileName, src => src.FileName ?? src.AttachmentId.ToString())
+                .Ignore(dest => dest.FileUrl);
         }
     }
 }

@@ -3,6 +3,7 @@ using Application.Exceptions;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Domain.Entities.Auth;
+using MapsterMapper;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
@@ -18,6 +19,7 @@ namespace Application.Services.AuthServices
         private readonly IUserRepository _userRepository;
         private readonly IRoleRepository _roleRepository;
         private readonly IPermissionRepository _permissionRepository;
+        private readonly IMapper _mapper;
 
         private static readonly TimeSpan FailDelay = TimeSpan.FromMilliseconds(250);
         private static readonly string DummyHash =
@@ -30,7 +32,8 @@ namespace Application.Services.AuthServices
             ITokenService tokenService,
             IUserRepository userRepository,
             IRoleRepository roleRepository,
-            IPermissionRepository permissionRepository)
+            IPermissionRepository permissionRepository,
+            IMapper mapper)
         {
             _userManager = userManager;
             _tokenService = tokenService;
@@ -39,6 +42,7 @@ namespace Application.Services.AuthServices
             _userRepository = userRepository;
             _roleRepository = roleRepository;
             _permissionRepository = permissionRepository;
+            _mapper = mapper;
         }
 
         public async Task<(TokenGenerationResultDto Tokens, string UserId)> LoginAsync(RequestToken requestToken)
@@ -88,16 +92,7 @@ namespace Application.Services.AuthServices
                 throw new UnauthenticatedUserException();
 
             var user = await _userRepository.QueryUsers(asNoTracking: true)
-                .Where(u => u.Id == userId)
-                .Select(u => new
-                {
-                    u.Id,
-                    u.UserName,
-                    u.Email,
-                    u.CreationDate,
-                    u.IsActive
-                })
-                .FirstOrDefaultAsync();
+                .FirstOrDefaultAsync(u => u.Id == userId);
 
             if (user == null || !user.IsActive)
                 throw new UnauthenticatedUserException();
@@ -121,15 +116,10 @@ namespace Application.Services.AuthServices
                 .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            return new MeResponseDto
-            {
-                UserId = user.Id,
-                UserName = user.UserName ?? "",
-                Email = user.Email ?? "",
-                CreationDate = user.CreationDate,
-                Roles = roles.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
-                Permissions = permissions
-            };
+            var me = _mapper.Map<MeResponseDto>(user);
+            me.Roles = roles.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+            me.Permissions = permissions;
+            return me;
         }
 
         public Task<string> ValidateAndGetUserIdAsync(string? userId)

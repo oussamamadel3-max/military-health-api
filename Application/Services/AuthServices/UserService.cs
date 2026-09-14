@@ -10,7 +10,7 @@ using Application.Dtos.AuthDtos;
 using Domain.Entities.Auth;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using AutoMapper;
+using MapsterMapper;
 
 namespace Application.Services.AuthServices;
 
@@ -251,16 +251,6 @@ public class UserService : IUserService
         var usersPage = await baseQuery
             .Skip((pageNumber - 1) * pageSize)
             .Take(pageSize)
-            .Select(u => new
-            {
-                u.Id,
-                FullName = u.FullName ?? u.UserName,
-                u.UserName,
-                u.Email,
-                u.PhoneNumber,
-                u.IsActive,
-                u.CreationDate
-            })
             .ToListAsync();
 
         if (usersPage.Count == 0)
@@ -268,19 +258,19 @@ public class UserService : IUserService
 
         var userIds = usersPage.Select(u => u.Id).ToList();
 
-        var rolesByUser = await _userRepository.QueryRoleAssociations()
+        var roleAssociations = await _userRepository.QueryRoleAssociations()
             .Where(ura => userIds.Contains(ura.UserId))
-            .Select(ura => new { ura.UserId, ura.RoleId, RoleName = ura.Role.Name })
+            .Include(ura => ura.Role)
             .ToListAsync();
 
-        var rolesLookup = rolesByUser
+        var rolesLookup = roleAssociations
             .GroupBy(x => x.UserId)
             .ToDictionary(
                 g => g.Key,
-                g => g.Select(x => new RoleLiteDto(x.RoleId, AuthDisplayNames.RoleAr(x.RoleName ?? string.Empty))).ToList()
+                g => _mapper.Map<List<RoleLiteDto>>(g.ToList())
             );
 
-        var roleIdsOnPage = rolesByUser.Select(x => x.RoleId).Distinct().ToList();
+        var roleIdsOnPage = roleAssociations.Select(x => x.RoleId).Distinct().ToList();
 
         var rolePermsLookup = await _roleRepository.GetRolePermissionsForRolesAsync(roleIdsOnPage);
         var rolePermsGrouped = rolePermsLookup
@@ -288,19 +278,20 @@ public class UserService : IUserService
             .GroupBy(x => x.RoleId)
             .ToDictionary(
                 g => g.Key,
-                g => g.Select(x => new PermissionLiteDto(x.PermissionId.ToString(), AuthDisplayNames.PermissionAr(x.Permission!.Name!)))
-                      .ToList()
+                g => _mapper.Map<List<PermissionLiteDto>>(g.ToList())
             );
 
-        var directPermsLookup = await _userRepository.QueryUserPermissions()
+        var directPermEntities = await _userRepository.QueryUserPermissions()
             .Where(up => userIds.Contains(up.UserId))
-            .Select(up => new { up.UserId, up.PermissionId, PermissionName = up.Permission.Name })
+            .Include(up => up.Permission)
+            .ToListAsync();
+
+        var directPermsLookup = directPermEntities
+            .Where(up => up.PermissionId.HasValue && up.Permission?.Name != null)
             .GroupBy(x => x.UserId)
-            .ToDictionaryAsync(
+            .ToDictionary(
                 g => g.Key,
-                g => g.Where(x => x.PermissionId.HasValue && x.PermissionName != null)
-                      .Select(x => new PermissionLiteDto(x.PermissionId!.Value.ToString(), AuthDisplayNames.PermissionAr(x.PermissionName!)))
-                      .ToList()
+                g => _mapper.Map<List<PermissionLiteDto>>(g.ToList())
             );
 
         var items = usersPage.Select(u =>
@@ -315,22 +306,14 @@ public class UserService : IUserService
                 if (rolePermsGrouped.TryGetValue(r.RoleId, out var rperms))
                     foreach (var p in rperms) permMap[p.PermissionId] = p;
 
-            return new UserListItemDto
-            {
-                userId = u.Id,
-                fullName = u.FullName ?? string.Empty,
-                username = u.UserName ?? string.Empty,
-                email = u.Email ?? string.Empty,
-                phone = u.PhoneNumber,
-                isActive = u.IsActive,
-                createdAt = u.CreationDate,
-                rolesCount = userRoles.Count,
-                permissionsCount = permMap.Count,
-                roles = userRoles,
-                Permissions = permMap.Values
-                                       .OrderBy(p => p.PermissionName, StringComparer.OrdinalIgnoreCase)
-                                       .ToList()
-            };
+            var item = _mapper.Map<UserListItemDto>(u);
+            item.rolesCount = userRoles.Count;
+            item.permissionsCount = permMap.Count;
+            item.roles = userRoles;
+            item.Permissions = permMap.Values
+                .OrderBy(p => p.PermissionName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            return item;
         }).ToList();
 
         return new PaginatedList<UserListItemDto>(items, totalCount, pageNumber, pageSize);
@@ -343,73 +326,43 @@ public class UserService : IUserService
         var (actor, actorIsSuperAdmin, actorIsBranchManager) = await GetActorAsync();
 
         var user = await _userRepository.QueryUsers()
-            .Where(u => u.Id == id)
-            .Select(u => new
-            {
-                u.Id,
-                u.UserName,
-                u.Email,
-                u.PhoneNumber,
-                u.IsActive,
-                u.CreationDate,
-                FullName = u.FullName
-            })
-            .FirstOrDefaultAsync()
+            .FirstOrDefaultAsync(u => u.Id == id)
             ?? throw new UserNotFoundException(id);
 
         if (!actorIsSuperAdmin && !actorIsBranchManager && actor.Id != user.Id)
             throw new ForbiddenPermissionException("غير مسموح بالوصول.");
 
-        var roles = await _userRepository.QueryRoleAssociations()
+        var roleAssociations = await _userRepository.QueryRoleAssociations()
             .Where(ura => ura.UserId == user.Id)
-            .Select(ura => new RoleLiteDto(
-                ura.RoleId,
-                (ura.Role != null && !string.IsNullOrWhiteSpace(ura.Role.Name)) ? ura.Role.Name : string.Empty))
+            .Include(ura => ura.Role)
             .ToListAsync();
+        var roles = _mapper.Map<List<RoleLiteDto>>(roleAssociations);
 
         var roleIds = roles.Select(r => r.RoleId).ToList();
 
-        var rolePermissions = (await _roleRepository.GetRolePermissionsForRolesAsync(roleIds))
-            .Select(rp => new { rp.PermissionId, rp.Permission!.Name })
+        var rolePermissionEntities = (await _roleRepository.GetRolePermissionsForRolesAsync(roleIds))
+            .Where(rp => rp.Permission != null && !string.IsNullOrWhiteSpace(rp.Permission.Name))
             .ToList();
 
-        var directPermissions = await _userRepository.QueryUserPermissions()
+        var directPermissionEntities = await _userRepository.QueryUserPermissions()
             .Where(up => up.UserId == user.Id)
-            .Select(up => new { up.PermissionId, up.Permission.Name })
+            .Include(up => up.Permission)
+            .Where(up => up.PermissionId.HasValue && up.Permission != null && !string.IsNullOrWhiteSpace(up.Permission.Name))
             .ToListAsync();
 
-        var permissionPairs = directPermissions
-            .Where(p => p.PermissionId.HasValue && !string.IsNullOrWhiteSpace(p.Name))
-            .Select(p => new { Id = p.PermissionId!.Value, Name = p.Name! })
-            .Concat(
-                rolePermissions
-                    .Where(p => p.PermissionId != Guid.Empty && !string.IsNullOrWhiteSpace(p.Name))
-                    .Select(p => new { Id = p.PermissionId, Name = p.Name! })
-            );
-
-        var permissionMap = permissionPairs
-            .GroupBy(p => p.Id)
-            .ToDictionary(g => g.Key, g => g.First().Name, EqualityComparer<Guid>.Default);
-
-        var permissionsLite = permissionMap
-            .OrderBy(kvp => kvp.Value, StringComparer.OrdinalIgnoreCase)
-            .Select(kvp => new PermissionLiteDto(kvp.Key.ToString(), kvp.Value))
+        var permissionsLite = _mapper.Map<List<PermissionLiteDto>>(directPermissionEntities)
+            .Concat(_mapper.Map<List<PermissionLiteDto>>(rolePermissionEntities))
+            .GroupBy(p => p.PermissionId, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .OrderBy(p => p.PermissionName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        return new UserListItemDto
-        {
-            userId = user.Id,
-            fullName = user.FullName ?? user.UserName ?? string.Empty,
-            username = user.UserName ?? string.Empty,
-            email = user.Email ?? string.Empty,
-            phone = user.PhoneNumber,
-            isActive = user.IsActive,
-            createdAt = user.CreationDate,
-            roles = roles,
-            rolesCount = roles.Count,
-            permissionsCount = permissionsLite.Count,
-            Permissions = permissionsLite
-        };
+        var result = _mapper.Map<UserListItemDto>(user);
+        result.roles = roles;
+        result.rolesCount = roles.Count;
+        result.permissionsCount = permissionsLite.Count;
+        result.Permissions = permissionsLite;
+        return result;
     }
 
     #endregion
@@ -444,11 +397,23 @@ public class UserService : IUserService
                 throw new EmailAlreadyExistsException(dto.email);
         }
 
-        if (dto.fullName is not null) user.FullName = _textSanitizer.SanitizePlainText(dto.fullName) ?? dto.fullName;
-        if (dto.username is not null) user.UserName = _textSanitizer.SanitizePlainText(dto.username) ?? dto.username;
-        if (dto.email is not null) user.Email = _textSanitizer.SanitizePlainText(dto.email) ?? dto.email;
-        if (dto.phone is not null) user.PhoneNumber = _textSanitizer.SanitizePlainText(dto.phone) ?? dto.phone;
-        if (dto.isActive.HasValue) user.IsActive = dto.isActive.Value;
+        if (dto.fullName is not null) dto.fullName = _textSanitizer.SanitizePlainText(dto.fullName) ?? dto.fullName;
+        if (dto.username is not null) dto.username = _textSanitizer.SanitizePlainText(dto.username) ?? dto.username;
+        if (dto.email is not null) dto.email = _textSanitizer.SanitizePlainText(dto.email) ?? dto.email;
+        if (dto.phone is not null) dto.phone = _textSanitizer.SanitizePlainText(dto.phone) ?? dto.phone;
+
+        var previousIsActive = user.IsActive;
+        _mapper.Map(dto, user);
+        if (!dto.isActive.HasValue)
+            user.IsActive = previousIsActive;
+
+        user.FullName = _textSanitizer.SanitizePlainText(user.FullName) ?? user.FullName;
+        if (user.UserName is not null)
+            user.UserName = _textSanitizer.SanitizePlainText(user.UserName) ?? user.UserName;
+        if (user.Email is not null)
+            user.Email = _textSanitizer.SanitizePlainText(user.Email) ?? user.Email;
+        if (user.PhoneNumber is not null)
+            user.PhoneNumber = _textSanitizer.SanitizePlainText(user.PhoneNumber) ?? user.PhoneNumber;
 
         var updRes = await _userManager.UpdateAsync(user);
         if (!updRes.Succeeded)
@@ -527,58 +492,36 @@ public class UserService : IUserService
             await _unitOfWork.SaveChangesAsync();
         }
 
-        var rolesLite = await _userRepository.QueryRoleAssociations()
+        var roleAssociationEntities = await _userRepository.QueryRoleAssociations()
             .Where(ura => ura.UserId == user.Id)
-            .Select(ura => new RoleLiteDto(
-                ura.RoleId,
-                (ura.Role != null && !string.IsNullOrWhiteSpace(ura.Role.Name)) ? ura.Role.Name : string.Empty
-            ))
+            .Include(ura => ura.Role)
             .ToListAsync();
+        var rolesLite = _mapper.Map<List<RoleLiteDto>>(roleAssociationEntities);
 
         var roleIds = rolesLite.Select(r => r.RoleId).ToList();
 
-        var rolePerms = (await _roleRepository.GetRolePermissionsForRolesAsync(roleIds))
+        var rolePermEntities = (await _roleRepository.GetRolePermissionsForRolesAsync(roleIds))
             .Where(rp => rp.Permission != null && rp.Permission.IsActive)
-            .Select(rp => new { rp.PermissionId, rp.Permission!.Name })
             .ToList();
 
-        var directPerms = await _userRepository.QueryUserPermissions()
+        var directPermEntities2 = await _userRepository.QueryUserPermissions()
             .Where(up => up.UserId == user.Id && up.Permission != null && up.Permission.IsActive)
-            .Select(up => new { up.PermissionId, up.Permission!.Name })
+            .Include(up => up.Permission)
             .ToListAsync();
 
-        var permissionPairs2 = directPerms
-            .Where(p => p.PermissionId.HasValue && !string.IsNullOrWhiteSpace(p.Name))
-            .Select(p => new { Id = p.PermissionId!.Value, Name = p.Name! })
-            .Concat(
-                rolePerms
-                    .Where(p => p.PermissionId != Guid.Empty && !string.IsNullOrWhiteSpace(p.Name))
-                    .Select(p => new { Id = p.PermissionId, Name = p.Name! })
-            );
-
-        var permissionMap2 = permissionPairs2
-            .GroupBy(p => p.Id)
-            .ToDictionary(g => g.Key, g => g.First().Name, EqualityComparer<Guid>.Default);
-
-        var permissionsLite2 = permissionMap2
-            .OrderBy(kvp => kvp.Value, StringComparer.OrdinalIgnoreCase)
-            .Select(kvp => new PermissionLiteDto(kvp.Key.ToString(), kvp.Value))
+        var permissionsLite2 = _mapper.Map<List<PermissionLiteDto>>(directPermEntities2)
+            .Concat(_mapper.Map<List<PermissionLiteDto>>(rolePermEntities))
+            .GroupBy(p => p.PermissionId, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .OrderBy(p => p.PermissionName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        return new UserListItemDto
-        {
-            userId = user.Id,
-            fullName = user.FullName,
-            username = user.UserName ?? string.Empty,
-            email = user.Email ?? string.Empty,
-            phone = user.PhoneNumber,
-            isActive = user.IsActive,
-            createdAt = user.CreationDate,
-            roles = rolesLite.OrderBy(r => r.RoleName, StringComparer.OrdinalIgnoreCase).ToList(),
-            rolesCount = rolesLite.Count,
-            permissionsCount = permissionsLite2.Count,
-            Permissions = permissionsLite2
-        };
+        var updated = _mapper.Map<UserListItemDto>(user);
+        updated.roles = rolesLite.OrderBy(r => r.RoleName, StringComparer.OrdinalIgnoreCase).ToList();
+        updated.rolesCount = rolesLite.Count;
+        updated.permissionsCount = permissionsLite2.Count;
+        updated.Permissions = permissionsLite2;
+        return updated;
     }
 
     #endregion
@@ -905,15 +848,12 @@ public class UserService : IUserService
     #region القائمة المنسدلة للمستخدمين
     public async Task<List<DropdownUserDto>> GetDropDownUsersAsync()
     {
-        return await _userRepository.QueryUsers()
+        var users = await _userRepository.QueryUsers()
             .Where(u => u.IsActive)
             .OrderBy(u => u.UserName)
-            .Select(u => new DropdownUserDto
-            {
-                Id = u.Id,
-                Name = u.FullName ?? u.UserName ?? string.Empty
-            })
             .ToListAsync();
+
+        return _mapper.Map<List<DropdownUserDto>>(users);
     }
     #endregion
 

@@ -1,6 +1,5 @@
 using Application.Common.Results;
 using Application.Common.Utilities;
-using Application.Dtos;
 using Application.Dtos.DocumentDtos;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
@@ -46,10 +45,9 @@ public class DocumentRepository : RepositoryBase<Document, long>, IDocumentRepos
         return GetPagedInternalAsync(query, page, size, ct);
     }
 
-    public async Task<IReadOnlyList<DropDownDto>> GetDropdownAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<Document>> GetDropdownAsync(CancellationToken ct = default)
         => await Context.Documents.AsNoTracking()
             .OrderBy(d => d.DocumentId)
-            .Select(d => new DropDownDto { Id = d.DocumentId, Name = d.Title })
             .ToListAsync(ct);
 
     public async Task<IReadOnlyList<Document>> ListAsync(ActorScope scope, DocumentSearchCriteria criteria, CancellationToken ct = default)
