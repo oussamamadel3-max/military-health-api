@@ -198,7 +198,7 @@ namespace Infrastructure.Persistence
             var superAdmin = await EnsureUserAsync(
                 userName: "superAdmin",
                 email: "superAdmin@gmail.com",
-                password: "Admin@123",
+                password: "cZf0bYa4HjMmqewUk2BM7#@3",
                 fullName: "Super Administrator",
                 attachRoles: new[] { roleSuperAdmin }
             );

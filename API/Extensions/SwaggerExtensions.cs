@@ -1,4 +1,3 @@
-using System.Reflection;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.OpenApi.Models;
 
@@ -6,8 +5,6 @@ namespace API.Extensions
 {
     public static class SwaggerExtensions
     {
-        private const string DarkThemeResourceName = "API.wwwroot.swagger_ui.dark.css";
-
         public static IServiceCollection AddSwaggerDocumentation(
             this IServiceCollection services,
             IWebHostEnvironment environment)
@@ -52,7 +49,7 @@ namespace API.Extensions
                                 Id = "Bearer"
                             }
                         },
-                        new string[] {}
+                        Array.Empty<string>()
                     }
                 });
             });
@@ -66,42 +63,45 @@ namespace API.Extensions
             if (!environment.IsDevelopment())
                 return app;
 
-            var darkThemeCss = LoadDarkThemeCss(environment);
+            // منع كاش المتصفح لملفات Swagger (نسخ قديمة من index.js كانت تسبب صفحة فارغة).
+            app.Use(async (context, next) =>
+            {
+                if (context.Request.Path.StartsWithSegments("/swagger"))
+                {
+                    context.Response.OnStarting(() =>
+                    {
+                        context.Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
+                        context.Response.Headers.Pragma = "no-cache";
+                        context.Response.Headers.Remove("ETag");
+                        context.Response.Headers.Remove("Last-Modified");
+                        return Task.CompletedTask;
+                    });
+                }
+
+                await next();
+            });
 
             app.UseSwagger();
             app.UseSwaggerUI(c =>
             {
-                c.SwaggerEndpoint("/swagger/v2/swagger.json", "Identity Project API v2");
-                c.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.None);
+                c.SwaggerEndpoint("v2/swagger.json", "Identity Project API v2");
+                c.RoutePrefix = "swagger";
+                c.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.List);
                 c.DefaultModelsExpandDepth(-1);
+                c.EnableDeepLinking();
+                c.DisplayRequestDuration();
+                c.ConfigObject.TryItOutEnabled = true;
 
-                if (!string.IsNullOrWhiteSpace(darkThemeCss))
-                    c.HeadContent = $"<style id=\"swagger-dark-theme\">{darkThemeCss}</style>";
+                // صفحة مخصّصة بدون JSON.parse الهش في index.js المولَّد من Swashbuckle
+                var indexPath = Path.Combine(
+                    environment.ContentRootPath,
+                    "wwwroot",
+                    "swagger-ui",
+                    "index.html");
+                c.IndexStream = () => File.OpenRead(indexPath);
             });
+
             return app;
-        }
-
-        private static string LoadDarkThemeCss(IWebHostEnvironment environment)
-        {
-            var fileCandidates = new[]
-            {
-                Path.Combine(environment.WebRootPath ?? string.Empty, "swagger-ui", "dark.css"),
-                Path.Combine(environment.ContentRootPath, "wwwroot", "swagger-ui", "dark.css"),
-                Path.Combine(AppContext.BaseDirectory, "wwwroot", "swagger-ui", "dark.css")
-            };
-
-            foreach (var path in fileCandidates)
-            {
-                if (File.Exists(path))
-                    return File.ReadAllText(path);
-            }
-
-            using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(DarkThemeResourceName);
-            if (stream is null)
-                return string.Empty;
-
-            using var reader = new StreamReader(stream);
-            return reader.ReadToEnd();
         }
     }
 }

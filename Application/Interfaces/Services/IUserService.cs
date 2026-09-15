@@ -1,5 +1,6 @@
 using Application.Common.Results;
 using Application.Dtos.AuthDtos;
+using Microsoft.AspNetCore.Http;
 
 namespace Application.Interfaces.Services
 {
@@ -19,5 +20,9 @@ namespace Application.Interfaces.Services
         Task<UpdateUserStatusRequest> UpdateUserStatusAsync(string id, UpdateUserStatusRequest request);
         Task UpdateUserWithRolesAsync(string userId, UpdateUserWithRolesDto updatedUser);
         Task<List<DropdownUserDto>> GetDropDownUsersAsync();
+        Task UpdateMyProfileAsync(UpdateMyProfileRequest request);
+        Task<string> UploadMyProfilePhotoAsync(IFormFile file);
+        Task<(byte[] Bytes, string ContentType, string FileName)> GetMyProfilePhotoAsync();
+        Task RemoveMyProfilePhotoAsync();
     }
 }

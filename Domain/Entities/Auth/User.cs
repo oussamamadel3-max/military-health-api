@@ -9,6 +9,16 @@ public class User : IdentityUser
     public bool IsActive { get; set; } = true;
     public string? FullName { get; set; }
 
+    /// <summary>
+    /// مسار نسبي لصورة الملف الشخصي داخل التخزين.
+    /// </summary>
+    public string? ProfilePhotoPath { get; set; }
+
+    /// <summary>
+    /// مستوى تصعيد حظر تسجيل الدخول (progressive lockout). يُصفَّر عند نجاح الدخول أو بعد فترة هدوء.
+    /// </summary>
+    public int LoginLockoutTier { get; set; }
+
     public IList<Document> Documents { get; set; } = new List<Document>();
 
     public IList<UserRoleAssociation> UserRoleAssociations { get; set; } = new List<UserRoleAssociation>();

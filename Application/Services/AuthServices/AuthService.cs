@@ -20,6 +20,7 @@ namespace Application.Services.AuthServices
         private readonly IRoleRepository _roleRepository;
         private readonly IPermissionRepository _permissionRepository;
         private readonly IMapper _mapper;
+        private readonly ILoginLockoutService _loginLockout;
 
         private static readonly TimeSpan FailDelay = TimeSpan.FromMilliseconds(250);
         private static readonly string DummyHash =
@@ -33,7 +34,8 @@ namespace Application.Services.AuthServices
             IUserRepository userRepository,
             IRoleRepository roleRepository,
             IPermissionRepository permissionRepository,
-            IMapper mapper)
+            IMapper mapper,
+            ILoginLockoutService loginLockout)
         {
             _userManager = userManager;
             _tokenService = tokenService;
@@ -43,6 +45,7 @@ namespace Application.Services.AuthServices
             _roleRepository = roleRepository;
             _permissionRepository = permissionRepository;
             _mapper = mapper;
+            _loginLockout = loginLockout;
         }
 
         public async Task<(TokenGenerationResultDto Tokens, string UserId)> LoginAsync(RequestToken requestToken)
@@ -62,8 +65,12 @@ namespace Application.Services.AuthServices
             if (await _userManager.IsLockedOutAsync(user))
             {
                 await Task.Delay(FailDelay);
-                throw new InvalidCredentialsException();
+                throw new UserAccountLockedException(_loginLockout.GetRetryAfterSeconds(user));
             }
+
+            await _loginLockout.EnsureTierDecayAsync(user);
+            user = await _userManager.FindByIdAsync(user.Id)
+                ?? throw new InvalidCredentialsException();
 
             var signIn = await _signInManager.CheckPasswordSignInAsync(
                 user, password, lockoutOnFailure: true);
@@ -71,6 +78,16 @@ namespace Application.Services.AuthServices
             if (!signIn.Succeeded)
             {
                 await Task.Delay(FailDelay);
+
+                user = await _userManager.FindByIdAsync(user.Id)
+                    ?? throw new InvalidCredentialsException();
+
+                if (signIn.IsLockedOut || await _userManager.IsLockedOutAsync(user))
+                {
+                    var retryAfter = await _loginLockout.ApplyProgressiveLockoutAsync(user.Id);
+                    throw new UserAccountLockedException(retryAfter);
+                }
+
                 throw new InvalidCredentialsException();
             }
 
@@ -80,7 +97,7 @@ namespace Application.Services.AuthServices
                 throw new InvalidCredentialsException();
             }
 
-            await _userManager.ResetAccessFailedCountAsync(user);
+            await _loginLockout.ResetAfterSuccessfulLoginAsync(user);
 
             var tokens = await _tokenService.GenerateTokensAsync(user.Id);
             return (tokens, user.Id);
@@ -119,6 +136,9 @@ namespace Application.Services.AuthServices
             var me = _mapper.Map<MeResponseDto>(user);
             me.Roles = roles.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
             me.Permissions = permissions;
+            me.ProfilePhotoUrl = string.IsNullOrWhiteSpace(user.ProfilePhotoPath)
+                ? null
+                : $"/api/User/MyProfilePhoto?v={Path.GetFileNameWithoutExtension(user.ProfilePhotoPath)}";
             return me;
         }
 

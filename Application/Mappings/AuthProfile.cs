@@ -49,7 +49,10 @@ namespace Application.Mappings
                 .Map(dest => dest.UserId, src => src.Id)
                 .Map(dest => dest.UserName, src => src.UserName ?? string.Empty)
                 .Map(dest => dest.Email, src => src.Email ?? string.Empty)
+                .Map(dest => dest.FullName, src => src.FullName ?? string.Empty)
+                .Map(dest => dest.Phone, src => src.PhoneNumber)
                 .Map(dest => dest.CreationDate, src => src.CreationDate)
+                .Ignore(dest => dest.ProfilePhotoUrl)
                 .Ignore(dest => dest.Roles)
                 .Ignore(dest => dest.Permissions);
 

@@ -87,6 +87,35 @@ namespace API.Controllers.AuthControllers
             return ApiResponse.Success("تم تغيير كلمة المرور بنجاح.");
         }
 
+        [HttpPut("[action]")]
+        public async Task<IResult> UpdateMyProfile([FromBody] UpdateMyProfileRequest dto)
+        {
+            await _userService.UpdateMyProfileAsync(dto);
+            return ApiResponse.Success("تم تحديث الملف الشخصي بنجاح.");
+        }
+
+        [HttpPost("[action]")]
+        [Consumes("multipart/form-data")]
+        public async Task<IResult> UploadMyProfilePhoto(IFormFile file)
+        {
+            var photoUrl = await _userService.UploadMyProfilePhotoAsync(file);
+            return ApiResponse.Success("تم رفع الصورة الشخصية بنجاح.", new { profilePhotoUrl = photoUrl });
+        }
+
+        [HttpGet("[action]")]
+        public async Task<IActionResult> MyProfilePhoto()
+        {
+            var (bytes, contentType, _) = await _userService.GetMyProfilePhotoAsync();
+            return File(bytes, contentType);
+        }
+
+        [HttpDelete("[action]")]
+        public async Task<IResult> RemoveMyProfilePhoto()
+        {
+            await _userService.RemoveMyProfilePhotoAsync();
+            return ApiResponse.Success("تم حذف الصورة الشخصية بنجاح.");
+        }
+
         [HttpPost("[action]")]
         [AuthorizePermission("UserManagement.Edit")]
         public async Task<IResult> ChangePasswordUser([FromBody] AdminChangePasswordRequest dto)

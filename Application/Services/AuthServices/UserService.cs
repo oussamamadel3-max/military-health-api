@@ -8,6 +8,7 @@ using Application.Common.Permissions;
 using Application.Exceptions;
 using Application.Dtos.AuthDtos;
 using Domain.Entities.Auth;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using MapsterMapper;
@@ -29,6 +30,12 @@ public class UserService : IUserService
     private readonly ICurrentUserService _currentUserService;
     private readonly ITextInputSanitizer _textSanitizer;
     private readonly IMapper _mapper;
+    private readonly IFileStorageService _fileStorage;
+
+    private static readonly HashSet<string> AllowedProfilePhotoExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".jpg", ".jpeg", ".png", ".webp"
+    };
 
     public UserService(
         UserManager<User> userManager,
@@ -43,7 +50,8 @@ public class UserService : IUserService
         JwtSettings jwtSettings,
         ICurrentUserService currentUserService,
         ITextInputSanitizer textSanitizer,
-        IMapper mapper)
+        IMapper mapper,
+        IFileStorageService fileStorage)
     {
         _userManager = userManager;
         _roleManager = roleManager;
@@ -58,6 +66,7 @@ public class UserService : IUserService
         _currentUserService = currentUserService;
         _textSanitizer = textSanitizer;
         _mapper = mapper;
+        _fileStorage = fileStorage;
     }
 
     #region الانشاء 
@@ -555,6 +564,121 @@ public class UserService : IUserService
         var result = await _userManager.ChangePasswordAsync(user, request.CurrentPassword, request.NewPassword);
         if (!result.Succeeded)
             throw new InvalidUserDataException(string.Join(", ", result.Errors.Select(e => e.Description)));
+    }
+    #endregion
+
+    #region الملف الشخصي (المستخدم نفسه)
+    public async Task UpdateMyProfileAsync(UpdateMyProfileRequest request)
+    {
+        var user = await GetCurrentUserOrThrowAsync();
+
+        var fullName = _textSanitizer.SanitizePlainText(request.FullName)?.Trim() ?? string.Empty;
+        var email = request.Email.Trim();
+        var phone = string.IsNullOrWhiteSpace(request.Phone)
+            ? null
+            : _textSanitizer.SanitizePlainText(request.Phone)?.Trim();
+
+        if (string.IsNullOrWhiteSpace(fullName))
+            throw new InvalidUserDataException("الاسم الكامل مطلوب.");
+
+        var existingByEmail = await _userManager.FindByEmailAsync(email);
+        if (existingByEmail is not null &&
+            !string.Equals(existingByEmail.Id, user.Id, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new EmailAlreadyExistsException(email);
+        }
+
+        user.FullName = fullName;
+        user.Email = email;
+        user.NormalizedEmail = _userManager.NormalizeEmail(email);
+        user.PhoneNumber = phone;
+
+        var result = await _userManager.UpdateAsync(user);
+        if (!result.Succeeded)
+            throw new InvalidUserDataException(string.Join(", ", result.Errors.Select(e => e.Description)));
+    }
+
+    public async Task<string> UploadMyProfilePhotoAsync(IFormFile file)
+    {
+        if (file is null || file.Length == 0)
+            throw new InvalidUserDataException("الملف فارغ أو غير محدد.");
+
+        var extension = Path.GetExtension(file.FileName)?.ToLowerInvariant() ?? string.Empty;
+        if (!AllowedProfilePhotoExtensions.Contains(extension))
+            throw new InvalidUserDataException("يُسمح فقط بصور JPG أو PNG أو WEBP.");
+
+        if (!_fileStorage.ValidateFile(file, out var validationError))
+            throw new InvalidUserDataException(validationError);
+
+        var user = await GetCurrentUserOrThrowAsync();
+
+        if (!string.IsNullOrWhiteSpace(user.ProfilePhotoPath))
+            await _fileStorage.DeleteFileAsync(user.ProfilePhotoPath);
+
+        var (path, _) = await _fileStorage.SaveFileAsync(file, "UserProfile", 0);
+        user.ProfilePhotoPath = path;
+
+        var result = await _userManager.UpdateAsync(user);
+        if (!result.Succeeded)
+            throw new InvalidUserDataException(string.Join(", ", result.Errors.Select(e => e.Description)));
+
+        return BuildProfilePhotoUrl(user.ProfilePhotoPath);
+    }
+
+    public async Task<(byte[] Bytes, string ContentType, string FileName)> GetMyProfilePhotoAsync()
+    {
+        var user = await GetCurrentUserOrThrowAsync();
+        if (string.IsNullOrWhiteSpace(user.ProfilePhotoPath))
+            throw new InvalidUserDataException("لا توجد صورة شخصية.");
+
+        var fullPath = _fileStorage.GetFullPath(user.ProfilePhotoPath);
+        if (!File.Exists(fullPath))
+            throw new InvalidUserDataException("ملف الصورة غير موجود.");
+
+        var bytes = await File.ReadAllBytesAsync(fullPath);
+        var fileName = Path.GetFileName(fullPath);
+        var extension = Path.GetExtension(fullPath).ToLowerInvariant();
+        var contentType = extension switch
+        {
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".webp" => "image/webp",
+            _ => "application/octet-stream"
+        };
+
+        return (bytes, contentType, fileName);
+    }
+
+    public async Task RemoveMyProfilePhotoAsync()
+    {
+        var user = await GetCurrentUserOrThrowAsync();
+        if (string.IsNullOrWhiteSpace(user.ProfilePhotoPath))
+            return;
+
+        await _fileStorage.DeleteFileAsync(user.ProfilePhotoPath);
+        user.ProfilePhotoPath = null;
+
+        var result = await _userManager.UpdateAsync(user);
+        if (!result.Succeeded)
+            throw new InvalidUserDataException(string.Join(", ", result.Errors.Select(e => e.Description)));
+    }
+
+    private async Task<User> GetCurrentUserOrThrowAsync()
+    {
+        var userId = _currentUserService.UserId ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(userId))
+            throw new UnauthenticatedUserException();
+
+        return await _userManager.FindByIdAsync(userId)
+            ?? throw new UserNotFoundException(userId);
+    }
+
+    private static string BuildProfilePhotoUrl(string? profilePhotoPath)
+    {
+        if (string.IsNullOrWhiteSpace(profilePhotoPath))
+            return string.Empty;
+
+        return $"/api/User/MyProfilePhoto?v={Path.GetFileNameWithoutExtension(profilePhotoPath)}";
     }
     #endregion
 

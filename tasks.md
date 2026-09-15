@@ -126,3 +126,16 @@
       - Login بمحاولات خاطئة: 1–5 → `401`؛ السادسة → **`429`** مع `rate_limit_exceeded` (وليس 503).
       - `/health` → `200 Healthy` حتى بعد استنفاد Login.
       - تسجيل دخول `superAdmin` → `200`؛ `/api/Auth/me` → `200`؛ تصدير Dashboard Excel → `200` (~8KB).
+
+- [x] **المهمة 13: Progressive Account Lockout فوق Rate Limiting**
+  - **التفاصيل**: إبقاء Sliding Window حسب IP، وإضافة حظر حساب مستقل مع تصعيد محدود السقف:
+    - إعدادات `LoginLockout`: `MaxFailedAccessAttempts=5`، `DurationsSeconds=[30,60,120,300,900]`، `TierResetAfterSeconds=86400`.
+    - حقل `User.LoginLockoutTier` + migration `AddUserProfilePhotoPathAndLoginLockoutTier`.
+    - `ILoginLockoutService`: Tier decay من `LockoutEnd`، `ApplyProgressiveLockoutAsync` آمن ضد السباق (لا `tier++` أثناء الحظر / عند منافس أنهى Apply)، `Retry-After = max(1, ceil(...))`.
+    - مسار Login: غير موجود/كلمة خاطئة → `401 AUTH_INVALID_CREDENTIALS`؛ محظور أو عتبة → `429 login_temporarily_locked` + هيدر `Retry-After`.
+    - الواجهة: رسائل عربية عامة عبر `formatLoginThrottleMessage` دون عرض نص الحالة الخام.
+  - **Trade-off موثّق (Account Enumeration)**: اختلاف `401` عن `429 login_temporarily_locked` يسمح بتمييز الحساب المحظور عن غير الموجود بعد عتبة المحاولات. قرار مقصود لقالب داخلي لصالح UX؛ الرسائل تبقى عامة (بلا محاولات متبقية / بلا «الحساب موجود»).
+  - **نتائج التحقق**:
+    - `dotnet build Backend.sln` ناجح؛ `Application.Tests` 11/11؛ `API.Tests` 9/9.
+    - `dotnet ef migrations has-pending-model-changes`: No changes.
+    - Smoke: محاولات 1–4 → `401`؛ الخامسة → `429` + `login_temporarily_locked` + `Retry-After: 30`؛ السادسة من نفس IP → `rate_limit_exceeded` (حماية IP مستقلة).

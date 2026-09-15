@@ -78,11 +78,20 @@ public class UserAccountDisabledException : BusinessException
 
 public class UserAccountLockedException : BusinessException
 {
-    public UserAccountLockedException(string message = "تم قفل الحساب مؤقتاً بسبب كثرة المحاولات الخاطئة")
+    public const string ErrorCodeValue = "login_temporarily_locked";
+
+    public const string DefaultMessage =
+        "تم تجاوز عدد محاولات تسجيل الدخول. يرجى المحاولة مرة أخرى لاحقاً.";
+
+    public int RetryAfterSeconds { get; }
+
+    public UserAccountLockedException(int retryAfterSeconds, string? message = null)
         : base(
-            message: message,
-            errorCode: "AUTH_ACCOUNT_LOCKED",
-            status: 401)
+            message: message ?? DefaultMessage,
+            errorCode: ErrorCodeValue,
+            status: 429,
+            meta: new { retryAfterSeconds = Math.Max(1, retryAfterSeconds) })
     {
+        RetryAfterSeconds = Math.Max(1, retryAfterSeconds);
     }
 }
