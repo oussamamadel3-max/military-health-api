@@ -1,8 +1,7 @@
 using API.Extensions;
 using API.Middleware;
+using API.RateLimiting;
 using Infrastructure.Persistence;
-using Microsoft.AspNetCore.HttpOverrides;
-using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -10,10 +9,6 @@ builder.WebHost.ConfigureKestrel(options => options.AddServerHeader = false);
 
 #region ================== CONFIGURE SERVICES ==================
 
-/*
- * إضافة Controllers الخاصة بالـ API
- * + ضبط JSON ليكون camelCase (مهم لتوافق Angular)
- */
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
@@ -21,73 +16,21 @@ builder.Services.AddControllers()
             System.Text.Json.JsonNamingPolicy.CamelCase;
     });
 
-/*
- * تمكين الوصول إلى HttpContext من أي Service
- * (مستخدم في FileUrl, CurrentUser, Audit, ...إلخ)
- */
 builder.Services.AddHttpContextAccessor();
 
-/*
- * كاش داخلي بالذاكرة
- * مستخدم في RateLimitingMiddleware
- */
-builder.Services.AddMemoryCache();
-
-/*
- * منع ASP.NET من تغيير أسماء الـ JWT Claims تلقائيًا
- * حتى تبقى مثل ما أصدرتها أنت (sub, role, permissions...)
- */
 System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler.DefaultMapInboundClaims = false;
 
-/*
- * تسجيل جميع طبقات المشروع:
- * - Application
- * - Infrastructure
- * - Identity
- * - JWT Authentication
- * - Swagger
- * - CORS
- */
 builder.Services
     .AddApplicationAndInfrastructure()
     .AddCustomIdentity(builder.Configuration)
     .AddJwtAuthentication(builder.Configuration)
     .AddSwaggerDocumentation(builder.Environment)
-    .AddFrontendCors(builder.Configuration);
+    .AddFrontendCors(builder.Configuration)
+    .AddAppRateLimiting(builder.Configuration);
 
-/*
- * Rate Limiter مبني داخل ASP.NET
- * (مستخدم فقط لبعض الـ Endpoints مثل login)
- */
-builder.Services.AddRateLimiter(options =>
-{
-    options.AddPolicy("login", context =>
-    {
-        var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-
-        return RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: ip,
-            factory: _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 5,                  // عدد المحاولات
-                Window = TimeSpan.FromMinutes(1), // خلال دقيقة
-                QueueLimit = 0,
-                AutoReplenishment = true
-            });
-    });
-});
-
-/*
- * Middleware مخصص لتأمين الكوكيز
- * (SameSite, Secure, HttpOnly...)
- */
 builder.Services.AddCookieSecurity(builder.Environment);
-
-/*
- * Middleware مخصص لتوحيد رسائل Validation
- * بدل ما يرجع ASP.NET أخطاء افتراضية
- */
 builder.Services.AddApiValidationBehavior();
+builder.Services.AddHealthChecks();
 
 #endregion
 
@@ -95,112 +38,37 @@ var app = builder.Build();
 
 #region ================== MIDDLEWARE PIPELINE ==================
 
-/*
- * إضافة Security Headers
- * (X-Frame-Options, X-Content-Type-Options, ...)
- */
 app.UseSecurityHeaders();
 
-/*
- * مهم جدًا على السيرفر (Reverse Proxy / Nginx / IIS)
- * حتى يتم قراءة IP الحقيقي للمستخدم
- */
-app.UseForwardedHeaders(new ForwardedHeadersOptions
-{
-    ForwardedHeaders =
-        ForwardedHeaders.XForwardedFor |
-        ForwardedHeaders.XForwardedProto
-});
+// Single ForwardedHeaders call (X-Forwarded-For | X-Forwarded-Proto).
+// Empty KnownProxies/KnownIPNetworks keep ASP.NET defaults (loopback trusted).
+app.UseAppForwardedHeaders();
 
 if (!app.Environment.IsDevelopment())
     app.UseHsts();
 
-/*
- * تقديم الملفات الثابتة من wwwroot
- * (لو عندك صور عامة أو ملفات ثابتة)
- */
 app.UseStaticFiles();
-
-/*
- * Middleware مركزي لمعالجة الأخطاء
- * يمنع تسريب StackTrace للعميل
- */
 app.UseErrorHandling();
-
-/*
- * تفعيل نظام الـ Routing
- * (ضروري قبل CORS و Authorization)
- */
 app.UseRouting();
-
-/*
- * Swagger (قبل المصادقة حتى يعمل swagger.json بدون توكن)
- */
 app.UseSwaggerDocumentation(app.Environment);
-
-/*
- * تفعيل سياسة CORS
- * للسماح فقط للـ Frontend المحدد بالوصول
- */
 app.UseFrontendCors();
-
-/*
- * تفعيل Rate Limiter الداخلي
- */
-app.UseRateLimiter();
-
-/*
- * Rate Limiting مخصص (Token Bucket)
- * لحماية الـ API من Flood / DoS
- */
-app.UseMiddleware<RateLimitingMiddleware>();
-
-/*
- * تحويل HTTP → HTTPS
- */
 app.UseHttpsRedirection();
-
-/*
- * تفعيل إعدادات أمان الكوكيز
- */
 app.UseCookieSecurity();
 
-/*
- * تفعيل المصادقة JWT
- * (قراءة التوكن والتحقق منه)
- */
+// Authentication BEFORE RateLimiter so Global can partition by UserId.
 app.UseAuthentication();
-
+app.UseRateLimiter();
 app.UseMiddleware<CsrfValidationMiddleware>();
-
-/*
- * تفعيل التفويض
- * (التحقق من الصلاحيات)
- */
 app.UseAuthorization();
-
-/*
- * Middleware مخصص لاستخراج المستخدم الحالي
- * وتخزينه في Context
- */
 app.UseMiddleware<CurrentUserMiddleware>();
 
-/*
- * ربط Controllers بالـ Endpoints
- */
 app.MapControllers();
+app.MapHealthChecks("/health").DisableRateLimiting();
 
 #endregion
 
 #region ================== DATABASE SEED ==================
 
-/*
- * تهيئة البيانات الأولية:
- * - Roles
- * - Permissions
- * - Admin User
- * - FieldPermissions
- */
 using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
@@ -219,3 +87,6 @@ using (var scope = app.Services.CreateScope())
 #endregion
 
 app.Run();
+
+// Expose for integration tests that host the real Program if needed later.
+public partial class Program { }

@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.CookiePolicy;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Hosting;
 
 namespace API.Extensions
@@ -17,9 +16,7 @@ namespace API.Extensions
                     ? CookieSecurePolicy.SameAsRequest
                     : CookieSecurePolicy.Always;
 
-                // ✅ حماية من CSRF بشكل افتراضي (غير مدمّر)
                 options.MinimumSameSitePolicy = SameSiteMode.Lax;
-
                 options.HttpOnly = HttpOnlyPolicy.Always;
             });
 
@@ -28,16 +25,8 @@ namespace API.Extensions
 
         public static IApplicationBuilder UseCookieSecurity(this IApplicationBuilder app)
         {
-            // ✅ مهم جداً إذا السيرفر وراء Proxy (Nginx/Apache/LoadBalancer)
-            // حتى Request.IsHttps يصير true ويتعامل صح مع Secure cookies
-            app.UseForwardedHeaders(new ForwardedHeadersOptions
-            {
-                ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
-            });
-
-            // ✅ تطبيق CookiePolicy (لازم قبل أي شي بيكتب كوكيز)
+            // ForwardedHeaders is configured once in Program via UseAppForwardedHeaders.
             app.UseCookiePolicy();
-
             return app;
         }
     }

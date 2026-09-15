@@ -41,10 +41,10 @@
     - Smoke Test ناجح بالكامل على .NET 10: الإقلاع و seeding، واتصال PostgreSQL 18، و Swagger UI و `swagger.json`، وتسجيل الدخول مع كوكيز `access_token`/`refresh_token`/`csrf_sig` بخصائص HttpOnly و Secure، و `GET /api/Auth/me` أرجع `superAdmin` بدور SuperAdmin و 22 صلاحية، و 401 بدون توكن، وقراءة `Documents` و `Dashboard`، وكتابة كاملة (إنشاء دور ثم قراءته ثم حذفه ثم التأكد من 404).
     - Rate Limiting لم يتغير سلوكه: سياسة `login` توقفت عند 5 محاولات بالضبط، و middleware الـ TokenBucket المخصص أعطى 40 طلبًا ناجحًا ثم 20 طلبًا بـ 429 مع `Retry-After: 10` و `X-RateLimit-Error-Message`، وهو مطابق تمامًا لـ `TokenLimit = 40`.
   - **ملاحظات مؤجّلة (خارج نطاق Phase 1، للتوثيق فقط)**:
-    - سياسة `login` تُرجع `503 Service Unavailable` وليس `429`، لأن `RateLimiterOptions.RejectionStatusCode` قيمته الافتراضية `Status503ServiceUnavailable` والكود لا يضبطها ولا يضبط `OnRejected`. هذه القيمة الافتراضية نفسها في ASP.NET Core 7 و 8 و 9 و 10، أي أن السلوك سابق للترقية ولم تسببه .NET 10. يُستحسن ضبطها إلى `429` في Phase 2.
+    - سياسة `login` كانت تُرجع `503` (قيمة افتراضية لـ `RejectionStatusCode`) — **عُولج في المهمة 12 (Phase 2)** وأصبح `429` مع `ApiResponse`.
     - `API/Dockerfile` قديم ومكسور: يبني `ArchiveProject/ArchiveProject.csproj` وهو مشروع غير موجود في هذا الحل، وصوره على `aspnet:8.0`/`sdk:8.0`. لم يُصلح لأنه غير مستخدم فعليًا في build/run.
     - لا يوجد `docker-compose` ولا `Directory.Build.props` ولا `Directory.Packages.props`، و `.github/workflows/` فارغ (لا CI). لم يُنشأ أي منها.
-    - `app.UseForwardedHeaders(...)` مُسجَّل مرتين: في `API/Program.cs` وفي `API/Extensions/CookieSecurityExtensions.cs`. مشكلة سابقة غير مرتبطة بـ .NET 10 → Phase 2.
+    - `app.UseForwardedHeaders(...)` كان مُسجَّلًا مرتين — **عُولج في المهمة 12 (Phase 2)** (تسجيل واحد آمن عبر `UseAppForwardedHeaders`).
     - تحذير `NU1510` جديد على `Microsoft.AspNetCore.Http.Abstractions 2.2.0` في `Application`: ميزة package pruning في .NET 10 تعتبر الحزمة غير ضرورية لأن الإطار المشترك يوفّرها. تحذير إرشادي فقط ولا يؤثر على build أو runtime.
     - تحذير `NU1903` على `AutoMapper 12.0.1` كان مؤجّلًا هنا؛ عُالج لاحقًا في **المهمة 10** باستبدال AutoMapper بـ Mapster.
     - حزم غير مستخدمة بقيت كما هي: `Microsoft.AspNetCore.Http.Features 5.0.17` و `Npgsql.EntityFrameworkCore.PostgreSQL` في `Domain`، وحزم SqlServer/`Microsoft.Data.SqlClient` مع أن التطبيق يعمل على `UseNpgsql`.
@@ -109,3 +109,20 @@
     - **سياق تشغيل**: `CurrentUserDto` في `AppDbContext` من `ICurrentUserService`.
     - **حقول محسوبة/إثراء بعد Mapster** (وليست نسخ Entity→DTO): تعبئة `Roles`/`Users` على `FieldPermissionDto`، و`roles`/`Permissions`/العدادات على `UserListItemDto`، و`FileUrl`/`FileSizeFormatted` على مرفقات، و`Name` العربي/`CreatedByName` على تفاصيل الدور، وتعقيم حقول الـ DTO قبل `_mapper.Map`، وتعديل حقول الكيان لأغراض عمل (مثل `DocumentNumber` أو `Description` المحسوبة).
     - **كيانات ربط DB**: `UserRoleAssociation`، `RolePermission`، `UserPermission`، `UserFieldPermission` (ليست DTOs).
+
+- [x] **المهمة 12: توحيد Rate Limiting على Microsoft.AspNetCore.RateLimiting (Phase 2)**
+  - **التفاصيل**: استبدال النظام المزدوج (FixedWindow لتسجيل الدخول + `RateLimitingMiddleware` TokenBucket مخصص) بنظام واحد فقط على .NET 10:
+    - مجلد `API/RateLimiting/`: سياسات `login` / `reports` / `public-api`، إعدادات مع `ValidateOnStart`، مفتاح تقسيم `user:{id}` أو `ip:{…}` (بدون `user:unknown`)، `ForwardedHeaders` آمن، `OnRejected` يوحّد `429` + `ApiResponse` (`rate_limit_exceeded`) و`X-RateLimit-Error-Message` و`Retry-After` عند التوفر.
+    - Global TokenBucket (مستخدم/IP)، Login SlidingWindow (IP)، Reports: Concurrency ثم TokenBucket عبر `SequentialRateLimiter`، وتسجيل سياسة Public دون endpoints وهمية.
+    - خط الأنابيب: Authentication ثم RateLimiter؛ `MapHealthChecks("/health").DisableRateLimiting()`؛ حذف الـ middleware المخصص وازدواجية ForwardedHeaders.
+    - `[EnableRateLimiting]` على Login وثلاث عمليات تصدير في `ReportsController`.
+    - مشروع `API.Tests` (TestServer، `Environment=Testing`، بدون PostgreSQL) يغطي العزل Global، Login 429≠503، Reports concurrency، Health bypass، ForwardedHeaders trusted/untrusted، وسقوط auth بدون userId إلى IP.
+  - **نتائج التحقق**:
+    - `dotnet build Backend.sln` ناجح (0 أخطاء).
+    - `dotnet test API.Tests`: **9/9 Passed**.
+    - `dotnet ef migrations has-pending-model-changes`: No changes.
+    - لا بقايا لـ `RateLimitingMiddleware` أو `AddMemoryCache` المرتبط به.
+    - Smoke على API حقيقي (`https://localhost:7265`):
+      - Login بمحاولات خاطئة: 1–5 → `401`؛ السادسة → **`429`** مع `rate_limit_exceeded` (وليس 503).
+      - `/health` → `200 Healthy` حتى بعد استنفاد Login.
+      - تسجيل دخول `superAdmin` → `200`؛ `/api/Auth/me` → `200`؛ تصدير Dashboard Excel → `200` (~8KB).
