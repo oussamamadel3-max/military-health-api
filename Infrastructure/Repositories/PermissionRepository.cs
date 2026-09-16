@@ -39,6 +39,17 @@ public class PermissionRepository : IPermissionRepository
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<List<Permission>> GetActiveByIdsAsync(IEnumerable<Guid> ids, CancellationToken cancellationToken = default)
+    {
+        var idList = ids.Distinct().ToList();
+        if (idList.Count == 0)
+            return new List<Permission>();
+
+        return await _context.Permissions.AsNoTracking()
+            .Where(p => idList.Contains(p.Id) && p.IsActive)
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<List<string>> GetPermissionNamesViaRolesAsync(string userId, CancellationToken cancellationToken = default)
     {
         return await _context.UserRoleAssociations

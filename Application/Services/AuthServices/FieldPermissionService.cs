@@ -3,7 +3,6 @@ using Application.Common.Permissions;
 using Application.Common.Results;
 using Application.Common.Utilities;
 using Application.Dtos.AuthDtos;
-using Application.Dtos.DocumentDtos;
 using Application.Exceptions;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
@@ -21,8 +20,8 @@ namespace Application.Services.AuthServices
 {
     public class FieldPermissionService : IFieldPermissionService
     {
-        private static readonly Assembly DomainEntitiesAssembly = typeof(Document).Assembly;
-        private static readonly Assembly ApplicationDtosAssembly = typeof(DocumentDto).Assembly;
+        private static readonly Assembly DomainEntitiesAssembly = typeof(User).Assembly;
+        private static readonly Assembly ApplicationDtosAssembly = typeof(UserDto).Assembly;
         private static Dictionary<string, string>? _dtoFieldDisplayCache;
         private static Dictionary<string, Dictionary<string, string>>? _entityDtoFieldsCache;
 

@@ -2,7 +2,6 @@ using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Application.Dtos.DashboardDtos;
-using Application.Common.Results;
 using Domain.Entities;
 using MapsterMapper;
 using Microsoft.EntityFrameworkCore;
@@ -11,24 +10,18 @@ namespace Application.Services.Dashboard
 {
     public class DashboardService : IDashboardService
     {
-        private readonly IDocumentRepository _documentRepository;
         private readonly IAuditLogRepository _auditLogRepository;
-        private readonly IAttachmentRepository _attachmentRepository;
         private readonly IActorScopeProvider _actorScopeProvider;
         private readonly IUserContextService _userCtx;
         private readonly IMapper _mapper;
 
         public DashboardService(
-            IDocumentRepository documentRepository,
             IAuditLogRepository auditLogRepository,
-            IAttachmentRepository attachmentRepository,
             IActorScopeProvider actorScopeProvider,
             IUserContextService userCtx,
             IMapper mapper)
         {
-            _documentRepository = documentRepository;
             _auditLogRepository = auditLogRepository;
-            _attachmentRepository = attachmentRepository;
             _actorScopeProvider = actorScopeProvider;
             _userCtx = userCtx;
             _mapper = mapper;
@@ -125,10 +118,6 @@ namespace Application.Services.Dashboard
             var actorScope = await _actorScopeProvider.GetScopeAsync(userId);
 
             var (start, endEx, _) = NormalizeRange(f.From, f.To);
-            var startUtc = start?.UtcDateTime;
-            var endUtc = endEx?.UtcDateTime;
-
-            var documentsCount = await _documentRepository.CountScopedAsync(actorScope, startUtc, endUtc);
 
             var auditQ = ApplyScopeAudit(_auditLogRepository.Query(), actorScope);
 
@@ -141,15 +130,6 @@ namespace Application.Services.Dashboard
                 .ToListAsync();
 
             var recent = _mapper.Map<List<RecentActivityDto>>(recentLogs);
-
-            var docIds = recent.Where(r => r.DocumentId.HasValue).Select(r => r.DocumentId!.Value).Distinct().ToList();
-            if (docIds.Count > 0)
-            {
-                var titles = await _documentRepository.GetTitlesScopedAsync(actorScope, docIds);
-
-                foreach (var r in recent.Where(x => x.DocumentId.HasValue))
-                    if (titles.TryGetValue(r.DocumentId!.Value, out var t)) r.DocumentTitle = t;
-            }
 
             var topUsersRaw = await (from a in auditQ
                                      group a by new { a.UserId, a.UserName } into g
@@ -173,74 +153,11 @@ namespace Application.Services.Dashboard
                 LastActivityAt = x.LastActivity.UtcDateTime.ToString("o")
             }).ToList();
 
-            DateTime growthFromUtc;
-            DateTime growthToUtc;
-
-            if (start.HasValue || endEx.HasValue)
-            {
-                growthFromUtc = (start ?? DateTimeOffset.UtcNow.AddMonths(-6)).UtcDateTime;
-                growthToUtc = (endEx ?? DateTimeOffset.UtcNow).UtcDateTime;
-            }
-            else
-            {
-                var months = Math.Abs(f.GrowthMonths <= 0 ? 6 : f.GrowthMonths);
-                growthToUtc = DateTime.UtcNow.Date.AddDays(1);
-                growthFromUtc = DateTime.UtcNow.AddMonths(-months).Date;
-            }
-
-            var growthRaw = await _documentRepository.GetGrowthByMonthScopedAsync(actorScope, growthFromUtc, growthToUtc);
-
-            var growth = growthRaw.Select(x => new DocumentGrowthPointDto
-            {
-                Period = $"{x.Year:D4}-{x.Month:D2}",
-                Count = x.Count
-            }).ToList();
-
-            growth = FillMissingMonths(growth, growthFromUtc, growthToUtc);
-
-            var totalBytes = await _attachmentRepository.SumFileSizeForScopedDocumentsAsync(actorScope, startUtc, endUtc);
-
-            var storage = new StorageUsageDto
-            {
-                TotalBytes = totalBytes,
-                TotalReadable = FormatBytes(totalBytes),
-            };
-
             return new DashboardStatsDto
             {
-                DocumentsCount = documentsCount,
                 RecentActivities = recent,
                 MostActiveUsers = topUsers,
-                DocumentGrowth = growth,
-                StorageUsage = storage,
             };
-        }
-
-        private static string FormatBytes(long bytes)
-        {
-            string[] units = { "B", "KB", "MB", "GB", "TB" };
-            double val = bytes;
-            int i = 0;
-            while (val >= 1024 && i < units.Length - 1) { val /= 1024; i++; }
-            return $"{val:0.##} {units[i]}";
-        }
-
-        private static List<DocumentGrowthPointDto> FillMissingMonths(List<DocumentGrowthPointDto> data, DateTime fromUtc, DateTime toUtc)
-        {
-            var map = data.ToDictionary(x => x.Period, x => x.Count);
-            var list = new List<DocumentGrowthPointDto>();
-
-            var cur = new DateTime(fromUtc.Year, fromUtc.Month, 1);
-            var end = new DateTime(toUtc.Year, toUtc.Month, 1);
-
-            while (cur <= end)
-            {
-                var key = $"{cur.Year:D4}-{cur.Month:D2}";
-                map.TryGetValue(key, out var count);
-                list.Add(new DocumentGrowthPointDto { Period = key, Count = count });
-                cur = cur.AddMonths(1);
-            }
-            return list;
         }
     }
 }

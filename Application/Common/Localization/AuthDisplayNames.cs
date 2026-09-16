@@ -31,19 +31,28 @@ namespace Application.Common.Localization
 
                 // Dashboard & Reports
                 ["Dashboard.Read"] = "قراءة لوحة التحكم",
-                ["ReportsDocuments.Export"] = "تصدير تقرير الوثائق",
                 ["ReportsAuditLogs.Export"] = "تصدير تقرير السجل",
                 ["ReportsDashboard.Export"] = "تصدير تقرير لوحة التحكم",
+            };
 
-                // Document CRUD
-                ["Document.Read"] = "قراءة الوثائق",
-                ["Document.Create"] = "إنشاء وثائق جديدة",
-                ["Document.Edit"] = "تعديل الوثائق",
-                ["Document.Delete"] = "حذف الوثائق",
+        private static readonly Dictionary<string, string> ModuleMap =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["UserManagement"] = "إدارة المستخدمين",
+                ["AuditLog"] = "سجل التدقيق",
+                ["Dashboard"] = "لوحة الإحصائيات",
+                ["ReportsAuditLogs"] = "تقارير سجل التدقيق",
+                ["ReportsDashboard"] = "تقارير لوحة التحكم",
+            };
 
-                // “BranchManager” كانت موجودة كسطر Permission عندك بس هي بالحقيقة Role
-                // إذا كانت عندك أيضاً Permission بنفس الاسم:
-                ["BranchManager"] = "مدير الفرع",
+        private static readonly Dictionary<string, string> ActionMap =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Read"] = "قراءة",
+                ["Create"] = "إنشاء",
+                ["Edit"] = "تعديل",
+                ["Delete"] = "حذف",
+                ["Export"] = "تصدير",
             };
 
         public static string RoleAr(string? roleNameOrNormalized)
@@ -60,6 +69,22 @@ namespace Application.Common.Localization
             return PermissionMap.TryGetValue(permissionName.Trim(), out var ar)
                 ? ar
                 : permissionName; // fallback
+        }
+
+        public static string ModuleAr(string? moduleKey)
+        {
+            if (string.IsNullOrWhiteSpace(moduleKey)) return string.Empty;
+            return ModuleMap.TryGetValue(moduleKey.Trim(), out var ar)
+                ? ar
+                : moduleKey;
+        }
+
+        public static string ActionAr(string? actionKey)
+        {
+            if (string.IsNullOrWhiteSpace(actionKey)) return string.Empty;
+            return ActionMap.TryGetValue(actionKey.Trim(), out var ar)
+                ? ar
+                : actionKey;
         }
     }
 }

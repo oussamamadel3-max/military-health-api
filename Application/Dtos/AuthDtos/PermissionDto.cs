@@ -78,5 +78,22 @@ namespace Application.Dtos.AuthDtos
 
         public List<string>? PermissionIds { get; set; }
     }
+
+    public class PermissionModuleItemDto
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = "";
+        public string? Description { get; set; }
+        public string ActionKey { get; set; } = "";
+        public string ActionLabel { get; set; } = "";
+        public bool IsActive { get; set; } = true;
+    }
+
+    public class PermissionModuleDto
+    {
+        public string ModuleKey { get; set; } = "";
+        public string ModuleLabel { get; set; } = "";
+        public List<PermissionModuleItemDto> Permissions { get; set; } = new();
+    }
 }
 

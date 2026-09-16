@@ -271,11 +271,18 @@ namespace Application.Services.AuthServices
                 .Distinct()
                 .ToList();
 
-            var activeValidIds = await _permissionRepository.GetActiveIdsAsync(requestedIds);
+            if (requestedIds.Count == 0)
+                throw new InvalidRoleDataException("يجب اختيار صلاحية واحدة على الأقل.");
+
+            var activePermissions = await _permissionRepository.GetActiveByIdsAsync(requestedIds);
+            var activeValidIds = activePermissions.Select(p => p.Id).ToList();
 
             var missingOrInactive = requestedIds.Except(activeValidIds).ToList();
             if (missingOrInactive.Any())
                 throw new InvalidRoleDataException($"صلاحيات غير موجودة أو غير نشطة: {string.Join(", ", missingOrInactive)}");
+
+            PermissionDependencyRules.EnsureReadBeforeWriteActions(
+                activePermissions.Select(p => p.Name));
 
             var existingRolePerms = await _roleRepository.GetRolePermissionsAsync(dto.RoleId);
 
@@ -339,13 +346,20 @@ namespace Application.Services.AuthServices
 
             var inputIds = dto.PermissionIds ?? Enumerable.Empty<Guid>();
             var requestedDistinct = inputIds.Distinct().ToList();
+            if (requestedDistinct.Count == 0)
+                throw new InvalidRoleDataException("يجب اختيار صلاحية واحدة على الأقل.");
+
             var inputDuplicatesSkipped = inputIds.Count() - requestedDistinct.Count;
 
-            var validIds = await _permissionRepository.GetActiveIdsAsync(requestedDistinct);
+            var activePermissions = await _permissionRepository.GetActiveByIdsAsync(requestedDistinct);
+            var validIds = activePermissions.Select(p => p.Id).ToList();
 
             var inactiveIds = requestedDistinct.Except(validIds).ToList();
             if (inactiveIds.Any())
                 throw new InvalidRoleDataException($"الصلاحيات التالية غير نشطة: {string.Join(", ", inactiveIds)}");
+
+            PermissionDependencyRules.EnsureReadBeforeWriteActions(
+                activePermissions.Select(p => p.Name));
 
             var invalidSkipped = requestedDistinct.Count - validIds.Count;
 

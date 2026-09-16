@@ -1,3 +1,5 @@
+using Application.Common.Localization;
+using Application.Common.Permissions;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
@@ -84,7 +86,56 @@ namespace Application.Services.AuthServices
         public async Task<List<PermissionDto>> GetPermissionsAsync()
         {
             var permissions = await _permissionRepository.GetAllOrderedAsync();
+            permissions = permissions
+                .Where(p => !PermissionCatalog.IsObsoletePermissionName(p.Name ?? string.Empty))
+                .ToList();
             return _mapper.Map<List<PermissionDto>>(permissions);
+        }
+
+        public async Task<List<PermissionModuleDto>> GetPermissionModulesAsync()
+        {
+            var permissions = await _permissionRepository.GetAllOrderedAsync();
+            permissions = permissions
+                .Where(p => !PermissionCatalog.IsObsoletePermissionName(p.Name ?? string.Empty))
+                .ToList();
+
+            var modules = permissions
+                .GroupBy(p => PermissionCatalog.GetModuleKey(p.Name ?? string.Empty), StringComparer.OrdinalIgnoreCase)
+                .Select(g =>
+                {
+                    var moduleKey = g.Key;
+                    var moduleLabel = AuthDisplayNames.ModuleAr(moduleKey);
+                    var items = g
+                        .Select(p =>
+                        {
+                            var name = p.Name ?? string.Empty;
+                            var actionKey = PermissionCatalog.GetActionKey(name);
+                            return new PermissionModuleItemDto
+                            {
+                                Id = p.Id,
+                                Name = name,
+                                Description = string.IsNullOrWhiteSpace(p.Description)
+                                    ? AuthDisplayNames.PermissionAr(name)
+                                    : p.Description,
+                                ActionKey = actionKey,
+                                ActionLabel = AuthDisplayNames.ActionAr(actionKey),
+                                IsActive = p.IsActive,
+                            };
+                        })
+                        .OrderBy(i => i.ActionLabel, StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+
+                    return new PermissionModuleDto
+                    {
+                        ModuleKey = moduleKey,
+                        ModuleLabel = moduleLabel,
+                        Permissions = items,
+                    };
+                })
+                .OrderBy(m => m.ModuleLabel, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            return modules;
         }
         #endregion
 

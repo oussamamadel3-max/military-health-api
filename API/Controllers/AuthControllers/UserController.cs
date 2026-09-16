@@ -50,9 +50,10 @@ namespace API.Controllers.AuthControllers
             [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
             [FromQuery][Range(1, 500)] int pageSize = 10,
             [FromQuery] string? q = null,
-            [FromQuery] bool? isActive = null)
+            [FromQuery] bool? isActive = null,
+            [FromQuery] string? roleId = null)
         {
-            var usersList = await _userService.GetUsersListAsync(pageNumber, pageSize, q, isActive);
+            var usersList = await _userService.GetUsersListAsync(pageNumber, pageSize, q, isActive, roleId);
             return ApiResponse.Success("تم جلب قائمة المستخدمين بنجاح.", usersList);
         }
 

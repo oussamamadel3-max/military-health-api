@@ -88,9 +88,13 @@ public class UserService : IUserService
         if (await _userManager.FindByEmailAsync(createdUser.email) is not null)
             throw new EmailAlreadyExistsException(createdUser.email);
 
-        // جلب الأدوار الفعالة (كما عندك)
-        var rawRoles = createdUser.roles.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim())
+        // جلب الأدوار الفعالة — الدور إجباري عند الإنشاء
+        var rawRoles = (createdUser.roles ?? Enumerable.Empty<string>())
+                          .Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim())
                           .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (rawRoles.Count == 0)
+            throw new InvalidUserDataException("يجب اختيار دور واحد على الأقل.");
+
         var rolesFromDb = await _roleRepository.ResolveActiveRolesAsync(rawRoles);
 
         var foundUpper = rolesFromDb
@@ -222,7 +226,12 @@ public class UserService : IUserService
     #endregion
 
     #region جلب الكل 
-    public async Task<PaginatedList<UserListItemDto>> GetUsersListAsync(int pageNumber, int pageSize, string? q = null, bool? isActive = null)
+    public async Task<PaginatedList<UserListItemDto>> GetUsersListAsync(
+        int pageNumber,
+        int pageSize,
+        string? q = null,
+        bool? isActive = null,
+        string? roleId = null)
     {
         if (pageNumber < 1) pageNumber = 1;
         if (pageSize < 1) pageSize = 10;
@@ -252,6 +261,13 @@ public class UserService : IUserService
 
         if (isActive.HasValue)
             baseQuery = baseQuery.Where(u => u.IsActive == isActive.Value);
+
+        if (!string.IsNullOrWhiteSpace(roleId))
+        {
+            var rid = roleId.Trim();
+            baseQuery = baseQuery.Where(u =>
+                u.UserRoleAssociations.Any(ura => ura.RoleId == rid));
+        }
 
         baseQuery = baseQuery.OrderBy(u => u.UserName);
 
@@ -824,13 +840,22 @@ public class UserService : IUserService
         var currentPermIds = await _userRepository.GetDirectPermissionIdsAsync(user.Id);
 
         var currentSet = new HashSet<Guid>(currentPermIds);
-        var finalSet = new HashSet<Guid>(activeIncomingIds);
 
-        var toAdd = finalSet.Except(currentSet).ToList();
-        var toRemove = currentSet.Except(finalSet).ToList();
+        // الواجهة ترسل المعرّفات المتغيّرة فقط (تبديل)، فيُحسب الناتج النهائي ثم يُتحقق منه
+        var toAdd = activeIncomingIds.Where(id => !currentSet.Contains(id)).ToList();
+        var toRemove = activeIncomingIds.Where(id => currentSet.Contains(id)).ToList();
 
         if (!toAdd.Any() && !toRemove.Any())
             return;
+
+        var finalSet = new HashSet<Guid>(currentSet);
+        foreach (var id in toRemove) finalSet.Remove(id);
+        foreach (var id in toAdd) finalSet.Add(id);
+
+        var finalPermissions = await _permissionRepository.GetActiveByIdsAsync(finalSet);
+        PermissionDependencyRules.EnsureReadBeforeWriteActions(
+            finalPermissions.Select(p => p.Name),
+            message => new InvalidUserDataException(message));
 
         using var tx = await _unitOfWork.BeginTransactionAsync();
         try

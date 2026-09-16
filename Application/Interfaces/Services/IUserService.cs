@@ -9,7 +9,12 @@ namespace Application.Interfaces.Services
         Task<CreateUserDto> Create(CreateUserDto createdUser);
         Task Update(string id, UpdateUserDto updatedUser);
         Task Delete(string userId);
-        Task<PaginatedList<UserListItemDto>> GetUsersListAsync(int pageNumber, int pageSize, string? q = null, bool? isActive = null);
+        Task<PaginatedList<UserListItemDto>> GetUsersListAsync(
+            int pageNumber,
+            int pageSize,
+            string? q = null,
+            bool? isActive = null,
+            string? roleId = null);
         Task<UserListItemDto> GetUserAsync(string id);
         Task ChangeOwnPasswordAsync(ChangePasswordRequest request);
         Task ResetUserPasswordAsync(AdminChangePasswordRequest request);

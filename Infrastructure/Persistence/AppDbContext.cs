@@ -39,9 +39,6 @@ public class AppDbContext : DbContext
     public DbSet<AuditLog> AuditLogs { get; set; } = null!;
     #endregion
 
-    public DbSet<Document> Documents { get; set; } = null!;
-    public DbSet<Attachment> Attachments { get; set; } = null!;
-
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
