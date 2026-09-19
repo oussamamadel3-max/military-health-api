@@ -1,5 +1,6 @@
 using Application.Common.Results;
 using Application.Dtos.AuthDtos;
+using Microsoft.AspNetCore.Http;
 
 namespace Application.Interfaces.Services
 {
@@ -8,7 +9,12 @@ namespace Application.Interfaces.Services
         Task<CreateUserDto> Create(CreateUserDto createdUser);
         Task Update(string id, UpdateUserDto updatedUser);
         Task Delete(string userId);
-        Task<PaginatedList<UserListItemDto>> GetUsersListAsync(int pageNumber, int pageSize, string? q = null, bool? isActive = null);
+        Task<PaginatedList<UserListItemDto>> GetUsersListAsync(
+            int pageNumber,
+            int pageSize,
+            string? q = null,
+            bool? isActive = null,
+            string? roleId = null);
         Task<UserListItemDto> GetUserAsync(string id);
         Task ChangeOwnPasswordAsync(ChangePasswordRequest request);
         Task ResetUserPasswordAsync(AdminChangePasswordRequest request);
@@ -19,5 +25,9 @@ namespace Application.Interfaces.Services
         Task<UpdateUserStatusRequest> UpdateUserStatusAsync(string id, UpdateUserStatusRequest request);
         Task UpdateUserWithRolesAsync(string userId, UpdateUserWithRolesDto updatedUser);
         Task<List<DropdownUserDto>> GetDropDownUsersAsync();
+        Task UpdateMyProfileAsync(UpdateMyProfileRequest request);
+        Task<string> UploadMyProfilePhotoAsync(IFormFile file);
+        Task<(byte[] Bytes, string ContentType, string FileName)> GetMyProfilePhotoAsync();
+        Task RemoveMyProfilePhotoAsync();
     }
 }

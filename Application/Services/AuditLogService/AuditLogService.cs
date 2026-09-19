@@ -5,7 +5,7 @@ using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Application.ModelsDto.AuditLogDtos;
-using AutoMapper;
+using MapsterMapper;
 using Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 

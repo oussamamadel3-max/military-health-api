@@ -14,5 +14,12 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
 
         builder.Property(u => u.FullName)
             .HasMaxLength(250);
+
+        builder.Property(u => u.ProfilePhotoPath)
+            .HasMaxLength(500);
+
+        builder.Property(u => u.LoginLockoutTier)
+            .HasDefaultValue(0)
+            .IsRequired();
     }
 }

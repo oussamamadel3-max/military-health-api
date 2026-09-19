@@ -37,6 +37,14 @@ namespace API.Controllers.AuthControllers
 
         [HttpGet("[action]")]
         [AuthorizePermission("UserManagement.Read")]
+        public async Task<IResult> GetPermissionModules()
+        {
+            var result = await _permissionService.GetPermissionModulesAsync();
+            return ApiResponse.Success("تم جلب وحدات الصلاحيات بنجاح.", result);
+        }
+
+        [HttpGet("[action]")]
+        [AuthorizePermission("UserManagement.Read")]
         public async Task<IResult> GetPermissionsWithRoles([FromQuery] string? name = null, [FromQuery] bool? isActive = null)
         {
             var result = await _permissionService.GetPermissionsWithRolesAsync(name, isActive);

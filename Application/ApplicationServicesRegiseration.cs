@@ -1,3 +1,5 @@
+using Mapster;
+using MapsterMapper;
 using Microsoft.Extensions.DependencyInjection;
 using System.Reflection;
 
@@ -7,10 +9,16 @@ namespace Application
     {
         public static IServiceCollection ConfigureApplicationServices(this IServiceCollection services)
         {
-            services.AddAutoMapper(Assembly.GetExecutingAssembly());
+            var config = new TypeAdapterConfig();
+            config.Scan(Assembly.GetExecutingAssembly());
+
+            // يفشل الإقلاع فورًا إذا كان أي تحويل غير صالح، بدل أن يظهر الخطأ عند أول طلب
+            config.Compile();
+
+            services.AddSingleton(config);
+            services.AddScoped<IMapper, ServiceMapper>();
 
             return services;
         }
     }
 }
-

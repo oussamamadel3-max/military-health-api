@@ -55,6 +55,9 @@ public class CreateRoleWithPermissionsDto
 
     [StringLength(500)]
     public string? Description { get; set; }
+
+    [Required(ErrorMessage = "يجب اختيار صلاحية واحدة على الأقل.")]
+    [MinLength(1, ErrorMessage = "يجب اختيار صلاحية واحدة على الأقل.")]
     public List<Guid> PermissionIds { get; set; } = new();
     public bool? IsActive { get; set; } = true;
 }

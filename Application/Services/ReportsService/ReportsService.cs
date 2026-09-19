@@ -3,86 +3,39 @@ using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Application.Common.Utilities;
 using Application.Dtos.DashboardDtos;
-using Application.Dtos.DocumentDtos;
 using Application.Dtos.ExportDtos;
 using Application.Dtos.ReportDtos;
-using Application.Exceptions;
 using Application.ModelsDto.AuditLogDtos;
 using Domain.Entities;
+using MapsterMapper;
 using Microsoft.EntityFrameworkCore;
 
 namespace Application.Services.Reports
 {
     public class ReportsService : IReportsService
     {
-        private readonly IDocumentRepository _documentRepository;
         private readonly IAuditLogRepository _auditLogRepository;
         private readonly IActorScopeProvider _actorScopeProvider;
         private readonly IUserContextService _userCtx;
         private readonly IExportService _export;
         private readonly IDashboardService _dashboard;
+        private readonly IMapper _mapper;
 
         public ReportsService(
-            IDocumentRepository documentRepository,
             IAuditLogRepository auditLogRepository,
             IActorScopeProvider actorScopeProvider,
             IUserContextService userCtx,
             IExportService export,
-            IDashboardService dashboard)
+            IDashboardService dashboard,
+            IMapper mapper)
         {
-            _documentRepository = documentRepository;
             _auditLogRepository = auditLogRepository;
             _actorScopeProvider = actorScopeProvider;
             _userCtx = userCtx;
             _export = export;
             _dashboard = dashboard;
+            _mapper = mapper;
         }
-
-        #region Export Documents
-        public async Task<ExportFileDto> ExportDocumentsAsync(DocumentSearchCriteria c, string format)
-        {
-            var userId = _userCtx.UserId ?? "";
-            var actorScope = await _actorScopeProvider.GetScopeAsync(userId);
-
-            var docs = await _documentRepository.ListAsync(actorScope, c);
-            var rows = docs.Select(d => new DocumentReportRowDto
-            {
-                DocumentNumber = d.DocumentNumber,
-                Title = d.Title ?? "",
-                CreatedAt = d.CreatedAt,
-                CreatedBy = d.User?.UserName ?? ""
-            }).ToList();
-
-            string? periodText = null;
-            if (c.CreatedFrom.HasValue || c.CreatedTo.HasValue)
-            {
-                var fromTxt = c.CreatedFrom?.ToString("yyyy/MM/dd") ?? "غير محدد";
-                var toTxt = c.CreatedTo?.ToString("yyyy/MM/dd") ?? "غير محدد";
-                periodText = $"{fromTxt} → {toTxt}";
-            }
-
-            var opt = new ExportOptions
-            {
-                ReportName = "Documents_Report",
-                SheetName = "Documents",
-                CustomTitle = "تقرير الوثائق",
-                PeriodText = periodText,
-                IncludeLogo = true,
-                IncludeFooter = true,
-                ColumnMappings = new Dictionary<string, string>
-                {
-                    ["DocumentNumber"] = "رقم الوثيقة",
-                    ["Title"] = "العنوان",
-                    ["CreatedAt"] = "تاريخ الإنشاء",
-                    ["CreatedBy"] = "أنشئ بواسطة",
-                }
-            };
-
-            return format.ToLower() == "pdf"
-                ? await _export.ExportToPdfAsync(rows, opt)
-                : await _export.ExportToExcelAsync(rows, opt);
-        }
-        #endregion
 
         #region Export Audit Logs
         public async Task<ExportFileDto> ExportAuditLogsAsync(AuditLogFilter filter, string format)
@@ -134,14 +87,8 @@ namespace Application.Services.Reports
 
             q = q.OrderByDescending(a => a.Timestamp);
 
-            var rows = await q.Select(a => new AuditLogReportRowDto
-            {
-                Timestamp = a.Timestamp,
-                UserName = a.UserName ?? "",
-                ActionType = a.ActionType ?? "",
-                TableName = a.TableName ?? "",
-                DocumentId = a.RecordId
-            }).ToListAsync();
+            var list = await q.ToListAsync();
+            var rows = _mapper.Map<List<AuditLogReportRowDto>>(list);
 
             var opt = new ExportOptions
             {
@@ -157,7 +104,7 @@ namespace Application.Services.Reports
                     ["UserName"] = "المستخدم",
                     ["ActionType"] = "الإجراء",
                     ["TableName"] = "اسم الجدول",
-                    ["DocumentId"] = "رقم السطر",
+                    ["RecordId"] = "رقم السطر",
                 }
             };
 
@@ -208,10 +155,6 @@ namespace Application.Services.Reports
 
             var rows = new List<DashboardExportRow>
             {
-                new() { Name = "عدد الوثائق", Value = dto.DocumentsCount.ToString() },
-                new() { Name = "إجمالي التخزين", Value = dto.StorageUsage?.TotalReadable ?? "0 B" },
-
-                new() { Name = "", Value = "" },
                 new() { Name = "أكثر المستخدمين نشاطًا", Value = "" },
             };
 

@@ -1,4 +1,5 @@
 using API.Infrastructure;
+using Application.Exceptions;
 using Domain.Exceptions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -44,6 +45,23 @@ public class ErrorHandlingMiddleware
             // =========================================================================
             // 1. Custom Business Exceptions (Domain & Application Logic Errors)
             // =========================================================================
+            case UserAccountLockedException lockedEx:
+                if (!context.Response.HasStarted)
+                {
+                    context.Response.Headers["Retry-After"] = lockedEx.RetryAfterSeconds.ToString();
+                }
+
+                response = ApiResponse.Error(
+                    message: lockedEx.Message,
+                    code: lockedEx.ErrorCode,
+                    meta: lockedEx.Meta,
+                    status: lockedEx.Status);
+
+                _logger.LogWarning(
+                    "LOGIN LOCKOUT: Code={ErrorCode}, RetryAfter={RetryAfter}, Message={Message}",
+                    lockedEx.ErrorCode, lockedEx.RetryAfterSeconds, lockedEx.Message);
+                break;
+
             case BusinessException bizEx:
                 response = ApiResponse.Error(
                     message: bizEx.Message,

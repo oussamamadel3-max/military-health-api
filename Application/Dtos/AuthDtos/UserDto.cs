@@ -95,6 +95,9 @@ public class CreateUserDto
     [RegularExpression(PasswordPolicy.ComplexityPattern, ErrorMessage = PasswordPolicy.ComplexityErrorMessage)]
     public string password { get; set; } = "";
     public bool isActive { get; set; } = true;
+
+    [Required(ErrorMessage = "يجب اختيار دور واحد على الأقل.")]
+    [MinLength(1, ErrorMessage = "يجب اختيار دور واحد على الأقل.")]
     public List<string> roles { get; set; } = new();
 }
 

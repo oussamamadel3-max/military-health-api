@@ -91,7 +91,7 @@
 //                IsActive = true,
 //                CreationDate = seedDate,
 //                SecurityStamp = Guid.NewGuid().ToString(),
-//                PasswordHash = hasher.HashPassword(null!, "Admin@123"),
+//                PasswordHash = hasher.HashPassword(null!, "cZf0bYa4HjMmqewUk2BM7#@3"),
 //            };
 
 

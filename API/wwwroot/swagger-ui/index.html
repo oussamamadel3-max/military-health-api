@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <title>Identity Project API</title>
+  <link rel="stylesheet" type="text/css" href="./swagger-ui.css" />
+  <link rel="stylesheet" type="text/css" href="./index.css" />
+  <link rel="stylesheet" type="text/css" href="/swagger-ui/dark.css" />
+  <link rel="icon" type="image/png" href="./favicon-32x32.png" sizes="32x32" />
+</head>
+<body>
+  <div id="swagger-ui"></div>
+
+  <script src="./swagger-ui-bundle.js" charset="utf-8"></script>
+  <script src="./swagger-ui-standalone-preset.js" charset="utf-8"></script>
+  <script>
+    window.onload = function () {
+      var specUrl = new URL("v2/swagger.json", window.location.href).href.split("#")[0];
+
+      window.ui = SwaggerUIBundle({
+        url: specUrl,
+        dom_id: "#swagger-ui",
+        deepLinking: true,
+        docExpansion: "list",
+        defaultModelsExpandDepth: -1,
+        displayRequestDuration: true,
+        tryItOutEnabled: true,
+        validatorUrl: null,
+        presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+        layout: "StandaloneLayout"
+      });
+    };
+  </script>
+</body>
+</html>

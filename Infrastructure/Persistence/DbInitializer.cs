@@ -20,8 +20,6 @@ namespace Infrastructure.Persistence
             // 1) تأكد من وجود القاعدة ومحدّثة
             await context.Database.MigrateAsync();
 
-
-
             // ============================
             // Helpers
             // ============================
@@ -116,12 +114,6 @@ namespace Infrastructure.Persistence
                 return perm;
             }
 
-            async Task EnsurePermissionsSetAsync(IEnumerable<(string Name, string? Desc)> list)
-            {
-                foreach (var (name, desc) in list)
-                    await EnsurePermissionAsync(name, desc);
-            }
-
             async Task EnsurePermissionsAndAssignToUserAsync(string userId, IEnumerable<(string Name, string? Desc)> list)
             {
                 foreach (var (name, desc) in list)
@@ -143,6 +135,7 @@ namespace Infrastructure.Persistence
                 }
                 await context.SaveChangesAsync();
             }
+
 
             async Task EnsureOrgUnitTypesAsync()
             {
@@ -203,11 +196,49 @@ namespace Infrastructure.Persistence
             }
 
 
+            async Task CleanupObsoletePermissionsAsync()
+            {
+                var obsolete = await context.Permissions
+                    .Where(p =>
+                        p.Name == "SuperAdmin" ||
+                        p.Name == "BranchManager" ||
+                        p.Name == "Document" ||
+                        p.Name == "ReportsDocuments" ||
+                        (p.Name != null && p.Name.StartsWith("Document.")) ||
+                        (p.Name != null && p.Name.StartsWith("ReportsDocuments.")))
+                    .ToListAsync();
+
+                if (obsolete.Count == 0) return;
+
+                var obsoleteIds = obsolete.Select(p => p.Id).ToList();
+
+                var userPerms = await context.UserPermissions
+                    .Where(up => up.PermissionId.HasValue && obsoleteIds.Contains(up.PermissionId.Value))
+                    .ToListAsync();
+                if (userPerms.Count > 0)
+                    context.UserPermissions.RemoveRange(userPerms);
+
+                var rolePerms = await context.RolePermissions
+                    .Where(rp => obsoleteIds.Contains(rp.PermissionId))
+                    .ToListAsync();
+                if (rolePerms.Count > 0)
+                    context.RolePermissions.RemoveRange(rolePerms);
+
+                var orgScopes = await context.UserOrgScopes
+                    .Where(s => obsoleteIds.Contains(s.PermissionId))
+                    .ToListAsync();
+                context.UserOrgScopes.RemoveRange(orgScopes);
+
+                context.Permissions.RemoveRange(obsolete);
+                await context.SaveChangesAsync();
+            }
+
+
             // ============================
             // 2) الأدوار
             // ============================
             var roleSuperAdmin = await EnsureRoleAsync("SuperAdmin", "SUPERADMIN");
-            var roleBranchManager = await EnsureRoleAsync("BranchManager", "BRANCHMANAGER");
+            _ = await EnsureRoleAsync("BranchManager", "BRANCHMANAGER");
             _ = await EnsureRoleAsync("DepartmentUser", "DEPARTMENTUSER");
 
             // ============================
@@ -227,9 +258,7 @@ namespace Infrastructure.Persistence
                 ("AuditLog.Read", "قراءة سجلات التدقيق"),
 
                 // عامة
-                ("SuperAdmin", "مدير النظام"),
                 ("Dashboard.Read", "قراءة لوحة التحكم"),
-                ("ReportsDocuments.Export", "تصدير تقرير الوثائق"),
                 ("ReportsAuditLogs.Export", "تصدير تقرير السجل"),
                 ("ReportsDashboard.Export", "تصدير تقرير لوحة التحكم"),
                 ("OrgStructure.Read", "قراءة الهيكل التنظيمي"),
@@ -242,21 +271,6 @@ namespace Infrastructure.Persistence
                 ("UserOrgScope.Delete", "حذف نطاقات المستخدمين التنظيمية")
             };
 
-            // 3.2) صلاحيات عامة: تُنشأ فقط
-            var publicPermsOnly = new (string Name, string? Desc)[]
-            {
-                // ========== Document CRUD =================
-                ("Document.Read",   "قراءة الوثائق"),
-                ("Document.Create", "إنشاء وثائق جديدة"),
-                ("Document.Edit",   "تعديل الوثائق"),
-                ("Document.Delete", "حذف الوثائق"),
-
-                // (موجودة ولكن لن تُمنح للسوبر)
-                ("BranchManager", "مدير الفرع"),
-            };
-
-            // إنشاء جميع الصلاحيات العامة
-            await EnsurePermissionsSetAsync(publicPermsOnly);
             await EnsureOrgUnitTypesAsync();
             await EnsureOrgUnitsAsync();
 
@@ -268,7 +282,7 @@ namespace Infrastructure.Persistence
             var superAdmin = await EnsureUserAsync(
                 userName: "superAdmin",
                 email: "superAdmin@gmail.com",
-                password: "Admin@123",
+                password: "cZf0bYa4HjMmqewUk2BM7#@3",
                 fullName: "Super Administrator",
                 attachRoles: new[] { roleSuperAdmin }
             );
@@ -276,14 +290,8 @@ namespace Infrastructure.Persistence
             // امنح SuperAdmin الصلاحيات الأساسية
             await EnsurePermissionsAndAssignToUserAsync(superAdmin.Id, permsForSuperAdmin);
 
-            // امنحه جميع صلاحيات CRUD العامة بدون BranchManager
-            var publicCrudPermsForSuperAdmin = publicPermsOnly
-                .Where(p => !string.Equals(p.Name, "BranchManager", StringComparison.OrdinalIgnoreCase))
-                .ToArray();
-
-            await EnsurePermissionsAndAssignToUserAsync(superAdmin.Id, publicCrudPermsForSuperAdmin);
-
-
+            // تنظيف صلاحيات قديمة (ليست أدوار)
+            await CleanupObsoletePermissionsAsync();
         }
     }
 }

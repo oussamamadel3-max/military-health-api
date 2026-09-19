@@ -43,9 +43,28 @@ namespace Application.Dtos.AuthDtos
         public DateTime CreationDate { get; set; }
         public string UserName { get; set; } = string.Empty;
         public string Email { get; set; } = string.Empty;
+        public string FullName { get; set; } = string.Empty;
+        public string? Phone { get; set; }
+        public string? ProfilePhotoUrl { get; set; }
 
         public List<string> Roles { get; set; } = new();
         public List<string> Permissions { get; set; } = new();
+    }
+
+    public class UpdateMyProfileRequest
+    {
+        [Required(ErrorMessage = "الاسم الكامل مطلوب.")]
+        [StringLength(100, MinimumLength = 3, ErrorMessage = "الاسم الكامل يجب أن يكون بين 3 و 100 حرف.")]
+        public string FullName { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "البريد الإلكتروني مطلوب.")]
+        [EmailAddress(ErrorMessage = "البريد الإلكتروني غير صالح.")]
+        [StringLength(254)]
+        public string Email { get; set; } = string.Empty;
+
+        [StringLength(20)]
+        [RegularExpression(@"^[0-9+ -]*$", ErrorMessage = "رقم الهاتف غير صالح.")]
+        public string? Phone { get; set; }
     }
 
 }

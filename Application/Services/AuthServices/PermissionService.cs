@@ -1,9 +1,12 @@
+using Application.Common.Localization;
+using Application.Common.Permissions;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Application.Dtos.AuthDtos;
 using Application.Exceptions;
 using Domain.Entities.Auth;
+using MapsterMapper;
 using Microsoft.AspNetCore.Identity;
 
 namespace Application.Services.AuthServices
@@ -13,15 +16,18 @@ namespace Application.Services.AuthServices
         private readonly IPermissionRepository _permissionRepository;
         private readonly IUnitOfWork _unitOfWork;
         private readonly RoleManager<Role> _roleManager;
+        private readonly IMapper _mapper;
 
         public PermissionService(
             IPermissionRepository permissionRepository,
             IUnitOfWork unitOfWork,
-            RoleManager<Role> roleManager)
+            RoleManager<Role> roleManager,
+            IMapper mapper)
         {
             _permissionRepository = permissionRepository;
             _unitOfWork = unitOfWork;
             _roleManager = roleManager;
+            _mapper = mapper;
         }
 
         #region الانشاء 
@@ -30,11 +36,11 @@ namespace Application.Services.AuthServices
             if (await _permissionRepository.ExistsByNameAsync(dto.Name))
                 throw new InvalidRoleDataException("الصلاحية موجودة مسبقاً.");
 
-            var permission = new Permission { Name = dto.Name, Description = dto.Description };
+            var permission = _mapper.Map<Permission>(dto);
             _permissionRepository.Add(permission);
             await _unitOfWork.SaveChangesAsync();
 
-            return new PermissionDto(permission.Id, permission.Name, permission.Description, permission.IsActive);
+            return _mapper.Map<PermissionDto>(permission);
         }
         #endregion
 
@@ -61,7 +67,7 @@ namespace Application.Services.AuthServices
             var permission = await _permissionRepository.FindByIdAsync(permissionId)
                 ?? throw new RoleNotFoundException("الصلاحية غير موجودة.");
 
-            return new PermissionDto(permission.Id, permission.Name, permission.Description ?? string.Empty, permission.IsActive);
+            return _mapper.Map<PermissionDto>(permission);
         }
         #endregion
 
@@ -71,8 +77,7 @@ namespace Application.Services.AuthServices
             var permission = await _permissionRepository.FindByIdAsync(id)
                 ?? throw new RoleNotFoundException("الصلاحية غير موجودة.");
 
-            permission.Name = dto.Name;
-            permission.Description = dto.Description;
+            _mapper.Map(dto, permission);
             await _unitOfWork.SaveChangesAsync();
         }
         #endregion
@@ -81,9 +86,56 @@ namespace Application.Services.AuthServices
         public async Task<List<PermissionDto>> GetPermissionsAsync()
         {
             var permissions = await _permissionRepository.GetAllOrderedAsync();
-            return permissions
-                .Select(p => new PermissionDto(p.Id, p.Name ?? string.Empty, p.Description ?? string.Empty, p.IsActive))
+            permissions = permissions
+                .Where(p => !PermissionCatalog.IsObsoletePermissionName(p.Name ?? string.Empty))
                 .ToList();
+            return _mapper.Map<List<PermissionDto>>(permissions);
+        }
+
+        public async Task<List<PermissionModuleDto>> GetPermissionModulesAsync()
+        {
+            var permissions = await _permissionRepository.GetAllOrderedAsync();
+            permissions = permissions
+                .Where(p => !PermissionCatalog.IsObsoletePermissionName(p.Name ?? string.Empty))
+                .ToList();
+
+            var modules = permissions
+                .GroupBy(p => PermissionCatalog.GetModuleKey(p.Name ?? string.Empty), StringComparer.OrdinalIgnoreCase)
+                .Select(g =>
+                {
+                    var moduleKey = g.Key;
+                    var moduleLabel = AuthDisplayNames.ModuleAr(moduleKey);
+                    var items = g
+                        .Select(p =>
+                        {
+                            var name = p.Name ?? string.Empty;
+                            var actionKey = PermissionCatalog.GetActionKey(name);
+                            return new PermissionModuleItemDto
+                            {
+                                Id = p.Id,
+                                Name = name,
+                                Description = string.IsNullOrWhiteSpace(p.Description)
+                                    ? AuthDisplayNames.PermissionAr(name)
+                                    : p.Description,
+                                ActionKey = actionKey,
+                                ActionLabel = AuthDisplayNames.ActionAr(actionKey),
+                                IsActive = p.IsActive,
+                            };
+                        })
+                        .OrderBy(i => i.ActionLabel, StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+
+                    return new PermissionModuleDto
+                    {
+                        ModuleKey = moduleKey,
+                        ModuleLabel = moduleLabel,
+                        Permissions = items,
+                    };
+                })
+                .OrderBy(m => m.ModuleLabel, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            return modules;
         }
         #endregion
 
@@ -94,29 +146,7 @@ namespace Application.Services.AuthServices
             var permissions = await _permissionRepository.GetWithRolesAsync(nameFilter, isActive);
             permissions = permissions.OrderBy(p => p.Name).ThenBy(p => p.Id).ToList();
 
-            return permissions.Select(p => new PermissionWithRolesResultDto
-            {
-                Roles = p.RolePermissions.Select(rp => new RoleDto
-                {
-                    Id = rp.Role.Id,
-                    Name = rp.Role.Name ?? string.Empty,
-                    Description = rp.Role.Description,
-                    IsActive = rp.Role.IsActive
-                }).ToList(),
-
-                Permissions = new List<PermissionWithRolesDto>
-                {
-                    new PermissionWithRolesDto
-                    {
-                        Id = p.Id,
-                        Name = p.Name ?? string.Empty,
-                        Description = p.Description,
-                        IsActive = p.IsActive,
-                        AssignedRoleIds = p.RolePermissions.Select(rp => rp.RoleId).ToList(),
-                        AssignedRolesCount = p.RolePermissions.Count
-                    }
-                }
-            }).ToList();
+            return _mapper.Map<List<PermissionWithRolesResultDto>>(permissions);
         }
         #endregion
 

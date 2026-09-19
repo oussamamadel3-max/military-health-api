@@ -1,4 +1,4 @@
-using AutoMapper;
+using MapsterMapper;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
@@ -128,13 +128,7 @@ namespace Application.Services.AuthServices
             var role = await _roleManager.Roles.FirstOrDefaultAsync(r => r.Id == id)
                 ?? throw new RoleNotFoundException("الدور غير موجود.");
 
-            var roleDto = new RoleDto
-            {
-                Id = role.Id,
-                Name = role.Name ?? string.Empty
-            };
-
-            return roleDto;
+            return _mapper.Map<RoleDto>(role);
         }
         #endregion
 
@@ -180,11 +174,7 @@ namespace Application.Services.AuthServices
                 .GroupBy(rp => rp.RoleId)
                 .ToDictionary(
                     g => g.Key,
-                    g => g.Select(rp => new PermissionInfoDto
-                    {
-                        Id = rp.Permission!.Id,
-                        Name = AuthDisplayNames.PermissionAr(rp.Permission.Name)
-                    }).ToList());
+                    g => _mapper.Map<List<PermissionInfoDto>>(g.Select(rp => rp.Permission!).ToList()));
 
             var assignedUsersDict = await _roleRepository.GetAssignedUserCountsAsync(roleIds);
 
@@ -281,11 +271,18 @@ namespace Application.Services.AuthServices
                 .Distinct()
                 .ToList();
 
-            var activeValidIds = await _permissionRepository.GetActiveIdsAsync(requestedIds);
+            if (requestedIds.Count == 0)
+                throw new InvalidRoleDataException("يجب اختيار صلاحية واحدة على الأقل.");
+
+            var activePermissions = await _permissionRepository.GetActiveByIdsAsync(requestedIds);
+            var activeValidIds = activePermissions.Select(p => p.Id).ToList();
 
             var missingOrInactive = requestedIds.Except(activeValidIds).ToList();
             if (missingOrInactive.Any())
                 throw new InvalidRoleDataException($"صلاحيات غير موجودة أو غير نشطة: {string.Join(", ", missingOrInactive)}");
+
+            PermissionDependencyRules.EnsureReadBeforeWriteActions(
+                activePermissions.Select(p => p.Name));
 
             var existingRolePerms = await _roleRepository.GetRolePermissionsAsync(dto.RoleId);
 
@@ -349,13 +346,20 @@ namespace Application.Services.AuthServices
 
             var inputIds = dto.PermissionIds ?? Enumerable.Empty<Guid>();
             var requestedDistinct = inputIds.Distinct().ToList();
+            if (requestedDistinct.Count == 0)
+                throw new InvalidRoleDataException("يجب اختيار صلاحية واحدة على الأقل.");
+
             var inputDuplicatesSkipped = inputIds.Count() - requestedDistinct.Count;
 
-            var validIds = await _permissionRepository.GetActiveIdsAsync(requestedDistinct);
+            var activePermissions = await _permissionRepository.GetActiveByIdsAsync(requestedDistinct);
+            var validIds = activePermissions.Select(p => p.Id).ToList();
 
             var inactiveIds = requestedDistinct.Except(validIds).ToList();
             if (inactiveIds.Any())
                 throw new InvalidRoleDataException($"الصلاحيات التالية غير نشطة: {string.Join(", ", inactiveIds)}");
+
+            PermissionDependencyRules.EnsureReadBeforeWriteActions(
+                activePermissions.Select(p => p.Name));
 
             var invalidSkipped = requestedDistinct.Count - validIds.Count;
 
@@ -403,14 +407,11 @@ namespace Application.Services.AuthServices
 
             var roleDetails = _mapper.Map<RoleDetailsDto>(role);
             var createdPermissions = await _roleRepository.GetRolePermissionsForRolesAsync(new[] { role.Id });
-            roleDetails.Permissions = createdPermissions
-                .Where(rp => rp.Permission != null)
-                .Select(rp => new PermissionInfoDto
-                {
-                    Id = rp.Permission!.Id,
-                    Name = rp.Permission.Name ?? string.Empty
-                })
-                .ToList();
+            roleDetails.Permissions = _mapper.Map<List<PermissionInfoDto>>(
+                createdPermissions
+                    .Where(rp => rp.Permission != null)
+                    .Select(rp => rp.Permission!)
+                    .ToList());
 
             roleDetails.PermissionsCount = roleDetails.Permissions.Count;
 
@@ -435,15 +436,12 @@ namespace Application.Services.AuthServices
         #region     جلب كل الصلاحيات الفعالة  
         public async Task<List<DropdownRoleDto>> GetDropdownRolesAsync()
         {
-            return await _roleRepository.QueryRoles()
+            var roles = await _roleRepository.QueryRoles()
                 .Where(r => r.IsActive)
                 .OrderBy(r => r.Name)
-                .Select(r => new DropdownRoleDto
-                {
-                    roleId = r.Id,
-                    name = AuthDisplayNames.RoleAr(r.Name ?? string.Empty)
-                })
                 .ToListAsync();
+
+            return _mapper.Map<List<DropdownRoleDto>>(roles);
         }
 
         public async Task<RoleStatusUpdateDto> ToggleRoleStatusAsync(Guid roleId)

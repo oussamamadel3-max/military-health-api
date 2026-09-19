@@ -50,9 +50,10 @@ namespace API.Controllers.AuthControllers
             [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
             [FromQuery][Range(1, 500)] int pageSize = 10,
             [FromQuery] string? q = null,
-            [FromQuery] bool? isActive = null)
+            [FromQuery] bool? isActive = null,
+            [FromQuery] string? roleId = null)
         {
-            var usersList = await _userService.GetUsersListAsync(pageNumber, pageSize, q, isActive);
+            var usersList = await _userService.GetUsersListAsync(pageNumber, pageSize, q, isActive, roleId);
             return ApiResponse.Success("تم جلب قائمة المستخدمين بنجاح.", usersList);
         }
 
@@ -85,6 +86,35 @@ namespace API.Controllers.AuthControllers
         {
             await _userService.ChangeOwnPasswordAsync(dto);
             return ApiResponse.Success("تم تغيير كلمة المرور بنجاح.");
+        }
+
+        [HttpPut("[action]")]
+        public async Task<IResult> UpdateMyProfile([FromBody] UpdateMyProfileRequest dto)
+        {
+            await _userService.UpdateMyProfileAsync(dto);
+            return ApiResponse.Success("تم تحديث الملف الشخصي بنجاح.");
+        }
+
+        [HttpPost("[action]")]
+        [Consumes("multipart/form-data")]
+        public async Task<IResult> UploadMyProfilePhoto(IFormFile file)
+        {
+            var photoUrl = await _userService.UploadMyProfilePhotoAsync(file);
+            return ApiResponse.Success("تم رفع الصورة الشخصية بنجاح.", new { profilePhotoUrl = photoUrl });
+        }
+
+        [HttpGet("[action]")]
+        public async Task<IActionResult> MyProfilePhoto()
+        {
+            var (bytes, contentType, _) = await _userService.GetMyProfilePhotoAsync();
+            return File(bytes, contentType);
+        }
+
+        [HttpDelete("[action]")]
+        public async Task<IResult> RemoveMyProfilePhoto()
+        {
+            await _userService.RemoveMyProfilePhotoAsync();
+            return ApiResponse.Success("تم حذف الصورة الشخصية بنجاح.");
         }
 
         [HttpPost("[action]")]

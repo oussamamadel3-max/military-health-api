@@ -3,7 +3,6 @@ using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Application.Services;
-using Application.Services.AttachmentService;
 using Application.Services.AuthServices;
 using Application.Services.Dashboard;
 using Application.Services.FileStorageService;
@@ -31,8 +30,6 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IPermissionRepository, PermissionRepository>();
         services.AddScoped<IFieldPermissionRepository, FieldPermissionRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
-        services.AddScoped<IDocumentRepository, DocumentRepository>();
-        services.AddScoped<IAttachmentRepository, AttachmentRepository>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
         services.AddScoped<IOrgUnitTypeRepository, OrgUnitTypeRepository>();
         services.AddScoped<IOrgUnitRepository, OrgUnitRepository>();
@@ -50,6 +47,7 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IPermissionService, PermissionService>();
         services.AddScoped<IFieldPermissionService, FieldPermissionService>();
         services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<ILoginLockoutService, LoginLockoutService>();
         services.AddScoped<IUserPermissionService, UserPermissionService>();
         services.AddScoped<ICurrentUserService, CurrentUserService>();
         services.AddScoped<ITokenService, TokenService>();
@@ -59,8 +57,6 @@ public static class InfrastructureServiceRegistration
 
         #region Application services
         services.AddScoped<IAuditLogService, AuditLogService>();
-        services.AddScoped<IDocumentService, DocumentService>();
-        services.AddScoped<IAttachmentService, AttachmentService>();
         services.AddScoped<IFileStorageService, FileStorageService>();
         services.AddScoped<IDashboardService, DashboardService>();
         services.AddScoped<IExportService, ExportService>();

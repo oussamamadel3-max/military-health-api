@@ -1,4 +1,5 @@
 using API.Infrastructure;
+using API.RateLimiting;
 using Application.Dtos.AuthDtos;
 using Application.Interfaces.Services;
 using Application.Services.AuthServices;
@@ -29,7 +30,7 @@ namespace API.Controllers.AuthControllers
             _userContextService = userContextService;
         }
 
-        [EnableRateLimiting("login")]
+        [EnableRateLimiting(RateLimitPolicies.Login)]
         [HttpPost("[action]")]
         public async Task<IResult> Login([FromBody] RequestToken requestToken)
         {

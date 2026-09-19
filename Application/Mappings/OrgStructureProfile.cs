@@ -1,75 +1,75 @@
 using Application.Dtos.CoreDtos;
-using AutoMapper;
+using Mapster;
 using Domain.Entities.Core;
 
 namespace Application.Mappings;
 
-public class OrgStructureProfile : Profile
+public class OrgStructureProfile : IRegister
 {
-    public OrgStructureProfile()
+    public void Register(TypeAdapterConfig config)
     {
-        CreateMap<OrgUnitType, OrgUnitTypeDto>();
-        CreateMap<CreateOrgUnitTypeDto, OrgUnitType>()
-            .ForMember(d => d.OrgUnitTypeId, o => o.Ignore())
-            .ForMember(d => d.Code, o => o.MapFrom(s => s.Code.Trim()))
-            .ForMember(d => d.NameAr, o => o.MapFrom(s => s.NameAr.Trim()));
-        CreateMap<UpdateOrgUnitTypeDto, OrgUnitType>()
-            .ForMember(d => d.OrgUnitTypeId, o => o.Ignore())
-            .ForMember(d => d.Code, o => o.MapFrom(s => s.Code.Trim()))
-            .ForMember(d => d.NameAr, o => o.MapFrom(s => s.NameAr.Trim()));
+        config.NewConfig<OrgUnitType, OrgUnitTypeDto>();
+        config.NewConfig<CreateOrgUnitTypeDto, OrgUnitType>()
+            .Ignore(d => d.OrgUnitTypeId)
+            .Map(d => d.Code, s => s.Code.Trim())
+            .Map(d => d.NameAr, s => s.NameAr.Trim());
+        config.NewConfig<UpdateOrgUnitTypeDto, OrgUnitType>()
+            .Ignore(d => d.OrgUnitTypeId)
+            .Map(d => d.Code, s => s.Code.Trim())
+            .Map(d => d.NameAr, s => s.NameAr.Trim());
 
-        CreateMap<OrgUnit, OrgUnitDto>()
-            .ForMember(d => d.OrgUnitTypeNameAr, o => o.MapFrom(s => s.OrgUnitType.NameAr))
-            .ForMember(d => d.ParentNameAr, o => o.MapFrom(s => s.ParentOrgUnit == null ? null : s.ParentOrgUnit.NameAr));
-        CreateMap<OrgUnit, OrgUnitTreeNodeDto>()
-            .ForMember(d => d.OrgUnitTypeNameAr, o => o.MapFrom(s => s.OrgUnitType.NameAr))
-            .ForMember(d => d.Children, o => o.Ignore());
-        CreateMap<OrgUnit, GuidDropDownDto>()
-            .ForMember(d => d.Id, o => o.MapFrom(s => s.OrgUnitId))
-            .ForMember(d => d.Name, o => o.MapFrom(s => s.NameAr));
-        CreateMap<CreateOrgUnitDto, OrgUnit>()
-            .ForMember(d => d.OrgUnitId, o => o.Ignore())
-            .ForMember(d => d.Code, o => o.MapFrom(s => string.IsNullOrWhiteSpace(s.Code) ? null : s.Code.Trim()))
-            .ForMember(d => d.NameAr, o => o.MapFrom(s => s.NameAr.Trim()))
-            .ForMember(d => d.Status, o => o.MapFrom(s => s.Status.Trim().ToUpperInvariant()))
-            .ForMember(d => d.ArchivedAt, o => o.Ignore())
-            .ForMember(d => d.OrgUnitType, o => o.Ignore())
-            .ForMember(d => d.ParentOrgUnit, o => o.Ignore());
-        CreateMap<UpdateOrgUnitDto, OrgUnit>()
-            .ForMember(d => d.OrgUnitId, o => o.Ignore())
-            .ForMember(d => d.Code, o => o.MapFrom(s => string.IsNullOrWhiteSpace(s.Code) ? null : s.Code.Trim()))
-            .ForMember(d => d.NameAr, o => o.MapFrom(s => s.NameAr.Trim()))
-            .ForMember(d => d.Status, o => o.MapFrom(s => s.Status.Trim().ToUpperInvariant()))
-            .ForMember(d => d.ArchivedAt, o => o.Ignore())
-            .ForMember(d => d.OrgUnitType, o => o.Ignore())
-            .ForMember(d => d.ParentOrgUnit, o => o.Ignore());
+        config.NewConfig<OrgUnit, OrgUnitDto>()
+            .Map(d => d.OrgUnitTypeNameAr, s => s.OrgUnitType.NameAr)
+            .Map(d => d.ParentNameAr, s => s.ParentOrgUnit == null ? null : s.ParentOrgUnit.NameAr);
+        config.NewConfig<OrgUnit, OrgUnitTreeNodeDto>()
+            .Map(d => d.OrgUnitTypeNameAr, s => s.OrgUnitType.NameAr)
+            .Ignore(d => d.Children);
+        config.NewConfig<OrgUnit, GuidDropDownDto>()
+            .Map(d => d.Id, s => s.OrgUnitId)
+            .Map(d => d.Name, s => s.NameAr);
+        config.NewConfig<CreateOrgUnitDto, OrgUnit>()
+            .Ignore(d => d.OrgUnitId)
+            .Map(d => d.Code, s => string.IsNullOrWhiteSpace(s.Code) ? null : s.Code.Trim())
+            .Map(d => d.NameAr, s => s.NameAr.Trim())
+            .Map(d => d.Status, s => s.Status.Trim().ToUpperInvariant())
+            .Ignore(d => d.ArchivedAt)
+            .Ignore(d => d.OrgUnitType)
+            .Ignore(d => d.ParentOrgUnit);
+        config.NewConfig<UpdateOrgUnitDto, OrgUnit>()
+            .Ignore(d => d.OrgUnitId)
+            .Map(d => d.Code, s => string.IsNullOrWhiteSpace(s.Code) ? null : s.Code.Trim())
+            .Map(d => d.NameAr, s => s.NameAr.Trim())
+            .Map(d => d.Status, s => s.Status.Trim().ToUpperInvariant())
+            .Ignore(d => d.ArchivedAt)
+            .Ignore(d => d.OrgUnitType)
+            .Ignore(d => d.ParentOrgUnit);
 
-        CreateMap<UserOrgScope, UserOrgScopeDto>()
-            .ForMember(d => d.UserName, o => o.MapFrom(s => s.User == null ? null : s.User.UserName))
-            .ForMember(d => d.UserFullName, o => o.MapFrom(s => s.User == null ? null : s.User.FullName))
-            .ForMember(d => d.PermissionName, o => o.MapFrom(s => s.Permission.Name))
-            .ForMember(d => d.OrgUnitNameAr, o => o.MapFrom(s => s.OrgUnit.NameAr));
-        CreateMap<CreateUserOrgScopeDto, UserOrgScope>()
-            .ForMember(d => d.UserOrgScopeId, o => o.Ignore())
-            .ForMember(d => d.UserId, o => o.MapFrom(s => s.UserId.Trim()))
-            .ForMember(d => d.ScopeMode, o => o.MapFrom(s => s.ScopeMode.Trim().ToUpperInvariant()))
-            .ForMember(d => d.Status, o => o.MapFrom(s => s.Status.Trim().ToUpperInvariant()))
-            .ForMember(d => d.AssignedAt, o => o.Ignore())
-            .ForMember(d => d.AssignedByUserId, o => o.Ignore())
-            .ForMember(d => d.User, o => o.Ignore())
-            .ForMember(d => d.Permission, o => o.Ignore())
-            .ForMember(d => d.OrgUnit, o => o.Ignore())
-            .ForMember(d => d.AssignedByUser, o => o.Ignore());
-        CreateMap<UpdateUserOrgScopeDto, UserOrgScope>()
-            .ForMember(d => d.UserOrgScopeId, o => o.Ignore())
-            .ForMember(d => d.UserId, o => o.Ignore())
-            .ForMember(d => d.ScopeMode, o => o.MapFrom(s => s.ScopeMode.Trim().ToUpperInvariant()))
-            .ForMember(d => d.Status, o => o.MapFrom(s => s.Status.Trim().ToUpperInvariant()))
-            .ForMember(d => d.AssignedAt, o => o.Ignore())
-            .ForMember(d => d.AssignedByUserId, o => o.Ignore())
-            .ForMember(d => d.User, o => o.Ignore())
-            .ForMember(d => d.Permission, o => o.Ignore())
-            .ForMember(d => d.OrgUnit, o => o.Ignore())
-            .ForMember(d => d.AssignedByUser, o => o.Ignore());
+        config.NewConfig<UserOrgScope, UserOrgScopeDto>()
+            .Map(d => d.UserName, s => s.User == null ? null : s.User.UserName)
+            .Map(d => d.UserFullName, s => s.User == null ? null : s.User.FullName)
+            .Map(d => d.PermissionName, s => s.Permission.Name)
+            .Map(d => d.OrgUnitNameAr, s => s.OrgUnit.NameAr);
+        config.NewConfig<CreateUserOrgScopeDto, UserOrgScope>()
+            .Ignore(d => d.UserOrgScopeId)
+            .Map(d => d.UserId, s => s.UserId.Trim())
+            .Map(d => d.ScopeMode, s => s.ScopeMode.Trim().ToUpperInvariant())
+            .Map(d => d.Status, s => s.Status.Trim().ToUpperInvariant())
+            .Ignore(d => d.AssignedAt)
+            .Ignore(d => d.AssignedByUserId)
+            .Ignore(d => d.User)
+            .Ignore(d => d.Permission)
+            .Ignore(d => d.OrgUnit)
+            .Ignore(d => d.AssignedByUser);
+        config.NewConfig<UpdateUserOrgScopeDto, UserOrgScope>()
+            .Ignore(d => d.UserOrgScopeId)
+            .Ignore(d => d.UserId)
+            .Map(d => d.ScopeMode, s => s.ScopeMode.Trim().ToUpperInvariant())
+            .Map(d => d.Status, s => s.Status.Trim().ToUpperInvariant())
+            .Ignore(d => d.AssignedAt)
+            .Ignore(d => d.AssignedByUserId)
+            .Ignore(d => d.User)
+            .Ignore(d => d.Permission)
+            .Ignore(d => d.OrgUnit)
+            .Ignore(d => d.AssignedByUser);
     }
 }
