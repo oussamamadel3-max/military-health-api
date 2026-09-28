@@ -47,7 +47,7 @@ namespace Application.Services.Reports
 
             var q = _auditLogRepository.Query().AsQueryable();
 
-            if (!actorScope.IsSuperAdmin && !actorScope.IsBranchManager)
+            if (!actorScope.IsSuperAdmin)
                 q = q.Where(a => a.UserId == actorScope.UserId);
 
             if (!string.IsNullOrWhiteSpace(filter.searchUserName))

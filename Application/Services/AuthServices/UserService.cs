@@ -74,7 +74,7 @@ public class UserService : IUserService
     {
         var errors = new List<string>();
 
-        var (_, actorIsSuperAdmin, actorIsBranchManager) = await GetActorAsync();
+        var (_, actorIsSuperAdmin) = await GetActorAsync();
 
         // تحقّقات أساسية
         if (string.IsNullOrWhiteSpace(createdUser.username)) errors.Add("اسم المستخدم مطلوب.");
@@ -104,7 +104,7 @@ public class UserService : IUserService
         if (missing.Any())
             throw new InvalidUserDataException($"أدوار غير موجودة أو غير نشطة: {string.Join(", ", missing)}");
 
-        if (!actorIsSuperAdmin && !actorIsBranchManager)
+        if (!actorIsSuperAdmin)
             throw new ForbiddenPermissionException("غير مسموح بإنشاء المستخدمين.");
 
         using var tx = await _unitOfWork.BeginTransactionAsync();
@@ -156,9 +156,9 @@ public class UserService : IUserService
     #region التعديل الكامل    
     public async Task Update(string id, UpdateUserDto updatedUser)
     {
-        var (_, actorIsSuperAdmin, actorIsBranchManager) = await GetActorAsync();
+        var (_, actorIsSuperAdmin) = await GetActorAsync();
 
-        if (!actorIsSuperAdmin && !actorIsBranchManager)
+        if (!actorIsSuperAdmin)
             throw new ForbiddenPermissionException("غير مسموح بتعديل المستخدمين.");
 
         var user = await _userRepository.GetByIdAsync(id)
@@ -211,9 +211,9 @@ public class UserService : IUserService
     #region الحذف
     public async Task Delete(string userId)
     {
-        var (_, actorIsSuperAdmin, actorIsBranchManager) = await GetActorAsync();
+        var (_, actorIsSuperAdmin) = await GetActorAsync();
 
-        if (!actorIsSuperAdmin && !actorIsBranchManager)
+        if (!actorIsSuperAdmin)
             throw new ForbiddenPermissionException("غير مسموح بحذف المستخدمين.");
 
         var user = await _userManager.FindByIdAsync(userId)
@@ -241,11 +241,10 @@ public class UserService : IUserService
 
         var actorScope = await _actorScopeProvider.GetScopeAsync(currentUserId);
         bool isSuperAdmin = actorScope.IsSuperAdmin;
-        bool isBranchManger = actorScope.IsBranchManager;
 
         IQueryable<User> baseQuery = _userRepository.QueryUsers();
 
-        if (!isSuperAdmin && !isBranchManger)
+        if (!isSuperAdmin)
             baseQuery = baseQuery.Where(u => false);
 
         baseQuery = baseQuery.Where(u => u.Id != currentUserId);
@@ -348,13 +347,13 @@ public class UserService : IUserService
     #region جلب حسب المعرف 
     public async Task<UserListItemDto> GetUserAsync(string id)
     {
-        var (actor, actorIsSuperAdmin, actorIsBranchManager) = await GetActorAsync();
+        var (actor, actorIsSuperAdmin) = await GetActorAsync();
 
         var user = await _userRepository.QueryUsers()
             .FirstOrDefaultAsync(u => u.Id == id)
             ?? throw new UserNotFoundException(id);
 
-        if (!actorIsSuperAdmin && !actorIsBranchManager && actor.Id != user.Id)
+        if (!actorIsSuperAdmin && actor.Id != user.Id)
             throw new ForbiddenPermissionException("غير مسموح بالوصول.");
 
         var roleAssociations = await _userRepository.QueryRoleAssociations()
@@ -401,10 +400,9 @@ public class UserService : IUserService
         var actorId = _currentUserService.UserId ?? string.Empty;
         var actorScope = await _actorScopeProvider.GetScopeAsync(actorId);
         var isSuperAdmin = actorScope.IsSuperAdmin;
-        var isBranchManager = actorScope.IsBranchManager;
 
-        if (!isSuperAdmin && !isBranchManager)
-            throw new ForbiddenPermissionException("غير مسموح بالتعديل إلا لمدير الفرع أو SuperAdmin.");
+        if (!isSuperAdmin)
+            throw new ForbiddenPermissionException("غير مسموح بالتعديل إلا لمدير النظام.");
 
         if (!string.IsNullOrWhiteSpace(dto.username) &&
             !string.Equals(dto.username, user.UserName, StringComparison.OrdinalIgnoreCase))
@@ -446,20 +444,6 @@ public class UserService : IUserService
 
         if (dto.roles != null)
         {
-            if (!isSuperAdmin)
-            {
-                var superAdminRoleId = await _roleRepository.GetSuperAdminRoleIdAsync();
-                bool touchesSuperAdmin =
-                    (dto.roles.Any(r => !string.IsNullOrWhiteSpace(r.RoleName) &&
-                                        r.RoleName.Equals("SuperAdmin", StringComparison.OrdinalIgnoreCase)))
-                    ||
-                    (dto.roles.Any(r => !string.IsNullOrWhiteSpace(r.RoleId) &&
-                                        r.RoleId == superAdminRoleId));
-
-                if (touchesSuperAdmin)
-                    throw new ForbiddenPermissionException("غير مسموح لمدير الفرع بمنح/سحب دور SuperAdmin.");
-            }
-
             var current = await _userRepository.GetRoleAssociationsAsync(user.Id);
             var requested = (dto.roles ?? new()).Where(r => r is not null).ToList();
 
@@ -721,10 +705,9 @@ public class UserService : IUserService
         var actorId = _currentUserService.UserId ?? string.Empty;
         var actorScope = await _actorScopeProvider.GetScopeAsync(actorId);
         var isSuperAdmin = actorScope.IsSuperAdmin;
-        var isBranchManager = actorScope.IsBranchManager;
 
-        if (!isSuperAdmin && !isBranchManager)
-            throw new ForbiddenPermissionException("غير مسموح بتعديل الأدوار إلا لمدير الفرع أو SuperAdmin.");
+        if (!isSuperAdmin)
+            throw new ForbiddenPermissionException("غير مسموح بتعديل الأدوار إلا لمدير النظام.");
 
         var incomingIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -756,12 +739,6 @@ public class UserService : IUserService
         }
 
         var activeIncomingIds = await _roleRepository.GetActiveRoleIdsAsync(incomingIds);
-        string? superAdminRoleId = await _roleRepository.GetSuperAdminRoleIdAsync();
-
-        if (!isSuperAdmin && !string.IsNullOrWhiteSpace(superAdminRoleId))
-        {
-            activeIncomingIds = activeIncomingIds.Where(id => !string.Equals(id, superAdminRoleId, StringComparison.OrdinalIgnoreCase)).ToList();
-        }
 
         var currentRoleIds = await _userRepository.GetActiveRoleIdsAsync(user.Id);
 
@@ -770,9 +747,6 @@ public class UserService : IUserService
 
         var toAdd = finalSet.Except(currentSet, StringComparer.OrdinalIgnoreCase).ToList();
         var toRemove = currentSet.Except(finalSet, StringComparer.OrdinalIgnoreCase).ToList();
-
-        if (!isSuperAdmin && !string.IsNullOrWhiteSpace(superAdminRoleId))
-            toRemove = toRemove.Where(id => !string.Equals(id, superAdminRoleId, StringComparison.OrdinalIgnoreCase)).ToList();
 
         if (toAdd.Count == 0 && toRemove.Count == 0)
             return;
@@ -826,10 +800,9 @@ public class UserService : IUserService
         var actorId = _currentUserService.UserId ?? string.Empty;
         var actorScope = await _actorScopeProvider.GetScopeAsync(actorId);
         var isSuperAdmin = actorScope.IsSuperAdmin;
-        var isBranchManager = actorScope.IsBranchManager;
 
-        if (!isSuperAdmin && !isBranchManager)
-            throw new ForbiddenPermissionException("غير مسموح بتعديل الصلاحيات المباشرة إلا لمدير الفرع أو SuperAdmin.");
+        if (!isSuperAdmin)
+            throw new ForbiddenPermissionException("غير مسموح بتعديل الصلاحيات المباشرة إلا لمدير النظام.");
 
         var incomingIds = new HashSet<Guid>();
         if (dto.PermissionId is { Count: > 0 })
@@ -907,8 +880,8 @@ public class UserService : IUserService
         var actorId = _currentUserService.UserId ?? string.Empty;
         var actorScope = await _actorScopeProvider.GetScopeAsync(actorId);
 
-        if (!actorScope.IsSuperAdmin && !actorScope.IsBranchManager)
-            throw new ForbiddenPermissionException("غير مسموح بإزالة الصلاحيات الحقلية إلا لمدير الفرع أو SuperAdmin.");
+        if (!actorScope.IsSuperAdmin)
+            throw new ForbiddenPermissionException("غير مسموح بإزالة الصلاحيات الحقلية إلا لمدير النظام.");
 
         var userFieldPermissions = (await _userRepository.GetUserFieldPermissionsAsync(dto.UserId))
             .Where(ufp => dto.FieldPermissionIds.Contains(ufp.FieldPermissionId))
@@ -1053,7 +1026,7 @@ public class UserService : IUserService
         await _unitOfWork.SaveChangesAsync();
     }
 
-    private async Task<(User actor, bool isSuperAdmin, bool isBranchManager)> GetActorAsync()
+    private async Task<(User actor, bool isSuperAdmin)> GetActorAsync()
     {
         var actorId = _currentUserService.UserId ?? string.Empty;
         var actorScope = await _actorScopeProvider.GetScopeAsync(actorId);
@@ -1061,6 +1034,6 @@ public class UserService : IUserService
         if (actorScope.Actor == null)
             throw new UnauthenticatedUserException();
 
-        return (actorScope.Actor, actorScope.IsSuperAdmin, actorScope.IsBranchManager);
+        return (actorScope.Actor, actorScope.IsSuperAdmin);
     }
 }

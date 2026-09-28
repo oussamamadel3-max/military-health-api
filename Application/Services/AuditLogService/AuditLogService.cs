@@ -194,7 +194,7 @@ namespace Application.Services
 
         private static IQueryable<AuditLog> ApplyScope(IQueryable<AuditLog> baseQuery, ActorScope scope)
         {
-            if (scope.IsSuperAdmin || scope.IsBranchManager) return baseQuery;
+            if (scope.IsSuperAdmin) return baseQuery;
             return baseQuery.Where(a => a.UserId == scope.UserId);
         }
     }

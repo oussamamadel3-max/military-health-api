@@ -9,9 +9,6 @@ namespace Application.Common.Localization
                 ["SuperAdmin"] = "مدير النظام",
                 ["SUPERADMIN"] = "مدير النظام",
 
-                ["BranchManager"] = "مدير الفرع",
-                ["BRANCHMANAGER"] = "مدير الفرع",
-
                 ["DepartmentUser"] = "مستخدم",
                 ["DEPARTMENTUSER"] = "مستخدم",
             };

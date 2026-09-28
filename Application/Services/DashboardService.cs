@@ -108,7 +108,7 @@ namespace Application.Services.Dashboard
 
         private IQueryable<AuditLog> ApplyScopeAudit(IQueryable<AuditLog> q, ActorScope scope)
         {
-            if (scope.IsSuperAdmin || scope.IsBranchManager) return q;
+            if (scope.IsSuperAdmin) return q;
             return q.Where(a => a.UserId == scope.UserId);
         }
 
