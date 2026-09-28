@@ -49,6 +49,33 @@ namespace Infrastructure.Persistence
                 return role;
             }
 
+            async Task RemoveRoleAsync(string name)
+            {
+                var role = await context.Roles.FirstOrDefaultAsync(r => r.Name == name);
+                if (role == null) return;
+
+                var associations = await context.UserRoleAssociations
+                    .Where(x => x.RoleId == role.Id)
+                    .ToListAsync();
+                if (associations.Count > 0)
+                    context.UserRoleAssociations.RemoveRange(associations);
+
+                var rolePerms = await context.RolePermissions
+                    .Where(x => x.RoleId == role.Id)
+                    .ToListAsync();
+                if (rolePerms.Count > 0)
+                    context.RolePermissions.RemoveRange(rolePerms);
+
+                var fieldLinks = await context.RoleFieldPermissions
+                    .Where(x => x.RoleId == role.Id)
+                    .ToListAsync();
+                if (fieldLinks.Count > 0)
+                    context.RoleFieldPermissions.RemoveRange(fieldLinks);
+
+                context.Roles.Remove(role);
+                await context.SaveChangesAsync();
+            }
+
             async Task<User> EnsureUserAsync(string userName, string email, string password,string fullName,IEnumerable<Role>? attachRoles = null)
             {
                 var u = await userManager.Users.FirstOrDefaultAsync(x => x.UserName == userName);
@@ -238,8 +265,8 @@ namespace Infrastructure.Persistence
             // 2) الأدوار
             // ============================
             var roleSuperAdmin = await EnsureRoleAsync("SuperAdmin", "SUPERADMIN");
-            _ = await EnsureRoleAsync("BranchManager", "BRANCHMANAGER");
             _ = await EnsureRoleAsync("DepartmentUser", "DEPARTMENTUSER");
+            await RemoveRoleAsync("BranchManager");
 
             // ============================
             // 3) الصلاحيات

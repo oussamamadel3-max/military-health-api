@@ -16,8 +16,7 @@ public class ActorScopeProvider : IActorScopeProvider
         var actor = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
         var normalizedRoleNames = await GetNormalizedRoleNamesAsync(userId, cancellationToken);
         var isSuperAdmin = normalizedRoleNames.Any(n => n == "SUPERADMIN");
-        var isBranchManager = normalizedRoleNames.Any(n => n == "BRANCHMANAGER");
-        return new ActorScope(actor, userId, isSuperAdmin, isBranchManager, normalizedRoleNames);
+        return new ActorScope(actor, userId, isSuperAdmin, normalizedRoleNames);
     }
 
     public async Task<IReadOnlyList<string>> GetNormalizedRoleNamesAsync(string userId, CancellationToken cancellationToken = default)
@@ -35,11 +34,5 @@ public class ActorScopeProvider : IActorScopeProvider
     {
         var names = await GetNormalizedRoleNamesAsync(userId, cancellationToken);
         return names.Any(n => n == "SUPERADMIN");
-    }
-
-    public async Task<bool> IsBranchManagerAsync(string userId, CancellationToken cancellationToken = default)
-    {
-        var names = await GetNormalizedRoleNamesAsync(userId, cancellationToken);
-        return names.Any(n => n == "BRANCHMANAGER");
     }
 }
