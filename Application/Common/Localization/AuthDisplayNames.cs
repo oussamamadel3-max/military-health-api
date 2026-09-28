@@ -8,9 +8,6 @@ namespace Application.Common.Localization
             {
                 ["SuperAdmin"] = "مدير النظام",
                 ["SUPERADMIN"] = "مدير النظام",
-
-                ["DepartmentUser"] = "مستخدم",
-                ["DEPARTMENTUSER"] = "مستخدم",
             };
 
         // ✅ ترجمة أسماء الصلاحيات حسب Permission.Name (الإنكليزي)
