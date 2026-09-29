@@ -22,7 +22,9 @@ namespace API.Controllers.AuthControllers
             _fieldPermissionService = fieldPermissionService;
         }
 
+        /// <summary>قائمة صلاحيات الحقول. الشرط: تسجيل الدخول وUserManagement.Read.</summary>
         [HttpGet("[action]")]
+        [AuthorizePermission("UserManagement.Read")]
         public async Task<IResult> GetFieldPermissions(
             [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
             [FromQuery][Range(1, 500)] int pageSize = 10,
@@ -45,56 +47,72 @@ namespace API.Controllers.AuthControllers
             return ApiResponse.Success("تم جلب صلاحيات الحقول بنجاح.", result);
         }
 
+        /// <summary>صلاحية حقل بالمعرف. الشرط: تسجيل الدخول وUserManagement.Read.</summary>
         [HttpGet("[action]/{id}")]
+        [AuthorizePermission("UserManagement.Read")]
         public async Task<IResult> GetById(Guid id)
         {
             var result = await _fieldPermissionService.GetByIdAsync(id);
             return ApiResponse.Success("تم جلب صلاحية الحقل بنجاح.", result);
         }
 
+        /// <summary>إنشاء صلاحيات حقول. الشرط: تسجيل الدخول وUserManagement.Create.</summary>
         [HttpPost("[action]")]
+        [AuthorizePermission("UserManagement.Create")]
         public async Task<IResult> Create([FromBody] CreateFieldPermissionDto dto)
         {
             var result = await _fieldPermissionService.CreateAsync(dto);
             return ApiResponse.Success("تم إنشاء صلاحيات الحقول بنجاح.", result);
         }
 
+        /// <summary>تعديل صلاحية حقل. الشرط: تسجيل الدخول وUserManagement.Edit.</summary>
         [HttpPut("[action]/{id}")]
+        [AuthorizePermission("UserManagement.Edit")]
         public async Task<IResult> Update(Guid id, [FromBody] UpdateFieldPermissionDto dto)
         {
             await _fieldPermissionService.UpdateAsync(id, dto);
             return ApiResponse.Success("تم تعديل صلاحيات الحقل بنجاح.");
         }
 
+        /// <summary>حذف صلاحية حقل. الشرط: تسجيل الدخول وUserManagement.Delete.</summary>
         [HttpDelete("[action]/{id}")]
+        [AuthorizePermission("UserManagement.Delete")]
         public async Task<IResult> Delete(Guid id)
         {
             await _fieldPermissionService.DeleteAsync(id);
             return ApiResponse.Success("تم حذف صلاحية الحقل بنجاح.");
         }
 
+        /// <summary>تغيير نوع الوصول. الشرط: تسجيل الدخول وUserManagement.Edit.</summary>
         [HttpPatch("[action]/{id}")]
+        [AuthorizePermission("UserManagement.Edit")]
         public async Task<IResult> ChangeAccessType(Guid id, [FromBody] ChangeFieldPermissionAccessTypeDto dto)
         {
             await _fieldPermissionService.ChangeAccessTypeAsync(id, dto);
             return ApiResponse.Success("تم تغيير نوع الوصول بنجاح.");
         }
 
+        /// <summary>قائمة الكيانات. الشرط: تسجيل الدخول وUserManagement.Read.</summary>
         [HttpGet("[action]")]
+        [AuthorizePermission("UserManagement.Read")]
         public async Task<IResult> GetEntities()
         {
             var result = await _fieldPermissionService.GetEntitiesAsync();
             return ApiResponse.Success("تم جلب قائمة الكيانات بنجاح.", result);
         }
 
+        /// <summary>حقول كيان. الشرط: تسجيل الدخول وUserManagement.Read.</summary>
         [HttpGet("[action]/{entityName}")]
+        [AuthorizePermission("UserManagement.Read")]
         public async Task<IResult> GetFields(string entityName)
         {
             var result = await _fieldPermissionService.GetFieldsAsync(entityName);
             return ApiResponse.Success("تم جلب قائمة الحقول بنجاح.", result);
         }
 
+        /// <summary>أنواع الوصول. الشرط: تسجيل الدخول وUserManagement.Read.</summary>
         [HttpGet("[action]")]
+        [AuthorizePermission("UserManagement.Read")]
         public IResult GetAccessTypes()
         {
             var list = Enum.GetValues(typeof(FieldAccessType))
