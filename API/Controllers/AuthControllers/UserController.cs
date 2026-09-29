@@ -141,6 +141,10 @@ namespace API.Controllers.AuthControllers
             return ApiResponse.Success("تم تعديل صلاحيات المستخدم بنجاح.");
         }
 
+        /// <summary>
+        /// إزالة روابط صلاحيات الحقول عن مستخدم. الشرط: تسجيل الدخول وUserManagement.Edit،
+        /// والمنفّذ SuperAdmin. يُبطل جلسات المستخدم بعد الإزالة.
+        /// </summary>
         [HttpPost("[action]")]
         [AuthorizePermission("UserManagement.Edit")]
         public async Task<IResult> RemoveFieldPermissionsFromUser([FromBody] RemoveFieldPermissionsDto dto)

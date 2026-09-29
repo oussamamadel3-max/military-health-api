@@ -86,21 +86,15 @@ namespace Application.Services.AuthServices
         public async Task<List<PermissionDto>> GetPermissionsAsync()
         {
             var permissions = await _permissionRepository.GetAllOrderedAsync();
-            permissions = permissions
-                .Where(p => !PermissionCatalog.IsObsoletePermissionName(p.Name ?? string.Empty))
-                .ToList();
             return _mapper.Map<List<PermissionDto>>(permissions);
         }
 
         public async Task<List<PermissionModuleDto>> GetPermissionModulesAsync()
         {
             var permissions = await _permissionRepository.GetAllOrderedAsync();
-            permissions = permissions
-                .Where(p => !PermissionCatalog.IsObsoletePermissionName(p.Name ?? string.Empty))
-                .ToList();
 
             var modules = permissions
-                .GroupBy(p => PermissionCatalog.GetModuleKey(p.Name ?? string.Empty), StringComparer.OrdinalIgnoreCase)
+                .GroupBy(p => PermissionDependencyRules.GetModuleKey(p.Name ?? string.Empty), StringComparer.OrdinalIgnoreCase)
                 .Select(g =>
                 {
                     var moduleKey = g.Key;
@@ -109,7 +103,7 @@ namespace Application.Services.AuthServices
                         .Select(p =>
                         {
                             var name = p.Name ?? string.Empty;
-                            var actionKey = PermissionCatalog.GetActionKey(name);
+                            var actionKey = PermissionDependencyRules.GetActionKey(name);
                             return new PermissionModuleItemDto
                             {
                                 Id = p.Id,
