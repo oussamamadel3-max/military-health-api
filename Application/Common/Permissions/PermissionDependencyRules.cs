@@ -31,8 +31,8 @@ public static class PermissionDependencyRules
             if (string.IsNullOrWhiteSpace(rawName)) continue;
 
             var name = rawName.Trim();
-            var moduleKey = PermissionCatalog.GetModuleKey(name);
-            var actionKey = PermissionCatalog.GetActionKey(name);
+            var moduleKey = GetModuleKey(name);
+            var actionKey = GetActionKey(name);
 
             if (string.IsNullOrWhiteSpace(moduleKey) || string.IsNullOrWhiteSpace(actionKey))
                 continue;
@@ -62,5 +62,25 @@ public static class PermissionDependencyRules
             throw createException(
                 $"لا يمكن تعيين صلاحيات ({actionLabels}) لوحدة «{moduleLabel}» بدون صلاحية القراءة.");
         }
+    }
+
+    public static string GetModuleKey(string permissionName)
+    {
+        if (string.IsNullOrWhiteSpace(permissionName)) return string.Empty;
+
+        var trimmed = permissionName.Trim();
+        var dot = trimmed.IndexOf('.');
+        return dot < 0 ? trimmed : trimmed[..dot];
+    }
+
+    public static string GetActionKey(string permissionName)
+    {
+        if (string.IsNullOrWhiteSpace(permissionName)) return string.Empty;
+
+        var trimmed = permissionName.Trim();
+        var dot = trimmed.IndexOf('.');
+        return dot < 0 || dot >= trimmed.Length - 1
+            ? string.Empty
+            : trimmed[(dot + 1)..];
     }
 }
