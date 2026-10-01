@@ -79,7 +79,9 @@ public class AppDbContext : DbContext
 
         if (auditLogsToSave.Any())
         {
-            _ = Task.Run(() => SaveAuditLogsInBackground(auditLogsToSave));
+            // نسخ القائمة لأن ChangeTracker قد يتغيّر بعد العودة
+            var snapshot = auditLogsToSave.ToList();
+            _ = Task.Run(async () => await SaveAuditLogsInBackground(snapshot));
         }
 
         return result;
@@ -87,9 +89,16 @@ public class AppDbContext : DbContext
 
     private async Task SaveAuditLogsInBackground(List<AuditLog> auditLogs)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var auditContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        auditContext.AuditLogs.AddRange(auditLogs);
-        await auditContext.SaveChangesAsync();
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var auditContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            auditContext.AuditLogs.AddRange(auditLogs);
+            await auditContext.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceError($"Failed to persist audit logs: {ex}");
+        }
     }
 }

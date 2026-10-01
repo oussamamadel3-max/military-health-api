@@ -16,10 +16,11 @@ namespace Application.Mappings
                 .Map(dest => dest.Timestamp, _ => DateTime.Now);
 
             config.NewConfig<AuditLog, AuditLogReportRowDto>()
+                .Map(dest => dest.LogId, src => src.LogId.ToString())
                 .Map(dest => dest.UserName, src => src.UserName ?? string.Empty)
                 .Map(dest => dest.ActionType, src => src.ActionType ?? string.Empty)
                 .Map(dest => dest.TableName, src => src.TableName ?? string.Empty)
-                .Map(dest => dest.RecordId, src => src.RecordId);
+                .Map(dest => dest.Timestamp, src => src.Timestamp);
 
             config.NewConfig<AuditLog, RecentActivityDto>()
                 .Map(dest => dest.Id, src => src.LogId)

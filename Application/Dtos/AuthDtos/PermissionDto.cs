@@ -19,26 +19,6 @@ namespace Application.Dtos.AuthDtos
         public string? Description { get; set; }
         public bool IsActive { get; set; } = true;
     }
-    public class CreatePermissionDto
-    {
-        [Required(ErrorMessage = "اسم الصلاحية مطلوب.")]
-        [StringLength(200, MinimumLength = 2)]
-        public string Name { get; set; } = string.Empty;
-
-        [StringLength(500)]
-        public string? Description { get; set; }
-        public bool? IsActive { get; set; }
-    }
-
-    public class UpdatePermissionDto
-    {
-        [Required(ErrorMessage = "اسم الصلاحية مطلوب.")]
-        [StringLength(200, MinimumLength = 2)]
-        public string Name { get; set; } = string.Empty;
-
-        [StringLength(500)]
-        public string? Description { get; set; }
-    }
 
     public class AssignPermissionToUserDto
     {

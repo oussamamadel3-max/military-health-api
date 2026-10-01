@@ -14,18 +14,15 @@ namespace Application.Services
     public class AuditLogService : IAuditLogService
     {
         private readonly IAuditLogRepository _auditLogs;
-        private readonly IActorScopeProvider _actorScope;
         private readonly ICurrentUserService _currentUser;
         private readonly IMapper _mapper;
 
         public AuditLogService(
             IAuditLogRepository auditLogs,
-            IActorScopeProvider actorScope,
             IMapper mapper,
             ICurrentUserService currentUser)
         {
             _auditLogs = auditLogs;
-            _actorScope = actorScope;
             _mapper = mapper;
             _currentUser = currentUser;
         }
@@ -33,9 +30,7 @@ namespace Application.Services
         #region استرجاع سجل حسب المعرف (يستخدم AuditLogDetailsDto)
         public async Task<AuditLogDetailsDto> GetByIdAsync(long id)
         {
-            var scope = await GetActorScopeAsync();
-
-            var scoped = ApplyScope(_auditLogs.Query(), scope)
+            var scoped = _auditLogs.Query()
                          .Where(a => a.LogId == id);
 
             var entity = await scoped.FirstOrDefaultAsync()
@@ -52,9 +47,7 @@ namespace Application.Services
             if (pageNumber < 1) pageNumber = 1;
             if (pageSize < 1) pageSize = 10;
 
-            var scope = await GetActorScopeAsync();
-
-            var scoped = ApplyScope(_auditLogs.Query(), scope)
+            var scoped = _auditLogs.Query()
                          .OrderByDescending(a => a.Timestamp);
 
             var total = await scoped.CountAsync();
@@ -77,10 +70,7 @@ namespace Application.Services
             if (pageSize < 1) pageSize = 10;
 
             auditLogFilter ??= new AuditLogFilter();
-
-            var scope = await GetActorScopeAsync();
-
-            var scoped = ApplyScope(_auditLogs.Query(), scope);
+            var scoped = _auditLogs.Query();
 
             if (!string.IsNullOrWhiteSpace(auditLogFilter.searchUserName))
             {
@@ -161,9 +151,7 @@ namespace Application.Services
         #region   جلب ملخص إحصائي للسجلات
         public async Task<AuditLogSummaryDto> GetSummaryAsync()
         {
-            var scope = await GetActorScopeAsync();
-
-            var scoped = ApplyScope(_auditLogs.Query(), scope);
+            var scoped = _auditLogs.Query();
 
             var grouped = await scoped
                 .GroupBy(a => a.ActionType)
@@ -184,18 +172,9 @@ namespace Application.Services
             };
         }
 
+        public Task<List<string>> GetEntityTypeNamesAsync()
+            => _auditLogs.GetEntityTypeNamesAsync();
+
         #endregion
-
-        private async Task<ActorScope> GetActorScopeAsync()
-        {
-            var userId = _currentUser.UserId ?? string.Empty;
-            return await _actorScope.GetScopeAsync(userId);
-        }
-
-        private static IQueryable<AuditLog> ApplyScope(IQueryable<AuditLog> baseQuery, ActorScope scope)
-        {
-            if (scope.IsSuperAdmin) return baseQuery;
-            return baseQuery.Where(a => a.UserId == scope.UserId);
-        }
-    }
+}
 }

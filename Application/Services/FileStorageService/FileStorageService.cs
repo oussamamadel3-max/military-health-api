@@ -32,7 +32,7 @@ public class FileStorageService : IFileStorageService
         _maxFileSizeInBytes = (configuration.GetValue<int?>("FileStorage:MaxFileSizeInMB") ?? 50) * 1024 * 1024;
 
         var exts = configuration.GetSection("FileStorage:AllowedExtensions").Get<string[]>()
-            ?? new[] { ".pdf", ".jpg", ".jpeg", ".png", ".doc", ".docx", ".xls", ".xlsx", ".txt", ".zip", ".rar", ".csv", ".svg" };
+            ?? new[] { ".pdf", ".jpg", ".jpeg", ".png", ".webp", ".doc", ".docx", ".xls", ".xlsx" };
 
         _allowedExtensions = new HashSet<string>(
             exts.Select(e => (e ?? "").Trim().ToLowerInvariant()).Where(e => !string.IsNullOrWhiteSpace(e)),
@@ -230,9 +230,12 @@ public class FileStorageService : IFileStorageService
         if (extension == ".rar")
             return read >= 4 && header[0] == 0x52 && header[1] == 0x61 && header[2] == 0x72 && header[3] == 0x21;
 
-        if (extension == ".txt" || extension == ".csv" || extension == ".svg")
-            return true;
+        if (extension == ".webp")
+            return read >= 12 &&
+                   header[0] == 0x52 && header[1] == 0x49 && header[2] == 0x46 && header[3] == 0x46 &&
+                   header[8] == 0x57 && header[9] == 0x45 && header[10] == 0x42 && header[11] == 0x50;
 
+        // لا نقبل امتدادات نصية/SVG بدون تحقق توقيع — تُرفض افتراضياً
         return false;
     }
 

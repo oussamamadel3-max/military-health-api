@@ -1,4 +1,5 @@
 using API.Infrastructure;
+using Application.Common.Permissions;
 using Application.Dtos.AuthDtos;
 using Application.Interfaces.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -21,7 +22,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpPost("[action]")]
-        [AuthorizePermission("UserManagement.Create")]
+        [AuthorizePermission(SystemPermissions.RoleManagement.Create)]
         public async Task<IResult> Create([FromBody] CreateRoleDto newRole)
         {
             var addRole = await _roleService.CreateRoleAsync(newRole);
@@ -29,7 +30,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpPut("[action]/{id}")]
-        [AuthorizePermission("UserManagement.Edit")]
+        [AuthorizePermission(SystemPermissions.RoleManagement.Edit)]
         public async Task<IResult> Update(string id, [FromBody] UpdateRoleDto updatedRole)
         {
             await _roleService.UpdateRoleAsync(id, updatedRole);
@@ -37,7 +38,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpDelete("[action]/{id}")]
-        [AuthorizePermission("UserManagement.Delete")]
+        [AuthorizePermission(SystemPermissions.RoleManagement.Delete)]
         public async Task<IResult> Delete(string id)
         {
             await _roleService.DeleteRoleAsync(id);
@@ -45,7 +46,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpGet("[action]/{id}")]
-        [AuthorizePermission("UserManagement.Read")]
+        [AuthorizePermission(SystemPermissions.RoleManagement.Read)]
         public async Task<IResult> GetById(string id)
         {
             var role = await _roleService.GetById(id);
@@ -53,7 +54,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpGet("[action]")]
-        [AuthorizePermission("UserManagement.Read")]
+        [AuthorizePermission(SystemPermissions.RoleManagement.Read)]
         public async Task<IResult> GetRolesWithDetails(
             [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
             [FromQuery][Range(1, 500)] int pageSize = 10,
@@ -65,7 +66,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpPost("[action]")]
-        [AuthorizePermission("UserManagement.Create")]
+        [AuthorizePermission(SystemPermissions.RoleManagement.AssignPermissions)]
         public async Task<IResult> SyncPermissionsForRole([FromBody] AssignPermissionsDto dto)
         {
             var summary = await _roleService.SyncPermissionsForRoleAsync(dto);
@@ -73,7 +74,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpPost("[action]")]
-        [AuthorizePermission("UserManagement.Create")]
+        [AuthorizePermission(SystemPermissions.RoleManagement.Create, SystemPermissions.RoleManagement.AssignPermissions)]
         public async Task<IResult> CreateRoleWithPermissions([FromBody] CreateRoleWithPermissionsDto dto)
         {
             var result = await _roleService.CreateRoleWithPermissionsAsync(dto);
@@ -81,7 +82,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpGet("[action]")]
-        [AuthorizePermission("UserManagement.Read")]
+        [AuthorizePermission(SystemPermissions.RoleManagement.Read)]
         public async Task<IResult> GetActiveRolesCount()
         {
             var count = await _roleService.GetActiveRolesCount();
@@ -89,7 +90,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpGet("[action]")]
-        [AuthorizePermission("UserManagement.Read")]
+        [AuthorizePermission(SystemPermissions.RoleManagement.Read)]
         public async Task<IResult> GetDropdownRoles()
         {
             var roles = await _roleService.GetDropdownRolesAsync();
@@ -97,7 +98,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpPatch("[action]/{roleId}")]
-        [AuthorizePermission("UserManagement.Edit")]
+        [AuthorizePermission(SystemPermissions.RoleManagement.ChangeStatus)]
         public async Task<IResult> ToggleRoleStatus(Guid roleId)
         {
             var result = await _roleService.ToggleRoleStatusAsync(roleId);

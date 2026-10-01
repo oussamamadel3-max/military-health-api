@@ -171,6 +171,10 @@ public class ErrorHandlingMiddleware
     {
         if (ex.InnerException is Microsoft.Data.SqlClient.SqlException sqlEx)
             return sqlEx.Number == 2601 || sqlEx.Number == 2627;
+
+        if (ex.InnerException is Npgsql.PostgresException pgEx)
+            return pgEx.SqlState == "23505";
+
         return false;
     }
 }

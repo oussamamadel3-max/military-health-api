@@ -72,4 +72,18 @@ public class PermissionRepository : IPermissionRepository
 
     public void AddRolePermission(RolePermission link) => _context.RolePermissions.Add(link);
     public void RemoveRolePermission(RolePermission link) => _context.RolePermissions.Remove(link);
+
+    public async Task<List<string>> GetRoleIdsByPermissionIdAsync(Guid permissionId, CancellationToken cancellationToken = default)
+        => await _context.RolePermissions.AsNoTracking()
+            .Where(rp => rp.PermissionId == permissionId)
+            .Select(rp => rp.RoleId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+    public async Task<List<string>> GetUserIdsByPermissionIdAsync(Guid permissionId, CancellationToken cancellationToken = default)
+        => await _context.UserPermissions.AsNoTracking()
+            .Where(up => up.PermissionId == permissionId)
+            .Select(up => up.UserId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
 }

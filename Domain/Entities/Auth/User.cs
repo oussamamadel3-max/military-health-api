@@ -1,8 +1,10 @@
+using Domain.Common;
+using Domain.Interfaces;
 using Microsoft.AspNetCore.Identity;
 
 namespace Domain.Entities.Auth;
 
-public class User : IdentityUser
+public class User : IdentityUser, IAuditableEntity
 {
     public DateTime CreationDate { get; set; } = DateTime.Now;
     public bool IsActive { get; set; } = true;
@@ -24,4 +26,6 @@ public class User : IdentityUser
     /// صلاحيات الحقول الخاصة بالمستخدم (جدول ربط مع FieldPermission)
     /// </summary>
     public IList<UserFieldPermission> UserFieldPermissions { get; set; } = new List<UserFieldPermission>();
+
+    public long GetPrimaryKey() => AuditPrimaryKey.FromString(Id);
 }

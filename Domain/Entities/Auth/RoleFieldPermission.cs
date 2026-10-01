@@ -1,6 +1,9 @@
+using Domain.Common;
+using Domain.Interfaces;
+
 namespace Domain.Entities.Auth
 {
-    public class RoleFieldPermission
+    public class RoleFieldPermission : IAuditableEntity
     {
         public Guid Id { get; set; } = Guid.NewGuid();
 
@@ -9,7 +12,7 @@ namespace Domain.Entities.Auth
 
         public string RoleId { get; set; } = string.Empty;
         public Role Role { get; set; } = null!;
+
+        public long GetPrimaryKey() => AuditPrimaryKey.FromGuid(Id);
     }
-
 }
-

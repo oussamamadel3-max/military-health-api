@@ -1,4 +1,5 @@
 using API.RateLimiting;
+using Application.Common.Permissions;
 using Application.Interfaces.Services;
 using Application.ModelsDto.AuditLogDtos;
 using Microsoft.AspNetCore.Mvc;
@@ -16,7 +17,7 @@ namespace API.Controllers
 
         // POST api/reports/auditlogs/export?format=pdf
         [HttpPost("auditlogs/export")]
-        [AuthorizePermission("ReportsAuditLogs.Export")]
+        [AuthorizePermission(SystemPermissions.AuditLog.Export)]
         [EnableRateLimiting(RateLimitPolicies.Reports)]
         public async Task<IActionResult> ExportAudit(
             [FromForm] AuditLogFilter filter,
@@ -28,7 +29,7 @@ namespace API.Controllers
 
         // POST api/reports/dashboard/export?format=
         [HttpPost("dashboard/export")]
-        [AuthorizePermission("ReportsDashboard.Export")]
+        [AuthorizePermission(SystemPermissions.Dashboard.Export)]
         [EnableRateLimiting(RateLimitPolicies.Reports)]
         public async Task<IActionResult> ExportDashboard(
             [FromForm] DashboardFilter filter,

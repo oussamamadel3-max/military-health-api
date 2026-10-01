@@ -134,4 +134,10 @@ public class UserRepository : IUserRepository
             .Select(ura => ura.UserId)
             .Distinct()
             .ToListAsync(cancellationToken);
+
+    public async Task<List<string>> GetActiveUserIdsExceptAsync(string excludeUserId, CancellationToken cancellationToken = default)
+        => await _context.Users.AsNoTracking()
+            .Where(u => u.IsActive && u.Id != excludeUserId)
+            .Select(u => u.Id)
+            .ToListAsync(cancellationToken);
 }

@@ -1,4 +1,5 @@
 using API.Infrastructure;
+using Application.Common.Permissions;
 using Application.Dtos.AuthDtos;
 using Application.Interfaces.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -20,7 +21,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpGet("[action]/{id}")]
-        [AuthorizePermission("UserManagement.Read")]
+        [AuthorizePermission(SystemPermissions.PermissionManagement.Read)]
         public async Task<IResult> GetById(string id)
         {
             var permission = await _permissionService.GetByIdAsync(id);
@@ -28,7 +29,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpGet("[action]")]
-        [AuthorizePermission("UserManagement.Read")]
+        [AuthorizePermission(SystemPermissions.PermissionManagement.Read)]
         public async Task<IResult> GetPermissions()
         {
             var result = await _permissionService.GetPermissionsAsync();
@@ -36,7 +37,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpGet("[action]")]
-        [AuthorizePermission("UserManagement.Read")]
+        [AuthorizePermission(SystemPermissions.PermissionManagement.Read)]
         public async Task<IResult> GetPermissionModules()
         {
             var result = await _permissionService.GetPermissionModulesAsync();
@@ -44,7 +45,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpGet("[action]")]
-        [AuthorizePermission("UserManagement.Read")]
+        [AuthorizePermission(SystemPermissions.PermissionManagement.Read)]
         public async Task<IResult> GetPermissionsWithRoles([FromQuery] string? name = null, [FromQuery] bool? isActive = null)
         {
             var result = await _permissionService.GetPermissionsWithRolesAsync(name, isActive);
@@ -52,7 +53,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpPut("[action]/{roleId}/Roles/{permissionId}")]
-        [AuthorizePermission("UserManagement.Edit")]
+        [AuthorizePermission(SystemPermissions.RoleManagement.AssignPermissions)]
         public async Task<IResult> TogglePermissionForRole(string roleId, Guid permissionId)
         {
             await _permissionService.TogglePermissionForRoleAsync(roleId, permissionId);
@@ -60,7 +61,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpPut("[action]/{permissionId}")]
-        [AuthorizePermission("UserManagement.Edit")]
+        [AuthorizePermission(SystemPermissions.PermissionManagement.ChangeStatus)]
         public async Task<IResult> TogglePermissionStatus(Guid permissionId)
         {
             await _permissionService.TogglePermissionStatusAsync(permissionId);

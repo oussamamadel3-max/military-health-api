@@ -60,7 +60,7 @@ namespace Application.Interfaces.Services
         public string? CustomTitle { get; set; }
 
         public bool IncludeSummary { get; set; } = true;
-        public bool IncludeLogo { get; set; } = false;
+        public bool IncludeLogo { get; set; } = true;
         public bool IncludeFooter { get; set; } = true;
 
         public bool AutoFilter { get; set; } = true;

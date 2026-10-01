@@ -17,4 +17,6 @@ public interface IPermissionRepository
     Task<RolePermission?> FindRolePermissionAsync(string roleId, Guid permissionId, CancellationToken cancellationToken = default);
     void AddRolePermission(RolePermission link);
     void RemoveRolePermission(RolePermission link);
+    Task<List<string>> GetRoleIdsByPermissionIdAsync(Guid permissionId, CancellationToken cancellationToken = default);
+    Task<List<string>> GetUserIdsByPermissionIdAsync(Guid permissionId, CancellationToken cancellationToken = default);
 }

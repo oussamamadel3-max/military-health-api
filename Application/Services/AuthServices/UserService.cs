@@ -25,7 +25,7 @@ public class UserService : IUserService
     private readonly IFieldPermissionRepository _fieldPermissionRepository;
     private readonly IRefreshTokenRepository _refreshTokenRepository;
     private readonly IUnitOfWork _unitOfWork;
-    private readonly IActorScopeProvider _actorScopeProvider;
+    private readonly IPermissionGate _permissionGate;
     private readonly JwtSettings _jwtSettings;
     private readonly ICurrentUserService _currentUserService;
     private readonly ITextInputSanitizer _textSanitizer;
@@ -46,7 +46,7 @@ public class UserService : IUserService
         IFieldPermissionRepository fieldPermissionRepository,
         IRefreshTokenRepository refreshTokenRepository,
         IUnitOfWork unitOfWork,
-        IActorScopeProvider actorScopeProvider,
+        IPermissionGate permissionGate,
         JwtSettings jwtSettings,
         ICurrentUserService currentUserService,
         ITextInputSanitizer textSanitizer,
@@ -61,7 +61,7 @@ public class UserService : IUserService
         _fieldPermissionRepository = fieldPermissionRepository;
         _refreshTokenRepository = refreshTokenRepository;
         _unitOfWork = unitOfWork;
-        _actorScopeProvider = actorScopeProvider;
+        _permissionGate = permissionGate;
         _jwtSettings = jwtSettings;
         _currentUserService = currentUserService;
         _textSanitizer = textSanitizer;
@@ -70,11 +70,9 @@ public class UserService : IUserService
     }
 
     #region الانشاء 
-    public async Task<CreateUserDto> Create(CreateUserDto createdUser)
+    public async Task<CreatedUserResponseDto> Create(CreateUserDto createdUser)
     {
         var errors = new List<string>();
-
-        var (_, actorIsSuperAdmin) = await GetActorAsync();
 
         // تحقّقات أساسية
         if (string.IsNullOrWhiteSpace(createdUser.username)) errors.Add("اسم المستخدم مطلوب.");
@@ -104,8 +102,16 @@ public class UserService : IUserService
         if (missing.Any())
             throw new InvalidUserDataException($"أدوار غير موجودة أو غير نشطة: {string.Join(", ", missing)}");
 
-        if (!actorIsSuperAdmin)
-            throw new ForbiddenPermissionException("غير مسموح بإنشاء المستخدمين.");
+        _permissionGate.EnsureAll(
+            SystemPermissions.UserManagement.Create,
+            SystemPermissions.UserManagement.AssignRoles);
+
+        var roleIds = rolesFromDb.Select(r => r.Id).ToList();
+        var rolePermissionNames = (await _roleRepository.GetRolePermissionsForRolesAsync(roleIds))
+            .Select(rp => rp.Permission?.Name)
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Select(n => n!);
+        IamAdminGuard.EnsureAssignableWithinActorPermissions(rolePermissionNames, _permissionGate.GetPermissions());
 
         using var tx = await _unitOfWork.BeginTransactionAsync();
         try
@@ -128,7 +134,6 @@ public class UserService : IUserService
             var associations = rolesFromDb.Select(r => new UserRoleAssociation { UserId = user.Id, RoleId = r.Id }).ToList();
             _userRepository.AddRoleAssociations(associations);
 
-            var roleIds = rolesFromDb.Select(r => r.Id).ToList();
             var rolePermissions = await _roleRepository.GetActivePermissionIdsForRolesAsync(roleIds);
 
             var existingUserPermissions = await _userRepository.GetDirectPermissionIdsAsync(user.Id);
@@ -143,7 +148,15 @@ public class UserService : IUserService
             await _unitOfWork.SaveChangesAsync();
             await tx.CommitAsync();
 
-            return createdUser;
+            return new CreatedUserResponseDto
+            {
+                fullName = createdUser.fullName,
+                username = createdUser.username,
+                email = createdUser.email,
+                phone = createdUser.phone,
+                isActive = createdUser.isActive,
+                roles = createdUser.roles?.ToList() ?? new List<string>()
+            };
         }
         catch
         {
@@ -156,13 +169,21 @@ public class UserService : IUserService
     #region التعديل الكامل    
     public async Task Update(string id, UpdateUserDto updatedUser)
     {
-        var (_, actorIsSuperAdmin) = await GetActorAsync();
-
-        if (!actorIsSuperAdmin)
-            throw new ForbiddenPermissionException("غير مسموح بتعديل المستخدمين.");
-
         var user = await _userRepository.GetByIdAsync(id)
             ?? throw new UserNotFoundException(id);
+
+        var required = new List<string> { SystemPermissions.UserManagement.Edit };
+        var statusChanging = updatedUser.IsActive.HasValue && updatedUser.IsActive.Value != user.IsActive;
+        if (statusChanging)
+            required.Add(SystemPermissions.UserManagement.ChangeStatus);
+
+        _permissionGate.EnsureAll(required.ToArray());
+
+        if (statusChanging && updatedUser.IsActive == false)
+        {
+            await IamAdminGuard.EnsureNotLastIamAdminBeforeDisableOrDeleteAsync(
+                _userRepository, _roleRepository, user.Id);
+        }
 
         if (!string.IsNullOrWhiteSpace(updatedUser.Email) &&
             !string.Equals(updatedUser.Email, user.Email, StringComparison.OrdinalIgnoreCase))
@@ -193,9 +214,9 @@ public class UserService : IUserService
             user.PhoneNumber = _textSanitizer.SanitizePlainText(updatedUser.Phone) ?? updatedUser.Phone;
 
         bool invalidateTokens = false;
-        if (updatedUser.IsActive.HasValue && updatedUser.IsActive.Value != user.IsActive)
+        if (statusChanging)
         {
-            user.IsActive = updatedUser.IsActive.Value;
+            user.IsActive = updatedUser.IsActive!.Value;
             if (!user.IsActive) invalidateTokens = true;
         }
 
@@ -211,13 +232,13 @@ public class UserService : IUserService
     #region الحذف
     public async Task Delete(string userId)
     {
-        var (_, actorIsSuperAdmin) = await GetActorAsync();
-
-        if (!actorIsSuperAdmin)
-            throw new ForbiddenPermissionException("غير مسموح بحذف المستخدمين.");
+        _permissionGate.EnsureAll(SystemPermissions.UserManagement.Delete);
 
         var user = await _userManager.FindByIdAsync(userId)
             ?? throw new UserNotFoundException(userId);
+
+        await IamAdminGuard.EnsureNotLastIamAdminBeforeDisableOrDeleteAsync(
+            _userRepository, _roleRepository, user.Id);
 
         var result = await _userManager.DeleteAsync(user);
         if (!result.Succeeded)
@@ -239,13 +260,7 @@ public class UserService : IUserService
 
         var currentUserId = _currentUserService.UserId ?? string.Empty;
 
-        var actorScope = await _actorScopeProvider.GetScopeAsync(currentUserId);
-        bool isSuperAdmin = actorScope.IsSuperAdmin;
-
         IQueryable<User> baseQuery = _userRepository.QueryUsers();
-
-        if (!isSuperAdmin)
-            baseQuery = baseQuery.Where(u => false);
 
         baseQuery = baseQuery.Where(u => u.Id != currentUserId);
 
@@ -347,14 +362,9 @@ public class UserService : IUserService
     #region جلب حسب المعرف 
     public async Task<UserListItemDto> GetUserAsync(string id)
     {
-        var (actor, actorIsSuperAdmin) = await GetActorAsync();
-
         var user = await _userRepository.QueryUsers()
             .FirstOrDefaultAsync(u => u.Id == id)
             ?? throw new UserNotFoundException(id);
-
-        if (!actorIsSuperAdmin && actor.Id != user.Id)
-            throw new ForbiddenPermissionException("غير مسموح بالوصول.");
 
         var roleAssociations = await _userRepository.QueryRoleAssociations()
             .Where(ura => ura.UserId == user.Id)
@@ -397,12 +407,60 @@ public class UserService : IUserService
         var user = await _userRepository.GetByIdAsync(id)
             ?? throw new UserNotFoundException(id);
 
-        var actorId = _currentUserService.UserId ?? string.Empty;
-        var actorScope = await _actorScopeProvider.GetScopeAsync(actorId);
-        var isSuperAdmin = actorScope.IsSuperAdmin;
+        var statusChanging = dto.isActive.HasValue && dto.isActive.Value != user.IsActive;
+        var rolesProvided = dto.roles != null;
 
-        if (!isSuperAdmin)
-            throw new ForbiddenPermissionException("غير مسموح بالتعديل إلا لمدير النظام.");
+        var required = new List<string> { SystemPermissions.UserManagement.Edit };
+        if (statusChanging) required.Add(SystemPermissions.UserManagement.ChangeStatus);
+        if (rolesProvided) required.Add(SystemPermissions.UserManagement.AssignRoles);
+        _permissionGate.EnsureAll(required.ToArray());
+
+        if (statusChanging && dto.isActive == false)
+        {
+            await IamAdminGuard.EnsureNotLastIamAdminBeforeDisableOrDeleteAsync(
+                _userRepository, _roleRepository, user.Id);
+        }
+
+        List<string>? finalRoleIdsForEscalation = null;
+        if (rolesProvided)
+        {
+            var requested = (dto.roles ?? new()).Where(r => r is not null).ToList();
+            var incomingIds = requested
+                .Where(r => !string.IsNullOrWhiteSpace(r.RoleId))
+                .Select(r => r.RoleId!)
+                .ToList();
+            var incomingNames = requested
+                .Where(r => string.IsNullOrWhiteSpace(r.RoleId) && !string.IsNullOrWhiteSpace(r.RoleName))
+                .Select(r => r.RoleName!.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var rolesByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (incomingNames.Any())
+            {
+                var foundByName = await _roleRepository.QueryRoles()
+                    .Where(r => r.Name != null && incomingNames.Contains(r.Name))
+                    .Select(r => new { r.Id, r.Name })
+                    .ToListAsync();
+                rolesByName = foundByName
+                    .Where(x => !string.IsNullOrWhiteSpace(x.Name))
+                    .ToDictionary(x => x.Name!, x => x.Id, StringComparer.OrdinalIgnoreCase);
+                var missingByName = incomingNames.Where(n => !rolesByName.ContainsKey(n)).ToList();
+                if (missingByName.Any())
+                    throw new InvalidUserDataException($"بعض الأدوار غير موجودة: {string.Join(", ", missingByName)}");
+            }
+
+            finalRoleIdsForEscalation = new HashSet<string>(incomingIds, StringComparer.OrdinalIgnoreCase)
+                .Concat(rolesByName.Values)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var rolePermNames = (await _roleRepository.GetRolePermissionsForRolesAsync(finalRoleIdsForEscalation))
+                .Select(rp => rp.Permission?.Name)
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .Select(n => n!);
+            IamAdminGuard.EnsureAssignableWithinActorPermissions(rolePermNames, _permissionGate.GetPermissions());
+        }
 
         if (!string.IsNullOrWhiteSpace(dto.username) &&
             !string.Equals(dto.username, user.UserName, StringComparison.OrdinalIgnoreCase))
@@ -429,6 +487,8 @@ public class UserService : IUserService
         _mapper.Map(dto, user);
         if (!dto.isActive.HasValue)
             user.IsActive = previousIsActive;
+        else if (!statusChanging)
+            user.IsActive = previousIsActive;
 
         user.FullName = _textSanitizer.SanitizePlainText(user.FullName) ?? user.FullName;
         if (user.UserName is not null)
@@ -442,42 +502,17 @@ public class UserService : IUserService
         if (!updRes.Succeeded)
             throw new InvalidUserDataException(string.Join(", ", updRes.Errors.Select(e => e.Description)));
 
-        if (dto.roles != null)
+        if (statusChanging && !user.IsActive)
+        {
+            await SecurityStampHelper.InvalidateUserTokensAsync(
+                _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id);
+        }
+
+        if (rolesProvided && finalRoleIdsForEscalation != null)
         {
             var current = await _userRepository.GetRoleAssociationsAsync(user.Id);
-            var requested = (dto.roles ?? new()).Where(r => r is not null).ToList();
-
-            var incomingIds = requested
-                .Where(r => !string.IsNullOrWhiteSpace(r.RoleId))
-                .Select(r => r.RoleId!)
-                .ToList();
-
-            var incomingNames = requested
-                .Where(r => string.IsNullOrWhiteSpace(r.RoleId) && !string.IsNullOrWhiteSpace(r.RoleName))
-                .Select(r => r.RoleName!.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            var rolesByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            if (incomingNames.Any())
-            {
-                var foundByName = await _roleRepository.QueryRoles()
-                    .Where(r => r.Name != null && incomingNames.Contains(r.Name))
-                    .Select(r => new { r.Id, r.Name })
-                    .ToListAsync();
-
-                var validByName = foundByName.Where(x => !string.IsNullOrWhiteSpace(x.Name)).ToList();
-                rolesByName = validByName.ToDictionary(x => x.Name!, x => x.Id, StringComparer.OrdinalIgnoreCase);
-
-                var missingByName = incomingNames.Where(n => !rolesByName.ContainsKey(n)).ToList();
-                if (missingByName.Any())
-                    throw new InvalidUserDataException($"بعض الأدوار غير موجودة: {string.Join(", ", missingByName)}");
-            }
-
-            var finalIncomingIds = new HashSet<string>(incomingIds, StringComparer.OrdinalIgnoreCase);
-            foreach (var kv in rolesByName) finalIncomingIds.Add(kv.Value);
-
             var currentIds = new HashSet<string>(current.Select(c => c.RoleId), StringComparer.OrdinalIgnoreCase);
+            var finalIncomingIds = finalRoleIdsForEscalation.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             var toAdd = finalIncomingIds.Except(currentIds, StringComparer.OrdinalIgnoreCase).ToList();
             var toRemove = currentIds.Except(finalIncomingIds, StringComparer.OrdinalIgnoreCase).ToList();
@@ -499,6 +534,14 @@ public class UserService : IUserService
             }
 
             await _unitOfWork.SaveChangesAsync();
+
+            var afterPerms = await IamAdminGuard.GetEffectivePermissionNamesAsync(
+                _userRepository, _roleRepository, user.Id);
+            await IamAdminGuard.EnsureNotLastIamAdminAsync(
+                _userRepository, _roleRepository, user.Id, afterPerms);
+
+            await SecurityStampHelper.InvalidateUserTokensAsync(
+                _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id);
         }
 
         var roleAssociationEntities = await _userRepository.QueryRoleAssociations()
@@ -538,14 +581,25 @@ public class UserService : IUserService
     #region تعديل حالة المستخدم فقط
     public async Task<UpdateUserStatusRequest> UpdateUserStatusAsync(string id, UpdateUserStatusRequest request)
     {
+        _permissionGate.EnsureAll(SystemPermissions.UserManagement.ChangeStatus);
+
         var user = await _userRepository.GetByIdAsync(id)
             ?? throw new UserNotFoundException(id);
+
+        if (user.IsActive && !request.isActive)
+        {
+            await IamAdminGuard.EnsureNotLastIamAdminBeforeDisableOrDeleteAsync(
+                _userRepository, _roleRepository, user.Id);
+        }
 
         user.IsActive = request.isActive;
 
         var updRes = await _userManager.UpdateAsync(user);
         if (!updRes.Succeeded)
             throw new InvalidUserDataException(string.Join(", ", updRes.Errors.Select(e => e.Description)));
+
+        await SecurityStampHelper.InvalidateUserTokensAsync(
+            _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, id);
 
         return new UpdateUserStatusRequest
         {
@@ -564,6 +618,9 @@ public class UserService : IUserService
         var result = await _userManager.ChangePasswordAsync(user, request.CurrentPassword, request.NewPassword);
         if (!result.Succeeded)
             throw new InvalidUserDataException(string.Join(", ", result.Errors.Select(e => e.Description)));
+
+        await SecurityStampHelper.InvalidateUserTokensAsync(
+            _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id);
     }
     #endregion
 
@@ -685,6 +742,8 @@ public class UserService : IUserService
     #region إعادة تعيين كلمة المرور (الإداري)
     public async Task ResetUserPasswordAsync(AdminChangePasswordRequest request)
     {
+        _permissionGate.EnsureAll(SystemPermissions.UserManagement.ResetPassword);
+
         var user = await _userManager.FindByIdAsync(request.UserId)
             ?? throw new UserNotFoundException(request.UserId);
 
@@ -693,21 +752,19 @@ public class UserService : IUserService
 
         if (!resetResult.Succeeded)
             throw new InvalidUserDataException(string.Join(", ", resetResult.Errors.Select(e => e.Description)));
+
+        await SecurityStampHelper.InvalidateUserTokensAsync(
+            _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id);
     }
     #endregion
 
     #region اسناد وحذف ادوار الى مستخدم 
     public async Task ToggleRolesForUserAsync(AssignRolesDto dto)
     {
+        _permissionGate.EnsureAll(SystemPermissions.UserManagement.AssignRoles);
+
         var user = await _userManager.FindByIdAsync(dto.UserId)
             ?? throw new UserNotFoundException(dto.UserId);
-
-        var actorId = _currentUserService.UserId ?? string.Empty;
-        var actorScope = await _actorScopeProvider.GetScopeAsync(actorId);
-        var isSuperAdmin = actorScope.IsSuperAdmin;
-
-        if (!isSuperAdmin)
-            throw new ForbiddenPermissionException("غير مسموح بتعديل الأدوار إلا لمدير النظام.");
 
         var incomingIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -739,6 +796,12 @@ public class UserService : IUserService
         }
 
         var activeIncomingIds = await _roleRepository.GetActiveRoleIdsAsync(incomingIds);
+
+        var rolePermNames = (await _roleRepository.GetRolePermissionsForRolesAsync(activeIncomingIds))
+            .Select(rp => rp.Permission?.Name)
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Select(n => n!);
+        IamAdminGuard.EnsureAssignableWithinActorPermissions(rolePermNames, _permissionGate.GetPermissions());
 
         var currentRoleIds = await _userRepository.GetActiveRoleIdsAsync(user.Id);
 
@@ -778,6 +841,11 @@ public class UserService : IUserService
 
             await SyncRoleDerivedPermissionsAsync(user.Id);
 
+            var afterPerms = await IamAdminGuard.GetEffectivePermissionNamesAsync(
+                _userRepository, _roleRepository, user.Id);
+            await IamAdminGuard.EnsureNotLastIamAdminAsync(
+                _userRepository, _roleRepository, user.Id, afterPerms);
+
             await SecurityStampHelper.InvalidateUserTokensAsync(
                 _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id);
 
@@ -794,15 +862,10 @@ public class UserService : IUserService
     #region اسناد وحذف صلاحيات الى مستخدم مباشرة
     public async Task TogglePermissionsForUserAsync(AssignPermissionToUserDto dto)
     {
+        _permissionGate.EnsureAll(SystemPermissions.UserManagement.AssignPermissions);
+
         var user = await _userManager.FindByIdAsync(dto.UserId)
             ?? throw new UserNotFoundException(dto.UserId);
-
-        var actorId = _currentUserService.UserId ?? string.Empty;
-        var actorScope = await _actorScopeProvider.GetScopeAsync(actorId);
-        var isSuperAdmin = actorScope.IsSuperAdmin;
-
-        if (!isSuperAdmin)
-            throw new ForbiddenPermissionException("غير مسموح بتعديل الصلاحيات المباشرة إلا لمدير النظام.");
 
         var incomingIds = new HashSet<Guid>();
         if (dto.PermissionId is { Count: > 0 })
@@ -830,6 +893,10 @@ public class UserService : IUserService
             finalPermissions.Select(p => p.Name),
             message => new InvalidUserDataException(message));
 
+        var grantingNames = (await _permissionRepository.GetActiveByIdsAsync(toAdd))
+            .Select(p => p.Name);
+        IamAdminGuard.EnsureAssignableWithinActorPermissions(grantingNames, _permissionGate.GetPermissions());
+
         using var tx = await _unitOfWork.BeginTransactionAsync();
         try
         {
@@ -855,6 +922,11 @@ public class UserService : IUserService
                 await _unitOfWork.SaveChangesAsync();
             }
 
+            var afterPerms = await IamAdminGuard.GetEffectivePermissionNamesAsync(
+                _userRepository, _roleRepository, user.Id);
+            await IamAdminGuard.EnsureNotLastIamAdminAsync(
+                _userRepository, _roleRepository, user.Id, afterPerms);
+
             await SecurityStampHelper.InvalidateUserTokensAsync(
                 _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id);
 
@@ -874,14 +946,10 @@ public class UserService : IUserService
         if (dto.FieldPermissionIds == null || dto.FieldPermissionIds.Count == 0)
             throw new InvalidUserDataException("لم يتم تحديد أي صلاحيات حقول.");
 
+        _permissionGate.EnsureAll(SystemPermissions.UserManagement.RemoveFieldPermissions);
+
         var user = await _userManager.FindByIdAsync(dto.UserId)
             ?? throw new UserNotFoundException(dto.UserId);
-
-        var actorId = _currentUserService.UserId ?? string.Empty;
-        var actorScope = await _actorScopeProvider.GetScopeAsync(actorId);
-
-        if (!actorScope.IsSuperAdmin)
-            throw new ForbiddenPermissionException("غير مسموح بإزالة الصلاحيات الحقلية إلا لمدير النظام.");
 
         var userFieldPermissions = (await _userRepository.GetUserFieldPermissionsAsync(dto.UserId))
             .Where(ufp => dto.FieldPermissionIds.Contains(ufp.FieldPermissionId))
@@ -904,8 +972,22 @@ public class UserService : IUserService
         if (string.IsNullOrWhiteSpace(userId))
             throw new InvalidUserDataException("معرف المستخدم غير صالح.");
 
+        _permissionGate.EnsureAll(
+            SystemPermissions.UserManagement.Edit,
+            SystemPermissions.UserManagement.AssignRoles);
+
         var user = await _userManager.FindByIdAsync(userId)
             ?? throw new UserNotFoundException(userId);
+
+        var roleIds = (updatedUser.RoleIds ?? new List<string>())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var rolePermNames = (await _roleRepository.GetRolePermissionsForRolesAsync(roleIds))
+            .Select(rp => rp.Permission?.Name)
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Select(n => n!);
+        IamAdminGuard.EnsureAssignableWithinActorPermissions(rolePermNames, _permissionGate.GetPermissions());
 
         using var transaction = await _unitOfWork.BeginTransactionAsync();
         try
@@ -957,6 +1039,16 @@ public class UserService : IUserService
             }
 
             await _unitOfWork.SaveChangesAsync();
+            await SyncRoleDerivedPermissionsAsync(userId);
+
+            var afterPerms = await IamAdminGuard.GetEffectivePermissionNamesAsync(
+                _userRepository, _roleRepository, userId);
+            await IamAdminGuard.EnsureNotLastIamAdminAsync(
+                _userRepository, _roleRepository, userId, afterPerms);
+
+            await SecurityStampHelper.InvalidateUserTokensAsync(
+                _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, userId);
+
             await transaction.CommitAsync();
         }
         catch
@@ -1024,16 +1116,5 @@ public class UserService : IUserService
             _userRepository.RemoveUserFieldPermissions(userFieldPermsToRemove);
 
         await _unitOfWork.SaveChangesAsync();
-    }
-
-    private async Task<(User actor, bool isSuperAdmin)> GetActorAsync()
-    {
-        var actorId = _currentUserService.UserId ?? string.Empty;
-        var actorScope = await _actorScopeProvider.GetScopeAsync(actorId);
-
-        if (actorScope.Actor == null)
-            throw new UnauthenticatedUserException();
-
-        return (actorScope.Actor, actorScope.IsSuperAdmin);
     }
 }
