@@ -37,16 +37,9 @@ public class AttachmentConfiguration : IEntityTypeConfiguration<Attachment>
         builder.Property(a => a.FileSize)
             .IsRequired();
 
-        builder.Property(a => a.IsProfilePhoto)
-            .HasDefaultValue(false);
-
         builder.Property(a => a.UploadedAt)
             .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
         builder.HasIndex(a => new { a.OwnerType, a.OwnerId });
-
-        builder.HasIndex(a => new { a.OwnerType, a.OwnerId, a.IsProfilePhoto })
-            .HasFilter("\"IsProfilePhoto\" = true")
-            .IsUnique();
     }
 }

@@ -22,11 +22,7 @@ namespace Domain.Entities
 
         public string? Description { get; set; }
 
-        public bool IsProfilePhoto { get; set; } = false;
-
         public DateTime UploadedAt { get; set; }
 
     }
 }
-
-

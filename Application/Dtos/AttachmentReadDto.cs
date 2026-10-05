@@ -33,9 +33,6 @@ namespace Application.Dtos
         [FieldPermission("Description", DisplayName = "الوصف")]
         public string? Description { get; set; }
 
-        [FieldPermission("IsProfilePhoto", DisplayName = "صورة الملف الشخصي؟")]
-        public bool? IsProfilePhoto { get; set; }
-
         [FieldPermission("UploadedAt", DisplayName = "تاريخ الرفع")]
         public DateTime? UploadedAt { get; set; }
 

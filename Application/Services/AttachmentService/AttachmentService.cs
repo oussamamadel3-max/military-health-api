@@ -40,8 +40,7 @@ namespace Application.Services.AttachmentService
             long entityId,
             string entityType,
             IFormFile file,
-            string? description = null,
-            bool isProfilePhoto = false)
+            string? description = null)
         {
             if (file == null || file.Length == 0)
                 throw new InvalidUserDataException("الملف فارغ.");
@@ -62,7 +61,6 @@ namespace Application.Services.AttachmentService
                 FileSize = size,
                 ContentType = file.ContentType,
                 Description = _textSanitizer.SanitizePlainText(description),
-                IsProfilePhoto = isProfilePhoto,
                 UploadedAt = DateTime.UtcNow,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,

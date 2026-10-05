@@ -19,6 +19,7 @@ namespace Application.Services.AuthServices
         private readonly IUserRepository _userRepository;
         private readonly IRoleRepository _roleRepository;
         private readonly IPermissionRepository _permissionRepository;
+        private readonly IAttachmentRepository _attachmentRepository;
         private readonly IMapper _mapper;
         private readonly ILoginLockoutService _loginLockout;
 
@@ -34,6 +35,7 @@ namespace Application.Services.AuthServices
             IUserRepository userRepository,
             IRoleRepository roleRepository,
             IPermissionRepository permissionRepository,
+            IAttachmentRepository attachmentRepository,
             IMapper mapper,
             ILoginLockoutService loginLockout)
         {
@@ -44,6 +46,7 @@ namespace Application.Services.AuthServices
             _userRepository = userRepository;
             _roleRepository = roleRepository;
             _permissionRepository = permissionRepository;
+            _attachmentRepository = attachmentRepository;
             _mapper = mapper;
             _loginLockout = loginLockout;
         }
@@ -136,9 +139,19 @@ namespace Application.Services.AuthServices
             var me = _mapper.Map<MeResponseDto>(user);
             me.Roles = roles.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
             me.Permissions = permissions;
-            me.ProfilePhotoUrl = string.IsNullOrWhiteSpace(user.ProfilePhotoPath)
-                ? null
-                : $"/api/User/MyProfilePhoto?v={Path.GetFileNameWithoutExtension(user.ProfilePhotoPath)}";
+            me.AttachmentOwnerId = user.GetPrimaryKey().ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+            var ownerId = user.GetPrimaryKey();
+            var latestAttachment = (await _attachmentRepository.GetByOwnerAsync(ownerId, new[] { "User" }))
+                .OrderByDescending(a => a.UploadedAt)
+                .FirstOrDefault();
+
+            if (latestAttachment is not null)
+            {
+                me.ProfilePhotoAttachmentId = latestAttachment.AttachmentId;
+                me.ProfilePhotoUrl = $"/api/attachments/download/{latestAttachment.AttachmentId}";
+            }
+
             return me;
         }
 
