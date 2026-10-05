@@ -3,6 +3,7 @@ using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Application.Services;
+using Application.Services.AttachmentService;
 using Application.Services.AuthServices;
 using Application.Services.Dashboard;
 using Application.Services.FileStorageService;
@@ -29,6 +30,7 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IPermissionRepository, PermissionRepository>();
         services.AddScoped<IFieldPermissionRepository, FieldPermissionRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+        services.AddScoped<IAttachmentRepository, AttachmentRepository>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
         #endregion
 
@@ -54,6 +56,7 @@ public static class InfrastructureServiceRegistration
 
         #region Application services
         services.AddScoped<IAuditLogService, AuditLogService>();
+        services.AddScoped<IAttachmentService, AttachmentService>();
         services.AddScoped<IFileStorageService, FileStorageService>();
         services.AddScoped<IDashboardService, DashboardService>();
         services.AddScoped<IExportService, ExportService>();

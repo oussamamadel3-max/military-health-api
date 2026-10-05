@@ -56,5 +56,11 @@ namespace Application.Dtos
         public string? UpdatedBy { get; set; }
     }
 
+    public class AttachmentLinkDto
+    {
+        public Guid Id { get; set; }
 
+        public string FileUrl { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+    }
 }

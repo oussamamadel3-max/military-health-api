@@ -1,4 +1,3 @@
-using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Domain.Entities;
 using Infrastructure.Persistence;
@@ -31,33 +30,11 @@ public class AttachmentRepository : IAttachmentRepository
         return await query.ToListAsync(cancellationToken);
     }
 
-    public async Task<List<Guid>> GetIdsByDocumentAsync(long documentId, CancellationToken cancellationToken = default)
-        => await _context.Attachments.AsNoTracking()
-            .Where(a => a.OwnerType == "Document" && a.OwnerId == documentId)
-            .Select(a => a.AttachmentId)
-            .ToListAsync(cancellationToken);
-
     public async Task<List<Attachment>> GetByIdsAsync(IEnumerable<Guid> attachmentIds, bool asNoTracking = false, CancellationToken cancellationToken = default)
     {
         var ids = attachmentIds.ToList();
         var query = _context.Attachments.Where(a => ids.Contains(a.AttachmentId));
         if (asNoTracking) query = query.AsNoTracking();
         return await query.ToListAsync(cancellationToken);
-    }
-
-    public async Task<long> SumFileSizeForScopedDocumentsAsync(ActorScope scope, DateTime? createdFrom, DateTime? createdToExclusive, string ownerType = "Document", CancellationToken cancellationToken = default)
-    {
-        var docs = _context.Documents.AsNoTracking();
-        if (!scope.IsSuperAdmin && !scope.IsBranchManager)
-            docs = docs.Where(d => d.UserId == scope.UserId);
-        if (createdFrom.HasValue)
-            docs = docs.Where(d => d.CreatedAt >= createdFrom.Value);
-        if (createdToExclusive.HasValue)
-            docs = docs.Where(d => d.CreatedAt < createdToExclusive.Value);
-
-        return await _context.Attachments.AsNoTracking()
-            .Where(a => a.OwnerType == ownerType)
-            .Join(docs, a => a.OwnerId, d => d.DocumentId, (a, _) => a.FileSize)
-            .SumAsync(size => (long?)size, cancellationToken) ?? 0;
     }
 }

@@ -1,12 +1,10 @@
-using Application.Common.Results;
 using Application.Dtos;
 using Application.Exceptions;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
-using MapsterMapper;
 using Domain.Entities;
-using Microsoft.AspNetCore.Hosting;
+using MapsterMapper;
 using Microsoft.AspNetCore.Http;
 using System.IO.Compression;
 
@@ -15,31 +13,25 @@ namespace Application.Services.AttachmentService
     public class AttachmentService : IAttachmentService
     {
         private readonly IAttachmentRepository _attachments;
-        private readonly IDocumentRepository _documents;
         private readonly IUnitOfWork _unitOfWork;
         private readonly IMapper _mapper;
         private readonly IFileStorageService _fileStorage;
         private readonly IHttpContextAccessor _httpContextAccessor;
-        private readonly IWebHostEnvironment _env;
         private readonly ITextInputSanitizer _textSanitizer;
 
         public AttachmentService(
             IAttachmentRepository attachments,
-            IDocumentRepository documents,
             IUnitOfWork unitOfWork,
             IMapper mapper,
             IFileStorageService fileStorage,
             IHttpContextAccessor httpContextAccessor,
-            IWebHostEnvironment env,
             ITextInputSanitizer textSanitizer)
         {
             _attachments = attachments;
-            _documents = documents;
             _unitOfWork = unitOfWork;
             _mapper = mapper;
             _fileStorage = fileStorage;
             _httpContextAccessor = httpContextAccessor;
-            _env = env;
             _textSanitizer = textSanitizer;
         }
 
@@ -176,7 +168,7 @@ namespace Application.Services.AttachmentService
                 .ToList();
 
             if (items.Count == 0)
-                throw new RoleNotFoundException("لا يوجد مرفقات لهذه الوثيقة.");
+                throw new RoleNotFoundException("لا يوجد مرفقات لهذا الكيان.");
 
             using var ms = new MemoryStream();
             using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
@@ -198,13 +190,9 @@ namespace Application.Services.AttachmentService
                 }
             }
 
-            var documentTitle = await _documents.GetTitleAsync(entityId);
-            if (string.IsNullOrWhiteSpace(documentTitle))
-                documentTitle = $"Document_{entityId}";
-
+            var ownerLabel = entityTypes.FirstOrDefault() ?? "attachments";
             var zipBytes = ms.ToArray();
-            var safeTitle = SanitizeFileName(documentTitle);
-            var zipName = $"{safeTitle}.zip";
+            var zipName = $"{SanitizeFileName(ownerLabel)}_{entityId}.zip";
 
             return (zipBytes, zipName);
         }
