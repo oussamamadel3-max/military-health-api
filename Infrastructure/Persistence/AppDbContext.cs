@@ -44,6 +44,8 @@ public class AppDbContext : DbContext
     public DbSet<OrgUnit> OrgUnits { get; set; } = null!;
     public DbSet<UserOrgScope> UserOrgScopes { get; set; } = null!;
 
+    public DbSet<Attachment> Attachments { get; set; } = null!;
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);

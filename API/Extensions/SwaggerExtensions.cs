@@ -86,7 +86,7 @@ namespace API.Extensions
             {
                 c.SwaggerEndpoint("v2/swagger.json", "Identity Project API v2");
                 c.RoutePrefix = "swagger";
-                c.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.List);
+                c.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.None);
                 c.DefaultModelsExpandDepth(-1);
                 c.EnableDeepLinking();
                 c.DisplayRequestDuration();
