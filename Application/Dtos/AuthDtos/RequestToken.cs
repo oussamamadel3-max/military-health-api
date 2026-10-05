@@ -45,6 +45,13 @@ namespace Application.Dtos.AuthDtos
         public string Email { get; set; } = string.Empty;
         public string FullName { get; set; } = string.Empty;
         public string? Phone { get; set; }
+
+        /// <summary>
+        /// معرّف المالك كنص (long) لتجنب فقدان الدقة في JavaScript عند التعامل مع Attachments.
+        /// </summary>
+        public string AttachmentOwnerId { get; set; } = "0";
+
+        public Guid? ProfilePhotoAttachmentId { get; set; }
         public string? ProfilePhotoUrl { get; set; }
 
         public List<string> Roles { get; set; } = new();

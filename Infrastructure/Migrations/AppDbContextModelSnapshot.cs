@@ -61,11 +61,6 @@ namespace Infrastructure.Migrations
                     b.Property<long>("FileSize")
                         .HasColumnType("bigint");
 
-                    b.Property<bool>("IsProfilePhoto")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(false);
-
                     b.Property<long>("OwnerId")
                         .HasColumnType("bigint");
 
@@ -88,10 +83,6 @@ namespace Infrastructure.Migrations
                     b.HasKey("AttachmentId");
 
                     b.HasIndex("OwnerType", "OwnerId");
-
-                    b.HasIndex("OwnerType", "OwnerId", "IsProfilePhoto")
-                        .IsUnique()
-                        .HasFilter("\"IsProfilePhoto\" = true");
 
                     b.ToTable("Attachments");
                 });
@@ -338,10 +329,6 @@ namespace Infrastructure.Migrations
 
                     b.Property<bool>("PhoneNumberConfirmed")
                         .HasColumnType("boolean");
-
-                    b.Property<string>("ProfilePhotoPath")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
 
                     b.Property<string>("SecurityStamp")
                         .HasColumnType("text");

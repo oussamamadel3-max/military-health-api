@@ -9,8 +9,7 @@ namespace Application.Interfaces.Services
             long entityId,
             string entityType,
             IFormFile file,
-            string? description = null,
-            bool isProfilePhoto = false);
+            string? description = null);
 
         Task<AttachmentReadDto> GetByIdAsync(Guid id);
         Task<bool> DeleteAsync(Guid id);

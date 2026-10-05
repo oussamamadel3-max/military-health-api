@@ -32,7 +32,7 @@ namespace API.Controllers
             if (file is null || file.Length == 0)
                 throw new InvalidUserDataException("الملف فارغ أو غير محدد.");
 
-            var result = await _service.UploadAsync(entityId, entityType, file, description, false);
+            var result = await _service.UploadAsync(entityId, entityType, file, description);
             return ApiResponse.Success("تم رفع المرفق بنجاح.", result);
         }
 
@@ -52,8 +52,7 @@ namespace API.Controllers
                     entityId: 0,
                     entityType: "Document",
                     file: file,
-                    description: null,
-                    isProfilePhoto: false
+                    description: null
                 );
                 results.Add(up);
             }
@@ -68,20 +67,6 @@ namespace API.Controllers
                 await _service.DeleteAsync(id);
 
             return ApiResponse.Success("تم حذف المرفقات المؤقتة.");
-        }
-
-        // Upload profile photo
-        [HttpPost("upload-profile/{entityType}/{entityId:long}")]
-        public async Task<IResult> UploadProfile(string entityType, long entityId, IFormFile file)
-        {
-            if (!AttachmentRouteConstraints.IsValidEntityType(entityType))
-                throw new InvalidUserDataException("نوع الكيان غير صالح.");
-
-            if (file is null || file.Length == 0)
-                throw new InvalidUserDataException("الملف فارغ أو غير محدد.");
-
-            var result = await _service.UploadAsync(entityId, entityType, file, null, true);
-            return ApiResponse.Success("تم رفع صورة الملف الشخصي بنجاح.", result);
         }
 
         // Get attachments for entity
@@ -127,6 +112,13 @@ namespace API.Controllers
         public async Task<IActionResult> Download(Guid id)
         {
             var res = await _service.DownloadAsync(id);
+            // الصور تُعرض inline داخل <img>؛ باقي الملفات تُنزَّل بالاسم.
+            if (!string.IsNullOrWhiteSpace(res.ContentType) &&
+                res.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            {
+                return File(res.Bytes, res.ContentType);
+            }
+
             return File(res.Bytes, res.ContentType, res.FileName);
         }
 
