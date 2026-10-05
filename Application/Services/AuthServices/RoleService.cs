@@ -25,6 +25,7 @@ namespace Application.Services.AuthServices
         private readonly IUnitOfWork _unitOfWork;
         private readonly IMapper _mapper;
         private readonly ICurrentUserService _currentUserService;
+        private readonly IPermissionGate _permissionGate;
 
         public RoleService(
             RoleManager<Role> roleManager,
@@ -32,6 +33,7 @@ namespace Application.Services.AuthServices
             UserManager<User> userManager,
             IMapper mapper,
             ICurrentUserService currentUserService,
+            IPermissionGate permissionGate,
             IRoleRepository roleRepository,
             IPermissionRepository permissionRepository,
             IRefreshTokenRepository refreshTokenRepository,
@@ -46,11 +48,14 @@ namespace Application.Services.AuthServices
             _unitOfWork = unitOfWork;
             _mapper = mapper;
             _currentUserService = currentUserService;
+            _permissionGate = permissionGate;
         }
 
         #region         الانشاء
         public async Task<RoleDto> CreateRoleAsync(CreateRoleDto newRole)
         {
+            _permissionGate.EnsureAll(SystemPermissions.RoleManagement.Create);
+
             var roleName = (newRole.Name ?? string.Empty).Trim();
             if (string.IsNullOrWhiteSpace(roleName))
                 throw new InvalidRoleDataException("اسم الدور مطلوب.");
@@ -80,6 +85,8 @@ namespace Application.Services.AuthServices
         #region         التعديل
         public async Task UpdateRoleAsync(string id, UpdateRoleDto updatedRole)
         {
+            _permissionGate.EnsureAll(SystemPermissions.RoleManagement.Edit);
+
             var role = await _roleManager.FindByIdAsync(id)
                 ?? throw new RoleNotFoundException("الدور غير موجود.");
 
@@ -102,6 +109,9 @@ namespace Application.Services.AuthServices
                 var errors = identityResult.Errors.Select(e => e.Description);
                 throw new InvalidRoleDataException(string.Join(", ", errors));
             }
+
+            await SecurityStampHelper.InvalidateUsersWithRoleAsync(
+                _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, id);
         }
         #endregion
 
@@ -109,8 +119,13 @@ namespace Application.Services.AuthServices
         #region         الحذف
         public async Task DeleteRoleAsync(string id)
         {
+            _permissionGate.EnsureAll(SystemPermissions.RoleManagement.Delete);
+
             var role = await _roleManager.FindByIdAsync(id)
                 ?? throw new RoleNotFoundException("الدور غير موجود.");
+
+            await SecurityStampHelper.InvalidateUsersWithRoleAsync(
+                _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, id);
 
             var result = await _roleManager.DeleteAsync(role);
             if (!result.Succeeded)
@@ -149,8 +164,6 @@ namespace Application.Services.AuthServices
 
             if (isActive.HasValue)
                 rolesQuery = rolesQuery.Where(r => r.IsActive == isActive.Value);
-
-            rolesQuery = rolesQuery.Where(r => r.NormalizedName != "SUPERADMIN");
 
             rolesQuery = rolesQuery.OrderBy(r => r.Name);
 
@@ -257,6 +270,8 @@ namespace Application.Services.AuthServices
         #region         اسناد صلاحية الى دور 
         public async Task<string> SyncPermissionsForRoleAsync(AssignPermissionsDto dto)
         {
+            _permissionGate.EnsureAll(SystemPermissions.RoleManagement.AssignPermissions);
+
             if (string.IsNullOrWhiteSpace(dto.RoleId))
                 throw new InvalidRoleDataException("RoleId مطلوب.");
 
@@ -283,6 +298,9 @@ namespace Application.Services.AuthServices
 
             PermissionDependencyRules.EnsureReadBeforeWriteActions(
                 activePermissions.Select(p => p.Name));
+
+            IamAdminGuard.EnsureAssignableWithinActorPermissions(
+                activePermissions.Select(p => p.Name), _permissionGate.GetPermissions());
 
             var existingRolePerms = await _roleRepository.GetRolePermissionsAsync(dto.RoleId);
 
@@ -336,6 +354,8 @@ namespace Application.Services.AuthServices
         #region          انشاء دور مع الصلاحيات
         public async Task<RoleDetailsDto> CreateRoleWithPermissionsAsync(CreateRoleWithPermissionsDto dto)
         {
+            _permissionGate.EnsureAll(SystemPermissions.RoleManagement.Create, SystemPermissions.RoleManagement.AssignPermissions);
+
             var roleName = (dto.Name ?? string.Empty).Trim();
             if (string.IsNullOrWhiteSpace(roleName))
                 throw new InvalidRoleDataException("اسم الدور مطلوب.");
@@ -360,6 +380,9 @@ namespace Application.Services.AuthServices
 
             PermissionDependencyRules.EnsureReadBeforeWriteActions(
                 activePermissions.Select(p => p.Name));
+
+            IamAdminGuard.EnsureAssignableWithinActorPermissions(
+                activePermissions.Select(p => p.Name), _permissionGate.GetPermissions());
 
             var invalidSkipped = requestedDistinct.Count - validIds.Count;
 
@@ -446,6 +469,8 @@ namespace Application.Services.AuthServices
 
         public async Task<RoleStatusUpdateDto> ToggleRoleStatusAsync(Guid roleId)
         {
+            _permissionGate.EnsureAll(SystemPermissions.RoleManagement.ChangeStatus);
+
             var role = await _roleRepository.GetByIdAsync(roleId.ToString())
                 ?? throw new RoleNotFoundException("الدور غير موجود.");
 
@@ -456,11 +481,13 @@ namespace Application.Services.AuthServices
             _roleRepository.Update(role);
             await _unitOfWork.SaveChangesAsync();
 
+            await SecurityStampHelper.InvalidateUsersWithRoleAsync(
+                _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, role.Id);
+
             return _mapper.Map<RoleStatusUpdateDto>(role);
         }
 
         #endregion
-
 
     }
 }

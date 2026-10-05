@@ -27,4 +27,5 @@ public interface IUserRepository
     Task<List<Guid>> GetDirectPermissionIdsAsync(string userId, CancellationToken cancellationToken = default);
     Task<List<Guid>> GetDirectFieldPermissionIdsAsync(string userId, CancellationToken cancellationToken = default);
     Task<List<string>> GetUserIdsByRoleIdAsync(string roleId, CancellationToken cancellationToken = default);
+    Task<List<string>> GetActiveUserIdsExceptAsync(string excludeUserId, CancellationToken cancellationToken = default);
 }

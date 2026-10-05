@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using Application.Common.Security;
 using System.Security.Claims;
 using System.Text;
 
@@ -80,20 +81,18 @@ namespace API.Extensions
                         }
 
                         var user = await userRepository.FindByIdAsync(userId);
-                        if (user == null || !user.IsActive)
-                        {
-                            context.Fail("User not found or inactive");
-                            return;
-                        }
-
                         var tokenSecurityStamp = context.Principal?.FindFirst("security_stamp")?.Value;
-                        var userSecurityStamp = user.SecurityStamp;
+                        var userSecurityStamp = user?.SecurityStamp;
 
-                        if (string.IsNullOrEmpty(tokenSecurityStamp) ||
-                            string.IsNullOrEmpty(userSecurityStamp) ||
-                            tokenSecurityStamp != userSecurityStamp)
+                        if (!AccessTokenSessionGate.IsAccessTokenAccepted(
+                                userExists: user != null,
+                                isActive: user?.IsActive ?? false,
+                                tokenSecurityStamp: tokenSecurityStamp,
+                                userSecurityStamp: userSecurityStamp))
                         {
-                            context.Fail("Token has been invalidated. Please login again.");
+                            context.Fail(user == null || !user.IsActive
+                                ? "User not found or inactive"
+                                : "Token has been invalidated. Please login again.");
                             return;
                         }
                     },

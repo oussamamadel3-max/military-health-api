@@ -55,6 +55,32 @@ namespace Application.Common.Permissions
         }
 
         /// <summary>
+        /// إبطال جلسات كل من يملك صلاحية معينة مباشرة أو عبر أدوار
+        /// </summary>
+        public static async Task InvalidateUsersWithPermissionAsync(
+            IPermissionRepository permissionRepository,
+            IUserRepository userRepository,
+            IRefreshTokenRepository refreshTokenRepository,
+            IUnitOfWork unitOfWork,
+            UserManager<User> userManager,
+            Guid permissionId)
+        {
+            var roleIds = await permissionRepository.GetRoleIdsByPermissionIdAsync(permissionId);
+            var userIds = await permissionRepository.GetUserIdsByPermissionIdAsync(permissionId);
+
+            foreach (var roleId in roleIds)
+            {
+                var fromRole = await userRepository.GetUserIdsByRoleIdAsync(roleId);
+                userIds = userIds.Union(fromRole).Distinct().ToList();
+            }
+
+            foreach (var userId in userIds)
+            {
+                await InvalidateUserTokensAsync(userRepository, refreshTokenRepository, unitOfWork, userManager, userId);
+            }
+        }
+
+        /// <summary>
         /// تحديث SecurityStamp لجميع المستخدمين الذين لديهم صلاحية حقل معينة
         /// </summary>
         public static async Task InvalidateUsersWithFieldPermissionAsync(

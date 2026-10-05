@@ -1,4 +1,5 @@
 using API.Infrastructure;
+using Application.Common.Permissions;
 using Application.Dtos.AuthDtos;
 using Application.Interfaces.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -21,7 +22,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpPost("[action]")]
-        [AuthorizePermission("UserManagement.Create")]
+        [AuthorizePermission(SystemPermissions.UserManagement.Create)]
         public async Task<IResult> Create([FromBody] CreateUserDto userDto)
         {
             var createdUser = await _userService.Create(userDto);
@@ -29,7 +30,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpPut("[action]/{id}")]
-        [AuthorizePermission("UserManagement.Edit")]
+        [AuthorizePermission(SystemPermissions.UserManagement.Edit)]
         public async Task<IResult> Update(string id, [FromBody] UpdateUserDto updatedUser)
         {
             await _userService.Update(id, updatedUser);
@@ -37,7 +38,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpDelete("[action]/{userId}")]
-        [AuthorizePermission("UserManagement.Delete")]
+        [AuthorizePermission(SystemPermissions.UserManagement.Delete)]
         public async Task<IResult> Delete(string userId)
         {
             await _userService.Delete(userId);
@@ -45,7 +46,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpGet("[action]")]
-        [AuthorizePermission("UserManagement.Read")]
+        [AuthorizePermission(SystemPermissions.UserManagement.Read)]
         public async Task<IResult> GetUsersList(
             [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
             [FromQuery][Range(1, 500)] int pageSize = 10,
@@ -58,7 +59,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpGet("[action]/{id}")]
-        [AuthorizePermission("UserManagement.Read")]
+        [AuthorizePermission(SystemPermissions.UserManagement.Read)]
         public async Task<IResult> GetUser(string id)
         {
             var user = await _userService.GetUserAsync(id);
@@ -66,7 +67,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpPatch("[action]/{id}")]
-        [AuthorizePermission("UserManagement.Edit")]
+        [AuthorizePermission(SystemPermissions.UserManagement.Edit)]
         public async Task<IResult> PatchUser(string id, [FromBody] UpdateUserPatchRequest request)
         {
             var updatedUser = await _userService.UpdateUserAsync(id, request);
@@ -74,7 +75,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpPatch("[action]/{id}")]
-        [AuthorizePermission("UserManagement.Edit")]
+        [AuthorizePermission(SystemPermissions.UserManagement.ChangeStatus)]
         public async Task<IResult> UpdateUserStatus(string id, [FromBody] UpdateUserStatusRequest request)
         {
             var updatedStatus = await _userService.UpdateUserStatusAsync(id, request);
@@ -118,7 +119,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpPost("[action]")]
-        [AuthorizePermission("UserManagement.Edit")]
+        [AuthorizePermission(SystemPermissions.UserManagement.ResetPassword)]
         public async Task<IResult> ChangePasswordUser([FromBody] AdminChangePasswordRequest dto)
         {
             await _userService.ResetUserPasswordAsync(dto);
@@ -126,7 +127,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpPost("[action]")]
-        [AuthorizePermission("UserManagement.Edit")]
+        [AuthorizePermission(SystemPermissions.UserManagement.AssignRoles)]
         public async Task<IResult> ToggleRolesForUserAsync([FromBody] AssignRolesDto dto)
         {
             await _userService.ToggleRolesForUserAsync(dto);
@@ -134,7 +135,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpPost("[action]")]
-        [AuthorizePermission("UserManagement.Edit")]
+        [AuthorizePermission(SystemPermissions.UserManagement.AssignPermissions)]
         public async Task<IResult> TogglePermissionsForUserAsync([FromBody] AssignPermissionToUserDto dto)
         {
             await _userService.TogglePermissionsForUserAsync(dto);
@@ -142,11 +143,11 @@ namespace API.Controllers.AuthControllers
         }
 
         /// <summary>
-        /// إزالة روابط صلاحيات الحقول عن مستخدم. الشرط: تسجيل الدخول وUserManagement.Edit،
-        /// والمنفّذ SuperAdmin. يُبطل جلسات المستخدم بعد الإزالة.
+        /// إزالة روابط صلاحيات الحقول عن مستخدم. يتطلب UserManagement.RemoveFieldPermissions.
+        /// يُبطل جلسات المستخدم بعد الإزالة.
         /// </summary>
         [HttpPost("[action]")]
-        [AuthorizePermission("UserManagement.Edit")]
+        [AuthorizePermission(SystemPermissions.UserManagement.RemoveFieldPermissions)]
         public async Task<IResult> RemoveFieldPermissionsFromUser([FromBody] RemoveFieldPermissionsDto dto)
         {
             await _userService.RemoveFieldPermissionsFromUserAsync(dto);
@@ -154,7 +155,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpPut("[action]/{id}")]
-        [AuthorizePermission("UserManagement.Edit")]
+        [AuthorizePermission(SystemPermissions.UserManagement.Edit, SystemPermissions.UserManagement.AssignRoles)]
         public async Task<IResult> UpdateUserWithRoles([FromRoute] string id, [FromBody] UpdateUserWithRolesDto dto)
         {
             await _userService.UpdateUserWithRolesAsync(id, dto);
@@ -162,7 +163,7 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpGet("[action]")]
-        [AuthorizePermission("UserManagement.Read")]
+        [AuthorizePermission(SystemPermissions.UserManagement.Read)]
         public async Task<IResult> GetDropDownUsers()
         {
             var dropDownUsers = await _userService.GetDropDownUsersAsync();

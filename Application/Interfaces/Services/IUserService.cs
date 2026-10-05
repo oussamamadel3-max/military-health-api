@@ -6,7 +6,7 @@ namespace Application.Interfaces.Services
 {
     public interface IUserService
     {
-        Task<CreateUserDto> Create(CreateUserDto createdUser);
+        Task<CreatedUserResponseDto> Create(CreateUserDto createdUser);
         Task Update(string id, UpdateUserDto updatedUser);
         Task Delete(string userId);
         Task<PaginatedList<UserListItemDto>> GetUsersListAsync(

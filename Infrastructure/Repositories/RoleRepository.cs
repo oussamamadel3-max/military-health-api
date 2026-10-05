@@ -21,9 +21,6 @@ public class RoleRepository : IRoleRepository
     public async Task<Role?> GetByNormalizedNameAsync(string normalizedName, CancellationToken cancellationToken = default)
         => await _context.Roles.AsNoTracking().FirstOrDefaultAsync(r => r.NormalizedName == normalizedName, cancellationToken);
 
-    public async Task<string?> GetSuperAdminRoleIdAsync(CancellationToken cancellationToken = default)
-        => await _context.Roles.AsNoTracking().Where(r => r.NormalizedName == "SUPERADMIN").Select(r => r.Id).FirstOrDefaultAsync(cancellationToken);
-
     public async Task<List<(string Id, string? Name)>> ResolveActiveRolesAsync(IEnumerable<string> idsOrNames, CancellationToken cancellationToken = default)
     {
         var rawUpper = idsOrNames.Select(x => x.Trim().ToUpperInvariant()).ToHashSet();

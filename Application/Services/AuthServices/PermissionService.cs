@@ -14,49 +14,36 @@ namespace Application.Services.AuthServices
     public class PermissionService : IPermissionService
     {
         private readonly IPermissionRepository _permissionRepository;
+        private readonly IUserRepository _userRepository;
+        private readonly IRefreshTokenRepository _refreshTokenRepository;
         private readonly IUnitOfWork _unitOfWork;
         private readonly RoleManager<Role> _roleManager;
+        private readonly UserManager<User> _userManager;
+        private readonly IPermissionGate _permissionGate;
+        private readonly ICurrentUserService _currentUserService;
         private readonly IMapper _mapper;
 
         public PermissionService(
             IPermissionRepository permissionRepository,
+            IUserRepository userRepository,
+            IRefreshTokenRepository refreshTokenRepository,
             IUnitOfWork unitOfWork,
             RoleManager<Role> roleManager,
+            UserManager<User> userManager,
+            IPermissionGate permissionGate,
+            ICurrentUserService currentUserService,
             IMapper mapper)
         {
             _permissionRepository = permissionRepository;
+            _userRepository = userRepository;
+            _refreshTokenRepository = refreshTokenRepository;
             _unitOfWork = unitOfWork;
             _roleManager = roleManager;
+            _userManager = userManager;
+            _permissionGate = permissionGate;
+            _currentUserService = currentUserService;
             _mapper = mapper;
         }
-
-        #region الانشاء 
-        public async Task<PermissionDto> CreatePermissionAsync(CreatePermissionDto dto)
-        {
-            if (await _permissionRepository.ExistsByNameAsync(dto.Name))
-                throw new InvalidRoleDataException("الصلاحية موجودة مسبقاً.");
-
-            var permission = _mapper.Map<Permission>(dto);
-            _permissionRepository.Add(permission);
-            await _unitOfWork.SaveChangesAsync();
-
-            return _mapper.Map<PermissionDto>(permission);
-        }
-        #endregion
-
-        #region الحذف 
-        public async Task DeletePermissionAsync(string id)
-        {
-            if (!Guid.TryParse(id, out var permissionId))
-                throw new RoleNotFoundException("الصلاحية غير موجودة.");
-
-            var permission = await _permissionRepository.FindByIdAsync(permissionId)
-                ?? throw new RoleNotFoundException("الصلاحية غير موجودة.");
-
-            _permissionRepository.Remove(permission);
-            await _unitOfWork.SaveChangesAsync();
-        }
-        #endregion
 
         #region جلب حسب المعرف
         public async Task<PermissionDto> GetByIdAsync(string id)
@@ -68,17 +55,6 @@ namespace Application.Services.AuthServices
                 ?? throw new RoleNotFoundException("الصلاحية غير موجودة.");
 
             return _mapper.Map<PermissionDto>(permission);
-        }
-        #endregion
-
-        #region التعديل
-        public async Task UpdatePermissionAsync(Guid id, UpdatePermissionDto dto)
-        {
-            var permission = await _permissionRepository.FindByIdAsync(id)
-                ?? throw new RoleNotFoundException("الصلاحية غير موجودة.");
-
-            _mapper.Map(dto, permission);
-            await _unitOfWork.SaveChangesAsync();
         }
         #endregion
 
@@ -147,6 +123,8 @@ namespace Application.Services.AuthServices
         #region تعين او الغاء تعين صلاحية لدور معين
         public async Task TogglePermissionForRoleAsync(string roleId, Guid permissionId)
         {
+            _permissionGate.EnsureAll(SystemPermissions.RoleManagement.AssignPermissions);
+
             var role = await _roleManager.FindByIdAsync(roleId)
                 ?? throw new RoleNotFoundException("الدور غير موجود.");
 
@@ -159,8 +137,13 @@ namespace Application.Services.AuthServices
             {
                 _permissionRepository.RemoveRolePermission(existing);
                 await _unitOfWork.SaveChangesAsync();
+                await SecurityStampHelper.InvalidateUsersWithRoleAsync(
+                    _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, roleId);
                 return;
             }
+
+            IamAdminGuard.EnsureAssignableWithinActorPermissions(
+                new[] { permission.Name }, _permissionGate.GetPermissions());
 
             var rolePermission = new RolePermission
             {
@@ -170,16 +153,24 @@ namespace Application.Services.AuthServices
 
             _permissionRepository.AddRolePermission(rolePermission);
             await _unitOfWork.SaveChangesAsync();
+
+            await SecurityStampHelper.InvalidateUsersWithRoleAsync(
+                _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, roleId);
         }
 
         public async Task TogglePermissionStatusAsync(Guid permissionId)
         {
+            _permissionGate.EnsureAll(SystemPermissions.PermissionManagement.ChangeStatus);
+
             var permission = await _permissionRepository.FindByIdAsync(permissionId)
                 ?? throw new RoleNotFoundException("الصلاحية غير موجودة.");
 
             permission.IsActive = !permission.IsActive;
             _permissionRepository.Update(permission);
             await _unitOfWork.SaveChangesAsync();
+
+            await SecurityStampHelper.InvalidateUsersWithPermissionAsync(
+                _permissionRepository, _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, permissionId);
         }
         #endregion
     }

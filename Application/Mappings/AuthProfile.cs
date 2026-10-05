@@ -92,9 +92,6 @@ namespace Application.Mappings
 
             // Permission Mappings
             config.NewConfig<Permission, PermissionDto>();
-            config.NewConfig<CreatePermissionDto, Permission>();
-            config.NewConfig<UpdatePermissionDto, Permission>()
-                .IgnoreNullValues(true);
 
             config.NewConfig<Permission, PermissionInfoDto>()
                 .Map(dest => dest.Name, src => AuthDisplayNames.PermissionAr(src.Name));

@@ -10,7 +10,13 @@ namespace Infrastructure.Persistence
 {
     public static class AuditLogger
     {
-        private static readonly string[] IgnoredFields = { "CreatedAt", "CreatedBy", "UpdatedAt", "UpdatedBy" };
+        private static readonly string[] IgnoredFields =
+        {
+            "CreatedAt", "CreatedBy", "UpdatedAt", "UpdatedBy",
+            "PasswordHash", "SecurityStamp", "ConcurrencyStamp",
+            "NormalizedUserName", "NormalizedEmail", "LockoutEnd",
+            "AccessFailedCount", "LoginLockoutTier"
+        };
 
         private static readonly JsonSerializerOptions JsonSerializerOptions = new JsonSerializerOptions
         {
@@ -52,21 +58,11 @@ namespace Infrastructure.Persistence
         /// </summary>
         private static void ProcessSingleEntry(EntityEntry entry, List<AuditLog> auditLogs, CurrentUserDto currentUser, EntityState effectiveState)
         {
-            long recordId = 0;
+            // لا نسجّل سجل التدقيق نفسه لتجنب حلقات لا نهائية
+            if (entry.Entity is AuditLog)
+                return;
 
-            // الحصول على الـ Primary Key
-            var getPkMethod = entry.Entity.GetType().GetMethod("GetPrimaryKey");
-            if (getPkMethod != null)
-            {
-                var result = getPkMethod.Invoke(entry.Entity, null);
-                if (result is long pkValue)
-                    recordId = pkValue;
-            }
-            else
-            {
-                var primaryKey = entry.Metadata.FindPrimaryKey()?.Properties.FirstOrDefault()?.Name ?? "Id";
-                recordId = entry.Property(primaryKey).CurrentValue is long l ? l : 0;
-            }
+            long recordId = ResolveRecordId(entry);
 
             string? oldValue = null;
             string? newValue = null;
@@ -149,6 +145,23 @@ namespace Infrastructure.Persistence
             }
 
             return auditData;
+        }
+
+        private static long ResolveRecordId(EntityEntry entry)
+        {
+            if (entry.Entity is IAuditableEntity auditable)
+                return auditable.GetPrimaryKey();
+
+            var primaryKey = entry.Metadata.FindPrimaryKey()?.Properties.FirstOrDefault()?.Name ?? "Id";
+            var value = entry.Property(primaryKey).CurrentValue;
+            return value switch
+            {
+                long l => l,
+                int i => i,
+                Guid g => Domain.Common.AuditPrimaryKey.FromGuid(g),
+                string s => Domain.Common.AuditPrimaryKey.FromString(s),
+                _ => 0
+            };
         }
     }
 }

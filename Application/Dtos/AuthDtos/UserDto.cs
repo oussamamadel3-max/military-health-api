@@ -101,6 +101,17 @@ public class CreateUserDto
     public List<string> roles { get; set; } = new();
 }
 
+/// <summary>استجابة إنشاء مستخدم بدون كلمة المرور.</summary>
+public class CreatedUserResponseDto
+{
+    public string fullName { get; set; } = "";
+    public string username { get; set; } = "";
+    public string email { get; set; } = "";
+    public string? phone { get; set; }
+    public bool isActive { get; set; }
+    public List<string> roles { get; set; } = new();
+}
+
 
 public record RoleLiteDto(string RoleId, string RoleName);
 public record PermissionLiteDto(string PermissionId, string PermissionName);

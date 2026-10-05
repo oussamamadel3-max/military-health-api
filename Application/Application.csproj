@@ -22,5 +22,12 @@
     <ProjectReference Include="..\Domain\Domain.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\Images\logo.svg" />
+    <EmbeddedResource Include="Resources\Images\logo.png" />
+    <EmbeddedResource Include="Resources\Fonts\itfQomraArabic-Regular.otf" />
+    <EmbeddedResource Include="Resources\Fonts\itfQomraArabic-Bold.otf" />
+  </ItemGroup>
+
 </Project>
 

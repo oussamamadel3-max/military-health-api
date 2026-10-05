@@ -1,14 +1,16 @@
 using Application.Exceptions;
+using Application.Interfaces.Services;
 using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.Extensions.DependencyInjection;
 
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = true)]
 public class AuthorizePermissionAttribute : Attribute, IAuthorizationFilter
 {
-    private readonly string _requiredPermission;
+    private readonly string[] _requiredPermissions;
 
-    public AuthorizePermissionAttribute(string requiredPermission)
+    public AuthorizePermissionAttribute(params string[] requiredPermissions)
     {
-        _requiredPermission = requiredPermission;
+        _requiredPermissions = requiredPermissions ?? Array.Empty<string>();
     }
 
     public void OnAuthorization(AuthorizationFilterContext context)
@@ -20,12 +22,22 @@ public class AuthorizePermissionAttribute : Attribute, IAuthorizationFilter
             throw new UnauthenticatedUserException();
         }
 
+        if (_requiredPermissions.Length == 0)
+            return;
+
+        var gate = context.HttpContext.RequestServices.GetService<IPermissionGate>();
+        if (gate != null)
+        {
+            gate.EnsureAll(_requiredPermissions);
+            return;
+        }
+
         var permissions = user.Claims
             .Where(c => c.Type == "permissions")
             .Select(c => c.Value)
-            .ToList();
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        if (!permissions.Contains(_requiredPermission))
+        if (!_requiredPermissions.All(p => permissions.Contains(p)))
         {
             throw new ForbiddenPermissionException();
         }

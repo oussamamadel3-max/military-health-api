@@ -32,6 +32,8 @@ namespace Application.Services.AuthServices
         private readonly IUnitOfWork _unitOfWork;
         private readonly UserManager<User> _userManager;
         private readonly IMapper _mapper;
+        private readonly IPermissionGate _permissionGate;
+        private readonly ICurrentUserService _currentUserService;
 
         public FieldPermissionService(
             IFieldPermissionRepository fieldPermissionRepository,
@@ -40,7 +42,9 @@ namespace Application.Services.AuthServices
             IRefreshTokenRepository refreshTokenRepository,
             IUnitOfWork unitOfWork,
             UserManager<User> userManager,
-            IMapper mapper)
+            IMapper mapper,
+            IPermissionGate permissionGate,
+            ICurrentUserService currentUserService)
         {
             _fieldPermissionRepository = fieldPermissionRepository;
             _userRepository = userRepository;
@@ -49,6 +53,8 @@ namespace Application.Services.AuthServices
             _unitOfWork = unitOfWork;
             _userManager = userManager;
             _mapper = mapper;
+            _permissionGate = permissionGate;
+            _currentUserService = currentUserService;
         }
 
         #region CRUD للـ FieldPermissions
@@ -197,6 +203,8 @@ namespace Application.Services.AuthServices
 
         public async Task<CreateFieldPermissionsResultDto> CreateAsync(CreateFieldPermissionDto dto)
         {
+            _permissionGate.EnsureAll(SystemPermissions.FieldPermissionManagement.Create);
+
             var roleIds = NormalizeIds(dto.RoleIds);
             var userIds = NormalizeIds(dto.UserIds);
 
@@ -307,6 +315,8 @@ namespace Application.Services.AuthServices
 
         public async Task UpdateAsync(Guid id, UpdateFieldPermissionDto dto)
         {
+            _permissionGate.EnsureAll(SystemPermissions.FieldPermissionManagement.Edit);
+
             var entity = await _fieldPermissionRepository.FindByIdAsync(id)
                 ?? throw new RoleNotFoundException("صلاحية الحقل غير موجودة.");
 
@@ -350,6 +360,8 @@ namespace Application.Services.AuthServices
 
         public async Task DeleteAsync(Guid id)
         {
+            _permissionGate.EnsureAll(SystemPermissions.FieldPermissionManagement.Delete);
+
             var entity = await _fieldPermissionRepository.FindByIdAsync(id)
                 ?? throw new RoleNotFoundException("صلاحية الحقل غير موجودة.");
 
@@ -380,6 +392,8 @@ namespace Application.Services.AuthServices
 
         public async Task ChangeAccessTypeAsync(Guid id, ChangeFieldPermissionAccessTypeDto dto)
         {
+            _permissionGate.EnsureAll(SystemPermissions.FieldPermissionManagement.ChangeAccessType);
+
             var entity = await _fieldPermissionRepository.FindByIdAsync(id)
                 ?? throw new RoleNotFoundException("صلاحية الحقل غير موجودة.");
 
@@ -719,8 +733,7 @@ namespace Application.Services.AuthServices
             return result;
         }
         #endregion
-
-        private class EntityMetadata
+private class EntityMetadata
         {
             public string DisplayName { get; set; } = string.Empty;
             public Dictionary<string, string> FieldDisplayMap { get; set; } = new(StringComparer.OrdinalIgnoreCase);

@@ -11,18 +11,15 @@ namespace Application.Services.Dashboard
     public class DashboardService : IDashboardService
     {
         private readonly IAuditLogRepository _auditLogRepository;
-        private readonly IActorScopeProvider _actorScopeProvider;
         private readonly IUserContextService _userCtx;
         private readonly IMapper _mapper;
 
         public DashboardService(
             IAuditLogRepository auditLogRepository,
-            IActorScopeProvider actorScopeProvider,
             IUserContextService userCtx,
             IMapper mapper)
         {
             _auditLogRepository = auditLogRepository;
-            _actorScopeProvider = actorScopeProvider;
             _userCtx = userCtx;
             _mapper = mapper;
         }
@@ -105,21 +102,11 @@ namespace Application.Services.Dashboard
                 System.Linq.Expressions.Expression.Constant(value));
             return System.Linq.Expressions.Expression.Lambda<Func<T, bool>>(body, p);
         }
-
-        private IQueryable<AuditLog> ApplyScopeAudit(IQueryable<AuditLog> q, ActorScope scope)
+public async Task<DashboardStatsDto> GetAsync(DashboardFilter f)
         {
-            if (scope.IsSuperAdmin) return q;
-            return q.Where(a => a.UserId == scope.UserId);
-        }
-
-        public async Task<DashboardStatsDto> GetAsync(DashboardFilter f)
-        {
-            var userId = _userCtx.UserId ?? string.Empty;
-            var actorScope = await _actorScopeProvider.GetScopeAsync(userId);
-
             var (start, endEx, _) = NormalizeRange(f.From, f.To);
 
-            var auditQ = ApplyScopeAudit(_auditLogRepository.Query(), actorScope);
+            var auditQ = _auditLogRepository.Query();
 
             if (start.HasValue || endEx.HasValue)
                 auditQ = ApplyRange(auditQ, start, endEx, a => a.Timestamp);

@@ -15,7 +15,6 @@ namespace Application.Services.Reports
     public class ReportsService : IReportsService
     {
         private readonly IAuditLogRepository _auditLogRepository;
-        private readonly IActorScopeProvider _actorScopeProvider;
         private readonly IUserContextService _userCtx;
         private readonly IExportService _export;
         private readonly IDashboardService _dashboard;
@@ -23,14 +22,12 @@ namespace Application.Services.Reports
 
         public ReportsService(
             IAuditLogRepository auditLogRepository,
-            IActorScopeProvider actorScopeProvider,
             IUserContextService userCtx,
             IExportService export,
             IDashboardService dashboard,
             IMapper mapper)
         {
             _auditLogRepository = auditLogRepository;
-            _actorScopeProvider = actorScopeProvider;
             _userCtx = userCtx;
             _export = export;
             _dashboard = dashboard;
@@ -42,13 +39,7 @@ namespace Application.Services.Reports
         {
             filter ??= new AuditLogFilter();
 
-            var userId = _userCtx.UserId ?? "";
-            var actorScope = await _actorScopeProvider.GetScopeAsync(userId);
-
             var q = _auditLogRepository.Query().AsQueryable();
-
-            if (!actorScope.IsSuperAdmin)
-                q = q.Where(a => a.UserId == actorScope.UserId);
 
             if (!string.IsNullOrWhiteSpace(filter.searchUserName))
             {
@@ -98,13 +89,19 @@ namespace Application.Services.Reports
                 PeriodText = periodText,
                 IncludeLogo = true,
                 IncludeFooter = true,
+                IncludeSummary = true,
+                AutoFilter = true,
+                FreezeHeaders = true,
+                // لا نجمع معرفات نصية/طويلة — الملخص يبقى عدد السجلات فقط
+                NonSummarizedColumns = ["LogId"],
                 ColumnMappings = new Dictionary<string, string>
                 {
-                    ["Timestamp"] = "التاريخ",
-                    ["UserName"] = "المستخدم",
-                    ["ActionType"] = "الإجراء",
+                    // ترتيب العرض من اليمين لليسار مع RTL: رقم السجل ← … ← التاريخ
+                    ["LogId"] = "رقم السجل",
                     ["TableName"] = "اسم الجدول",
-                    ["RecordId"] = "رقم السطر",
+                    ["ActionType"] = "الإجراء",
+                    ["UserName"] = "المستخدم",
+                    ["Timestamp"] = "التاريخ",
                 }
             };
 

@@ -8,6 +8,7 @@ namespace Application.Interfaces.Services
         Task<AuditLogDetailsDto> GetByIdAsync(long id);
         Task<PaginatedList<AuditLogListDto>> GetAllAsync(int pageNumber, int pageSize);
         Task<PaginatedList<AuditLogListDto>> GetAllFilteredAsync(int pageNumber, int pageSize, AuditLogFilter auditLogFilter);
+        Task<List<string>> GetEntityTypeNamesAsync();
         Task<AuditLogSummaryDto> GetSummaryAsync();
     }
 }

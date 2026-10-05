@@ -1,11 +1,12 @@
+using Application.Common.Security;
 using Application.Dtos.AuthDtos;
+using Application.Exceptions;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Domain.Entities.Auth;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
-using System.Collections.Concurrent;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
@@ -14,10 +15,6 @@ namespace Application.Services.AuthServices
 {
     public class TokenService : ITokenService
     {
-        private static readonly ConcurrentDictionary<string, SemaphoreSlim> RefreshLocks = new();
-        private static readonly ConcurrentDictionary<string, (TokenResponseDto Result, DateTime ExpiresAt)> RefreshResultsCache = new();
-        private static readonly TimeSpan RefreshCacheTtl = TimeSpan.FromSeconds(30);
-
         private readonly IUserRepository _userRepository;
         private readonly IRoleRepository _roleRepository;
         private readonly IRefreshTokenRepository _refreshTokenRepository;
@@ -42,9 +39,8 @@ namespace Application.Services.AuthServices
         public async Task<TokenGenerationResultDto> GenerateTokensAsync(string userId)
         {
             var user = await _userRepository.GetByIdAsync(userId);
-            if (user == null) throw new Exception("User not found");
+            if (user == null) throw new InvalidSessionException("المستخدم غير موجود.");
 
-            // 1️⃣ Roles - فقط الأدوار النشطة
             var roleNames = await _userRepository.GetActiveRoleNamesAsync(user.Id);
             roleNames = roleNames
                 .Where(n => !string.IsNullOrWhiteSpace(n))
@@ -52,10 +48,8 @@ namespace Application.Services.AuthServices
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            // 2️⃣ User permissions - فقط الصلاحيات النشطة
             var userPermissions = await _userRepository.GetDirectPermissionNamesAsync(user.Id, activeOnly: true);
 
-            // 3️⃣ Role permissions - فقط الصلاحيات النشطة
             var roleIds = await _userRepository.GetActiveRoleIdsAsync(user.Id);
             var rolePermissions = (await _roleRepository.GetRolePermissionsForRolesAsync(roleIds))
                 .Select(rp => rp.Permission!.Name)
@@ -63,18 +57,15 @@ namespace Application.Services.AuthServices
                 .Select(p => p!)
                 .ToList();
 
-            // 4️⃣ دمج الصلاحيات
             var allPermissions = userPermissions.Concat(rolePermissions)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            // 5️⃣ Field Permissions (من روابط المستخدم + الأدوار، مع أولوية لصلاحيات المستخدم)
             var userFieldPermissions = await _userRepository.GetUserFieldPermissionDetailsAsync(user.Id);
             var roleFieldPermissions = await _roleRepository.GetRoleFieldPermissionDetailsAsync(roleNames);
 
             var mergedFieldPermissions = new Dictionary<string, (string EntityName, string FieldName, Domain.Enums.FieldAccessType AccessType)>();
 
-            // أضف صلاحيات الأدوار أولاً
             foreach (var fp in roleFieldPermissions)
             {
                 var fieldKey = $"{fp.EntityName}:{fp.FieldName}";
@@ -82,7 +73,6 @@ namespace Application.Services.AuthServices
                     mergedFieldPermissions[fieldKey] = (fp.EntityName, fp.FieldName, fp.AccessType);
             }
 
-            // ثم قم بالكتابة فوقها بصلاحيات المستخدم إن وجدت
             foreach (var fp in userFieldPermissions)
             {
                 var fieldKey = $"{fp.EntityName}:{fp.FieldName}";
@@ -91,8 +81,7 @@ namespace Application.Services.AuthServices
 
             var fieldPermissions = mergedFieldPermissions.Values.ToList();
 
-            // 6️⃣ Claims
-            var now = DateTime.Now;
+            var now = DateTime.UtcNow;
             var claims = new List<Claim>
             {
                 new Claim(ClaimTypes.NameIdentifier, user.Id),
@@ -101,18 +90,15 @@ namespace Application.Services.AuthServices
                 new Claim(JwtRegisteredClaimNames.Email, user.Email ?? ""),
                 new Claim(JwtRegisteredClaimNames.Iat, new DateTimeOffset(now).ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64),
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-                // إضافة SecurityStamp للتحقق من صلاحية Token عند تغيير الصلاحيات
                 new Claim("security_stamp", user.SecurityStamp ?? Guid.NewGuid().ToString())
             };
 
-            // Permissions
             foreach (var permission in allPermissions)
             {
                 if (!string.IsNullOrEmpty(permission))
                     claims.Add(new Claim("permissions", permission));
             }
 
-            // Roles
             foreach (var roleName in roleNames)
             {
                 if (!string.IsNullOrEmpty(roleName))
@@ -122,11 +108,9 @@ namespace Application.Services.AuthServices
                 }
             }
 
-            // Field permissions
             foreach (var fp in fieldPermissions)
                 claims.Add(new Claim("field_permission", $"{fp.EntityName}:{fp.FieldName}:{fp.AccessType}"));
 
-            // 7️⃣ إنشاء Access Token
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.Key));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
@@ -140,15 +124,14 @@ namespace Application.Services.AuthServices
             );
             var accessToken = new JwtSecurityTokenHandler().WriteToken(token);
 
-            // 8️⃣ إنشاء Refresh Token
-            var refreshToken = Convert.ToBase64String(Guid.NewGuid().ToByteArray());
+            var rawRefreshToken = RefreshTokenProtector.GenerateRawToken();
+            var refreshTokenHash = RefreshTokenProtector.HashToken(rawRefreshToken);
 
-            // حفظ Refresh Token في DB
             var dbRefreshToken = new UserRefreshToken
             {
                 Id = Guid.NewGuid(),
                 UserId = user.Id,
-                Token = refreshToken,
+                Token = refreshTokenHash,
                 ExpiryDate = now.AddDays(_jwtSettings.RefreshTokenExpirationInDays),
                 IsRevoked = false
             };
@@ -158,7 +141,7 @@ namespace Application.Services.AuthServices
             return new TokenGenerationResultDto
             {
                 AccessToken = accessToken,
-                RefreshToken = refreshToken,
+                RefreshToken = rawRefreshToken,
                 Roles = roleNames,
                 Permissions = allPermissions
             };
@@ -168,78 +151,48 @@ namespace Application.Services.AuthServices
         #region    استخدام Refresh Token للحصول على Access Token جديد و Refresh Token جديد
         public async Task<TokenResponseDto> RefreshAccessTokenAsync(string refreshToken)
         {
-            if (TryGetCachedRefreshResult(refreshToken, out var cachedResult))
-                return cachedResult;
+            if (string.IsNullOrWhiteSpace(refreshToken))
+                throw new InvalidSessionException("رمز التحديث غير صالح أو منتهي الصلاحية");
 
-            var refreshLock = RefreshLocks.GetOrAdd(refreshToken, _ => new SemaphoreSlim(1, 1));
-            await refreshLock.WaitAsync();
+            var tokenHash = RefreshTokenProtector.HashToken(refreshToken);
+            var now = DateTime.UtcNow;
+
+            await using var tx = await _unitOfWork.BeginTransactionAsync();
             try
             {
-                if (TryGetCachedRefreshResult(refreshToken, out cachedResult))
-                    return cachedResult;
+                var consumed = await _refreshTokenRepository.TryConsumeValidByTokenHashAsync(tokenHash, now);
+                if (consumed == null)
+                    throw new InvalidSessionException("رمز التحديث غير صالح أو منتهي الصلاحية");
 
-                var now = DateTime.Now;
-                var dbToken = await _refreshTokenRepository.GetValidByTokenAsync(refreshToken, now);
-
-                if (dbToken == null)
-                {
-                    if (TryGetCachedRefreshResult(refreshToken, out cachedResult))
-                        return cachedResult;
-
-                    throw new Exception("رمز التحديث غير صالح أو منتهي الصلاحية");
-                }
-
-                var user = await _userRepository.FindByIdAsync(dbToken.UserId);
+                var user = await _userRepository.FindByIdAsync(consumed.UserId);
                 if (user == null || !user.IsActive)
-                    throw new Exception("المستخدم غير موجود أو غير نشط");
+                    throw new InvalidSessionException("المستخدم غير موجود أو غير نشط");
 
-                _refreshTokenRepository.MarkRevoked(dbToken);
+                var tokenResult = await GenerateTokensAsync(consumed.UserId);
+                await tx.CommitAsync();
 
-                var tokenResult = await GenerateTokensAsync(dbToken.UserId);
-                await _unitOfWork.SaveChangesAsync();
-
-                var response = new TokenResponseDto
+                return new TokenResponseDto
                 {
                     AccessToken = tokenResult.AccessToken,
                     RefreshToken = tokenResult.RefreshToken
                 };
-
-                CacheRefreshResult(refreshToken, response);
-                return response;
             }
-            finally
+            catch
             {
-                refreshLock.Release();
-                RefreshLocks.TryRemove(refreshToken, out _);
+                await tx.RollbackAsync();
+                throw;
             }
-        }
-
-        private static bool TryGetCachedRefreshResult(string refreshToken, out TokenResponseDto result)
-        {
-            result = null!;
-            if (!RefreshResultsCache.TryGetValue(refreshToken, out var cached))
-                return false;
-
-            if (cached.ExpiresAt <= DateTime.UtcNow)
-            {
-                RefreshResultsCache.TryRemove(refreshToken, out _);
-                return false;
-            }
-
-            result = cached.Result;
-            return true;
-        }
-
-        private static void CacheRefreshResult(string refreshToken, TokenResponseDto result)
-        {
-            RefreshResultsCache[refreshToken] = (result, DateTime.UtcNow.Add(RefreshCacheTtl));
         }
         #endregion
 
         #region  إلغاء Refresh Token
         public async Task<bool> RevokeRefreshTokenAsync(string refreshToken)
         {
-            var dbToken = await _refreshTokenRepository.GetByTokenAsync(refreshToken);
+            if (string.IsNullOrWhiteSpace(refreshToken))
+                return false;
+
+            var tokenHash = RefreshTokenProtector.HashToken(refreshToken);
+            var dbToken = await _refreshTokenRepository.GetByTokenAsync(tokenHash);
             if (dbToken == null) return false;
 
             _refreshTokenRepository.MarkRevoked(dbToken);

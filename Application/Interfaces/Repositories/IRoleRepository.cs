@@ -6,7 +6,6 @@ public interface IRoleRepository
 {
     Task<Role?> GetByIdAsync(string id, bool asNoTracking = false, CancellationToken cancellationToken = default);
     Task<Role?> GetByNormalizedNameAsync(string normalizedName, CancellationToken cancellationToken = default);
-    Task<string?> GetSuperAdminRoleIdAsync(CancellationToken cancellationToken = default);
     Task<List<(string Id, string? Name)>> ResolveActiveRolesAsync(IEnumerable<string> idsOrNames, CancellationToken cancellationToken = default);
     Task<List<string>> GetActiveRoleIdsAsync(IEnumerable<string> roleIds, CancellationToken cancellationToken = default);
     IQueryable<Role> QueryRoles(bool asNoTracking = true);

@@ -49,6 +49,7 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<ILoginLockoutService, LoginLockoutService>();
         services.AddScoped<IUserPermissionService, UserPermissionService>();
+        services.AddScoped<IPermissionGate, PermissionGate>();
         services.AddScoped<ICurrentUserService, CurrentUserService>();
         services.AddScoped<ITokenService, TokenService>();
         services.AddScoped<FieldPermissionHelper>();

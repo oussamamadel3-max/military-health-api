@@ -1,5 +1,4 @@
 using API.Infrastructure;
-using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Application.ModelsDto.AuditLogDtos;
 using Microsoft.AspNetCore.Mvc;
@@ -10,12 +9,10 @@ using System.ComponentModel.DataAnnotations;
 public class AuditLogController : ControllerBase
 {
     private readonly IAuditLogService _service;
-    private readonly IAuditLogRepository _auditLogRepository;
 
-    public AuditLogController(IAuditLogService service, IAuditLogRepository auditLogRepository)
+    public AuditLogController(IAuditLogService service)
     {
         _service = service;
-        _auditLogRepository = auditLogRepository;
     }
 
     [HttpGet("[action]/{id}")]
@@ -30,8 +27,8 @@ public class AuditLogController : ControllerBase
     [AuthorizePermission("AuditLog.Read")]
     public async Task<IResult> GetAuditEntities()
     {
-        var entityNames = await _auditLogRepository.GetEntityTypeNamesAsync();
-        return ApiResponse.Success("تم جلب أسماء كيانات السجل بنجاح.", entityNames.ToList());
+        var entityNames = await _service.GetEntityTypeNamesAsync();
+        return ApiResponse.Success("تم جلب أسماء كيانات السجل بنجاح.", entityNames);
     }
 
     [HttpPost("[action]")]
