@@ -1,5 +1,5 @@
 using Application.Interfaces.Repositories;
-using Domain.Entities;
+using Domain.Entities.Audit;
 using Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,19 +11,20 @@ public class AuditLogRepository : IAuditLogRepository
 
     public AuditLogRepository(AppDbContext context) => _context = context;
 
-    public IQueryable<AuditLog> Query(bool asNoTracking = true)
-        => asNoTracking ? _context.AuditLogs.AsNoTracking() : _context.AuditLogs;
+    public IQueryable<AuditEvent> Query(bool asNoTracking = true)
+        => asNoTracking ? _context.AuditEvents.AsNoTracking() : _context.AuditEvents;
 
-    public async Task<AuditLog?> GetByIdAsync(long logId, IQueryable<AuditLog> scopedQuery, CancellationToken cancellationToken = default)
-        => await scopedQuery.FirstOrDefaultAsync(a => a.LogId == logId, cancellationToken);
+    public async Task<AuditEvent?> GetByIdAsync(long eventId, IQueryable<AuditEvent> scopedQuery, CancellationToken cancellationToken = default)
+        => await scopedQuery.FirstOrDefaultAsync(a => a.EventId == eventId, cancellationToken);
 
-    public async Task<List<string>> GetEntityTypeNamesAsync(CancellationToken cancellationToken = default)
+    public Task<List<string>> GetEntityTypeNamesAsync(CancellationToken cancellationToken = default)
     {
-        return _context.Model.GetEntityTypes()
+        var names = _context.Model.GetEntityTypes()
             .Select(t => t.ClrType.Name)
-            .Where(n => n != nameof(AuditLog))
+            .Where(n => n != nameof(AuditEvent) && n != nameof(CrossCenterAccess))
             .Distinct()
             .OrderBy(n => n)
             .ToList();
+        return Task.FromResult(names);
     }
 }

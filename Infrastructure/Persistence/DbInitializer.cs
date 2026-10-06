@@ -1,3 +1,4 @@
+using Application.Common.Security;
 using Domain.Entities.Auth;
 using Domain.Entities.Core;
 using Infrastructure.Persistence;
@@ -75,15 +76,27 @@ namespace Infrastructure.Persistence
                 {
                     foreach (var r in attachRoles)
                     {
-                        var exists = await context.UserRoleAssociations
-                            .AnyAsync(ura => ura.UserId == u.Id && ura.RoleId == r.Id);
-                        if (!exists)
+                        var existingRoles = await context.UserRoleAssociations
+                            .Where(ura => ura.UserId == u.Id && ura.RoleId == r.Id && ura.CenterId == null)
+                            .OrderByDescending(ura => ura.IsActive)
+                            .ThenByDescending(ura => ura.RevokedAt)
+                            .ToListAsync();
+                        if (existingRoles.Any(ura => ura.IsActive))
+                            continue;
+
+                        var revokedRole = existingRoles.FirstOrDefault();
+                        if (revokedRole != null)
+                            IamRetention.Reactivate(revokedRole, u.Id, DateTimeOffset.UtcNow);
+                        else
                         {
                             context.UserRoleAssociations.Add(new UserRoleAssociation
                             {
                                 Id = Guid.NewGuid(),
                                 UserId = u.Id,
-                                RoleId = r.Id
+                                RoleId = r.Id,
+                                AssignedByUserId = u.Id,
+                                AssignedAt = DateTimeOffset.UtcNow,
+                                IsActive = true
                             });
                         }
                     }
@@ -110,14 +123,19 @@ namespace Infrastructure.Persistence
                     context.Permissions.Add(perm);
                     await context.SaveChangesAsync();
                 }
+                else if (!perm.IsActive)
+                {
+                    perm.IsActive = true;
+                    await context.SaveChangesAsync();
+                }
                 return perm;
             }
 
             /// <summary>
             /// يعيد تسمية صلاحية قديمة إلى الاسم الجديد مع الحفاظ على إسنادات الأدوار/المستخدمين.
-            /// إن وُجد الاسمان معاً تُنقل الإسنادات ثم تُحذف القديمة.
+            /// إن وُجد الاسمان معاً تُنقل الإسنادات النشطة أو يُلغى المكرر، ثم تُعطّل القديمة.
             /// </summary>
-            async Task MigratePermissionNameAsync(string oldName, string newName, string? newDesc)
+            async Task MigratePermissionNameAsync(string oldName, string newName, string? newDesc, string actorId)
             {
                 var oldPerm = await context.Permissions.FirstOrDefaultAsync(p => p.Name == oldName);
                 if (oldPerm == null) return;
@@ -135,38 +153,44 @@ namespace Infrastructure.Persistence
                 var oldRoleLinks = await context.RolePermissions
                     .Where(rp => rp.PermissionId == oldPerm.Id)
                     .ToListAsync();
-                var existingNewRoleIds = await context.RolePermissions
+                var newRoleLinks = await context.RolePermissions
                     .Where(rp => rp.PermissionId == newPerm.Id)
-                    .Select(rp => rp.RoleId)
                     .ToListAsync();
-                var existingNewRoleSet = existingNewRoleIds.ToHashSet();
-
-                foreach (var link in oldRoleLinks)
+                foreach (var link in oldRoleLinks.Where(link => link.IsActive))
                 {
-                    if (existingNewRoleSet.Contains(link.RoleId))
-                        context.RolePermissions.Remove(link);
-                    else
+                    var counterpart = newRoleLinks.FirstOrDefault(row => row.RoleId == link.RoleId);
+                    if (counterpart == null)
                         link.PermissionId = newPerm.Id;
+                    else if (!counterpart.IsActive)
+                    {
+                        IamRetention.Reactivate(counterpart, actorId, DateTimeOffset.UtcNow);
+                        IamRetention.Revoke(link, actorId, IamRetention.PermissionRenamed);
+                    }
+                    else
+                        IamRetention.Revoke(link, actorId, IamRetention.PermissionRenamed);
                 }
 
                 var oldUserLinks = await context.UserPermissions
                     .Where(up => up.PermissionId == oldPerm.Id)
                     .ToListAsync();
-                var existingNewUserIds = await context.UserPermissions
+                var newUserLinks = await context.UserPermissions
                     .Where(up => up.PermissionId == newPerm.Id)
-                    .Select(up => up.UserId)
                     .ToListAsync();
-                var existingNewUserSet = existingNewUserIds.ToHashSet();
-
-                foreach (var link in oldUserLinks)
+                foreach (var link in oldUserLinks.Where(link => link.IsActive))
                 {
-                    if (existingNewUserSet.Contains(link.UserId))
-                        context.UserPermissions.Remove(link);
-                    else
+                    var counterpart = newUserLinks.FirstOrDefault(row => row.UserId == link.UserId && row.CenterId == link.CenterId);
+                    if (counterpart == null)
                         link.PermissionId = newPerm.Id;
+                    else if (!counterpart.IsActive)
+                    {
+                        IamRetention.Reactivate(counterpart, actorId, DateTimeOffset.UtcNow);
+                        IamRetention.Revoke(link, actorId, IamRetention.PermissionRenamed);
+                    }
+                    else
+                        IamRetention.Revoke(link, actorId, IamRetention.PermissionRenamed);
                 }
 
-                context.Permissions.Remove(oldPerm);
+                IamRetention.DeactivatePermission(oldPerm);
                 if (!string.IsNullOrWhiteSpace(newDesc) && string.IsNullOrWhiteSpace(newPerm.Description))
                     newPerm.Description = newDesc;
 
@@ -179,16 +203,30 @@ namespace Infrastructure.Persistence
                 {
                     var perm = await EnsurePermissionAsync(name, desc);
 
-                    var has = await context.UserPermissions
-                        .AnyAsync(up => up.UserId == userId && up.PermissionId == perm.Id);
+                    if (!perm.IsActive)
+                        continue;
 
-                    if (!has)
+                    var existingGrants = await context.UserPermissions
+                        .Where(up => up.UserId == userId && up.PermissionId == perm.Id && up.CenterId == null)
+                        .OrderByDescending(up => up.IsActive)
+                        .ThenByDescending(up => up.RevokedAt)
+                        .ToListAsync();
+                    if (existingGrants.Any(up => up.IsActive))
+                        continue;
+
+                    var revokedGrant = existingGrants.FirstOrDefault();
+                    if (revokedGrant != null)
+                        IamRetention.Reactivate(revokedGrant, userId, DateTimeOffset.UtcNow);
+                    else
                     {
                         context.UserPermissions.Add(new UserPermission
                         {
                             Id = Guid.NewGuid(),
                             UserId = userId,
-                            PermissionId = perm.Id
+                            PermissionId = perm.Id,
+                            GrantedByUserId = userId,
+                            GrantedAt = DateTimeOffset.UtcNow,
+                            IsActive = true
                         });
                     }
                 }
@@ -196,29 +234,7 @@ namespace Infrastructure.Persistence
             }
 
 
-            async Task EnsureOrgUnitTypesAsync()
-            {
-                var types = new (string Code, string NameAr, short Order)[]
-                {
-                    ("HQ", "المقر الرئيسي", 1),
-                    ("DIRECTORATE", "مديرية", 2),
-                    ("DEPARTMENT", "إدارة", 3),
-                    ("BRANCH", "فرع", 4),
-                    ("UNIT", "وحدة", 5)
-                };
-                foreach (var (code, name, order) in types)
-                {
-                    if (!await context.OrgUnitTypes.AnyAsync(x => x.Code == code))
-                        context.OrgUnitTypes.Add(new OrgUnitType
-                        {
-                            OrgUnitTypeId = Guid.NewGuid(), Code = code, NameAr = name,
-                            DisplayOrder = order, IsActive = true
-                        });
-                }
-                await context.SaveChangesAsync();
-            }
-
-            async Task CleanupObsoletePermissionsAsync()
+            async Task CleanupObsoletePermissionsAsync(string actorId)
             {
                 var obsolete = await context.Permissions
                     .Where(p =>
@@ -237,7 +253,9 @@ namespace Infrastructure.Persistence
                         (p.Name != null && p.Name.StartsWith("ReportsDocuments.")) ||
                         (p.Name != null && p.Name.StartsWith("ReportsAuditLogs.")) ||
                         (p.Name != null && p.Name.StartsWith("ReportsDashboard.")) ||
-                        (p.Name != null && p.Name.StartsWith("ReportManagement.")))
+                        (p.Name != null && p.Name.StartsWith("ReportManagement.")) ||
+                        (p.Name != null && p.Name.StartsWith("OrgStructure.")) ||
+                        (p.Name != null && p.Name.StartsWith("UserOrgScope.")))
                     .ToListAsync();
 
                 if (obsolete.Count == 0) return;
@@ -245,46 +263,52 @@ namespace Infrastructure.Persistence
                 var obsoleteIds = obsolete.Select(p => p.Id).ToList();
 
                 var userPerms = await context.UserPermissions
-                    .Where(up => up.PermissionId.HasValue && obsoleteIds.Contains(up.PermissionId.Value))
+                    .Where(up => obsoleteIds.Contains(up.PermissionId) && up.IsActive)
                     .ToListAsync();
-                if (userPerms.Count > 0)
-                    context.UserPermissions.RemoveRange(userPerms);
+                foreach (var link in userPerms)
+                    IamRetention.Revoke(link, actorId, IamRetention.ObsoletePermission);
 
                 var rolePerms = await context.RolePermissions
-                    .Where(rp => obsoleteIds.Contains(rp.PermissionId))
+                    .Where(rp => obsoleteIds.Contains(rp.PermissionId) && rp.IsActive)
                     .ToListAsync();
-                if (rolePerms.Count > 0)
-                    context.RolePermissions.RemoveRange(rolePerms);
+                foreach (var link in rolePerms)
+                    IamRetention.Revoke(link, actorId, IamRetention.ObsoletePermission);
 
-                var orgScopes = await context.UserOrgScopes
-                    .Where(s => obsoleteIds.Contains(s.PermissionId))
-                    .ToListAsync();
-                context.UserOrgScopes.RemoveRange(orgScopes);
-
-                context.Permissions.RemoveRange(obsolete);
+                foreach (var permission in obsolete)
+                    IamRetention.DeactivatePermission(permission);
                 await context.SaveChangesAsync();
             }
 
-            async Task EnsureAllPermissionsAssignedToRoleAsync(string roleId, IEnumerable<(string Name, string? Desc)> catalog)
+            async Task EnsureAllPermissionsAssignedToRoleAsync(string roleId, string grantedByUserId, IEnumerable<(string Name, string? Desc)> catalog)
             {
                 foreach (var (name, desc) in catalog)
                     await EnsurePermissionAsync(name, desc);
 
-                var allPerms = await context.Permissions.AsNoTracking().ToListAsync();
-                var existingRolePermIds = await context.RolePermissions
+                var allPerms = await context.Permissions.AsNoTracking().Where(p => p.IsActive).ToListAsync();
+                var existingRolePerms = await context.RolePermissions
                     .Where(rp => rp.RoleId == roleId)
-                    .Select(rp => rp.PermissionId)
                     .ToListAsync();
-                var existingSet = existingRolePermIds.ToHashSet();
 
                 foreach (var perm in allPerms)
                 {
-                    if (existingSet.Contains(perm.Id)) continue;
-                    context.RolePermissions.Add(new RolePermission
+                    var matches = existingRolePerms.Where(rp => rp.PermissionId == perm.Id).ToList();
+                    if (matches.Any(rp => rp.IsActive))
+                        continue;
+
+                    var revoked = matches.OrderByDescending(rp => rp.RevokedAt).FirstOrDefault();
+                    if (revoked != null)
+                        IamRetention.Reactivate(revoked, grantedByUserId, DateTimeOffset.UtcNow);
+                    else
                     {
-                        RoleId = roleId,
-                        PermissionId = perm.Id
-                    });
+                        context.RolePermissions.Add(new RolePermission
+                        {
+                            RoleId = roleId,
+                            PermissionId = perm.Id,
+                            GrantedByUserId = grantedByUserId,
+                            GrantedAt = DateTimeOffset.UtcNow,
+                            IsActive = true
+                        });
+                    }
                 }
                 await context.SaveChangesAsync();
             }
@@ -330,18 +354,8 @@ namespace Infrastructure.Persistence
                 ("AuditLog.Export", "تصدير تقرير السجل"),
 
                 ("Dashboard.Read", "قراءة لوحة التحكم"),
-                ("Dashboard.Export", "تصدير تقرير لوحة التحكم"),
-                ("OrgStructure.Read", "قراءة الهيكل التنظيمي"),
-                ("OrgStructure.Create", "إنشاء وحدات تنظيمية"),
-                ("OrgStructure.Edit", "تعديل الوحدات التنظيمية"),
-                ("OrgStructure.Delete", "حذف أو أرشفة الوحدات التنظيمية"),
-                ("UserOrgScope.Read", "قراءة نطاقات المستخدمين التنظيمية"),
-                ("UserOrgScope.Create", "إنشاء نطاقات المستخدمين التنظيمية"),
-                ("UserOrgScope.Edit", "تعديل نطاقات المستخدمين التنظيمية"),
-                ("UserOrgScope.Delete", "حذف نطاقات المستخدمين التنظيمية")
+                ("Dashboard.Export", "تصدير تقرير لوحة التحكم")
             };
-
-            await EnsureOrgUnitTypesAsync();
 
             // ============================
             // 5) المستخدمون
@@ -357,18 +371,18 @@ namespace Infrastructure.Persistence
             );
 
             // أنشئ الصلاحيات وأسند كل صلاحيات النظام لدور SuperAdmin (إضافة الناقص فقط)
-            await MigratePermissionNameAsync("ReportsAuditLogs.Export", "AuditLog.Export", "تصدير تقرير السجل");
-            await MigratePermissionNameAsync("ReportsDashboard.Export", "Dashboard.Export", "تصدير تقرير لوحة التحكم");
-            await EnsureAllPermissionsAssignedToRoleAsync(roleSuperAdmin.Id, systemPermissions);
+            await MigratePermissionNameAsync("ReportsAuditLogs.Export", "AuditLog.Export", "تصدير تقرير السجل", superAdmin.Id);
+            await MigratePermissionNameAsync("ReportsDashboard.Export", "Dashboard.Export", "تصدير تقرير لوحة التحكم", superAdmin.Id);
+            await EnsureAllPermissionsAssignedToRoleAsync(roleSuperAdmin.Id, superAdmin.Id, systemPermissions);
 
             // مزامنة UserPermissions للمستخدم seed مع الكتالوج (إضافة الناقص فقط؛ بلا إعادة ضبط كلمة المرور)
             await EnsurePermissionsAndAssignToUserAsync(superAdmin.Id, systemPermissions);
 
             // تنظيف صلاحيات قديمة بعد إضافة البدائل
-            await CleanupObsoletePermissionsAsync();
+            await CleanupObsoletePermissionsAsync(superAdmin.Id);
 
             // بعد التنظيف أعد ضمان إسناد كل المتبقي لدور SuperAdmin
-            await EnsureAllPermissionsAssignedToRoleAsync(roleSuperAdmin.Id, systemPermissions);
+            await EnsureAllPermissionsAssignedToRoleAsync(roleSuperAdmin.Id, superAdmin.Id, systemPermissions);
         }
     }
 }

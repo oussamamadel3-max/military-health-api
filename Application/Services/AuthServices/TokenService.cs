@@ -18,6 +18,7 @@ namespace Application.Services.AuthServices
         private readonly IUserRepository _userRepository;
         private readonly IRoleRepository _roleRepository;
         private readonly IRefreshTokenRepository _refreshTokenRepository;
+        private readonly IAccessContextRepository _access;
         private readonly IUnitOfWork _unitOfWork;
         private readonly JwtSettings _jwtSettings;
 
@@ -25,41 +26,27 @@ namespace Application.Services.AuthServices
             IUserRepository userRepository,
             IRoleRepository roleRepository,
             IRefreshTokenRepository refreshTokenRepository,
+            IAccessContextRepository access,
             IUnitOfWork unitOfWork,
             IOptions<JwtSettings> jwtOptions)
         {
             _userRepository = userRepository;
             _roleRepository = roleRepository;
             _refreshTokenRepository = refreshTokenRepository;
+            _access = access;
             _unitOfWork = unitOfWork;
             _jwtSettings = jwtOptions.Value;
         }
 
         #region    توليد Access/Refresh Token وإرجاع بيانات الصلاحيات لاستخدامها خارجياً
-        public async Task<TokenGenerationResultDto> GenerateTokensAsync(string userId)
+        public async Task<TokenGenerationResultDto> GenerateTokensAsync(string userId, Guid? activeCenterId = null)
         {
             var user = await _userRepository.GetByIdAsync(userId);
             if (user == null) throw new InvalidSessionException("المستخدم غير موجود.");
 
-            var roleNames = await _userRepository.GetActiveRoleNamesAsync(user.Id);
-            roleNames = roleNames
-                .Where(n => !string.IsNullOrWhiteSpace(n))
-                .Select(n => n!)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            var userPermissions = await _userRepository.GetDirectPermissionNamesAsync(user.Id, activeOnly: true);
-
-            var roleIds = await _userRepository.GetActiveRoleIdsAsync(user.Id);
-            var rolePermissions = (await _roleRepository.GetRolePermissionsForRolesAsync(roleIds))
-                .Select(rp => rp.Permission!.Name)
-                .Where(p => !string.IsNullOrEmpty(p))
-                .Select(p => p!)
-                .ToList();
-
-            var allPermissions = userPermissions.Concat(rolePermissions)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            var snapshot = await _access.LoadAsync(user.Id);
+            var roleNames = CenterPermissionEvaluator.ApplicableRoleNames(snapshot.Roles, activeCenterId).ToList();
+            var allPermissions = CenterPermissionEvaluator.Resolve(snapshot.Roles, snapshot.Directs, snapshot.Links, activeCenterId).ToList();
 
             var userFieldPermissions = await _userRepository.GetUserFieldPermissionDetailsAsync(user.Id);
             var roleFieldPermissions = await _roleRepository.GetRoleFieldPermissionDetailsAsync(roleNames);
@@ -90,8 +77,12 @@ namespace Application.Services.AuthServices
                 new Claim(JwtRegisteredClaimNames.Email, user.Email ?? ""),
                 new Claim(JwtRegisteredClaimNames.Iat, new DateTimeOffset(now).ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64),
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-                new Claim("security_stamp", user.SecurityStamp ?? Guid.NewGuid().ToString())
+                new Claim("security_stamp", user.SecurityStamp ?? Guid.NewGuid().ToString()),
+                new Claim(CenterClaimTypes.Scope, activeCenterId.HasValue ? CenterClaimTypes.Center : CenterClaimTypes.Central)
             };
+
+            if (activeCenterId.HasValue)
+                claims.Add(new Claim(CenterClaimTypes.CenterId, activeCenterId.Value.ToString()));
 
             foreach (var permission in allPermissions)
             {
@@ -132,6 +123,9 @@ namespace Application.Services.AuthServices
                 Id = Guid.NewGuid(),
                 UserId = user.Id,
                 Token = refreshTokenHash,
+                TokenFamilyId = Guid.NewGuid(),
+                SecurityStamp = user.SecurityStamp,
+                IssuedAt = new DateTimeOffset(now),
                 ExpiryDate = now.AddDays(_jwtSettings.RefreshTokenExpirationInDays),
                 IsRevoked = false
             };
@@ -149,7 +143,7 @@ namespace Application.Services.AuthServices
         #endregion
 
         #region    استخدام Refresh Token للحصول على Access Token جديد و Refresh Token جديد
-        public async Task<TokenResponseDto> RefreshAccessTokenAsync(string refreshToken)
+        public async Task<TokenResponseDto> RefreshAccessTokenAsync(string refreshToken, Guid? activeCenterId = null)
         {
             if (string.IsNullOrWhiteSpace(refreshToken))
                 throw new InvalidSessionException("رمز التحديث غير صالح أو منتهي الصلاحية");
@@ -168,7 +162,7 @@ namespace Application.Services.AuthServices
                 if (user == null || !user.IsActive)
                     throw new InvalidSessionException("المستخدم غير موجود أو غير نشط");
 
-                var tokenResult = await GenerateTokensAsync(consumed.UserId);
+                var tokenResult = await GenerateTokensAsync(consumed.UserId, activeCenterId);
                 await tx.CommitAsync();
 
                 return new TokenResponseDto

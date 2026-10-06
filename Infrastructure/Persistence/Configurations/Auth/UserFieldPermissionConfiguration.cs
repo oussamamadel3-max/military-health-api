@@ -8,6 +8,7 @@ public class UserFieldPermissionConfiguration : IEntityTypeConfiguration<UserFie
 {
     public void Configure(EntityTypeBuilder<UserFieldPermission> builder)
     {
+        builder.ToTable("UserFieldPermissions", "iam");
         builder.HasKey(ufp => ufp.Id);
 
         builder.HasOne(ufp => ufp.User)

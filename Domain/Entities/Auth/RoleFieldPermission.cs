@@ -1,4 +1,3 @@
-using Domain.Common;
 using Domain.Interfaces;
 
 namespace Domain.Entities.Auth
@@ -12,7 +11,5 @@ namespace Domain.Entities.Auth
 
         public string RoleId { get; set; } = string.Empty;
         public Role Role { get; set; } = null!;
-
-        public long GetPrimaryKey() => AuditPrimaryKey.FromGuid(Id);
     }
 }

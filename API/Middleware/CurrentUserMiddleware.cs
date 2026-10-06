@@ -16,6 +16,9 @@ namespace API.Middleware
         public async Task InvokeAsync(HttpContext context, ICurrentUserService currentUser)
         {
             var clientIp = GetClientIp(context) ?? "unknown";
+            var correlationHeader = context.Request.Headers["X-Correlation-Id"].FirstOrDefault();
+            var correlationId = Guid.TryParse(correlationHeader, out var parsed) ? parsed : Guid.NewGuid();
+            currentUser.SetRequest(context.Request.Headers.UserAgent.ToString(), correlationId);
 
             if (context.User.Identity?.IsAuthenticated ?? false)
             {

@@ -8,7 +8,8 @@ namespace Application.Interfaces.Services
     public interface IFileStorageService
     {
         /// رفع ملف وحفظه
-        Task<(string FilePath, long FileSize)> SaveFileAsync(IFormFile file, string entityType, long entityId);
+        Task<(string FilePath, long FileSize)> SaveFileAsync(IFormFile file, string entityType, string entityKey);
+        byte[] ReadFileBytes(string relativePath);
 
         /// حذف ملف
         Task<bool> DeleteFileAsync(string filePath);

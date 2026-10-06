@@ -5,6 +5,8 @@ namespace Application.Dtos
     public class AttachmentReadDto
     {
         public Guid? AttachmentId { get; set; }
+        public Guid? FileAssetId { get; set; }
+        public Guid? CenterId { get; set; }
 
         [FieldPermission("OwnerId", DisplayName = "معرّف المالك")]
         public long? OwnerId { get; set; }

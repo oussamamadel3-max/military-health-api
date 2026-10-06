@@ -8,10 +8,12 @@ namespace Application.Services.AuthServices;
 public sealed class PermissionGate : IPermissionGate
 {
     private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly IUserPermissionService _permissions;
 
-    public PermissionGate(IHttpContextAccessor httpContextAccessor)
+    public PermissionGate(IHttpContextAccessor httpContextAccessor, IUserPermissionService permissions)
     {
         _httpContextAccessor = httpContextAccessor;
+        _permissions = permissions;
     }
 
     public IReadOnlyCollection<string> GetPermissions()
@@ -20,12 +22,12 @@ public sealed class PermissionGate : IPermissionGate
         if (user?.Identity?.IsAuthenticated != true)
             return Array.Empty<string>();
 
-        return user.Claims
-            .Where(c => c.Type == "permissions")
-            .Select(c => c.Value)
-            .Where(v => !string.IsNullOrWhiteSpace(v))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+            ?? user.FindFirst("sub")?.Value;
+        if (string.IsNullOrWhiteSpace(userId))
+            return Array.Empty<string>();
+
+        return _permissions.GetPermissionNames(userId);
     }
 
     public bool Has(string permission)

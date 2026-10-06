@@ -6,7 +6,7 @@ using Application.Dtos.DashboardDtos;
 using Application.Dtos.ExportDtos;
 using Application.Dtos.ReportDtos;
 using Application.ModelsDto.AuditLogDtos;
-using Domain.Entities;
+using Domain.Entities.Audit;
 using MapsterMapper;
 using Microsoft.EntityFrameworkCore;
 
@@ -15,6 +15,7 @@ namespace Application.Services.Reports
     public class ReportsService : IReportsService
     {
         private readonly IAuditLogRepository _auditLogRepository;
+        private readonly IUserRepository _users;
         private readonly IUserContextService _userCtx;
         private readonly IExportService _export;
         private readonly IDashboardService _dashboard;
@@ -22,12 +23,14 @@ namespace Application.Services.Reports
 
         public ReportsService(
             IAuditLogRepository auditLogRepository,
+            IUserRepository users,
             IUserContextService userCtx,
             IExportService export,
             IDashboardService dashboard,
             IMapper mapper)
         {
             _auditLogRepository = auditLogRepository;
+            _users = users;
             _userCtx = userCtx;
             _export = export;
             _dashboard = dashboard;
@@ -42,24 +45,15 @@ namespace Application.Services.Reports
             var q = _auditLogRepository.Query().AsQueryable();
 
             if (!string.IsNullOrWhiteSpace(filter.searchUserName))
-            {
-                var ns = SqlLikePatternEscape.EscapeForSqlServerLike(filter.searchUserName.Trim().ToLower());
-                q = q.Where(a =>
-                    (a.UserName ?? "").ToLower().Contains(ns));
-            }
+                q = await FilterByActorNameAsync(q, filter.searchUserName);
 
             if (!string.IsNullOrWhiteSpace(filter.userName))
-            {
-                var name = SqlLikePatternEscape.EscapeForSqlServerLike(filter.userName.Trim().ToLower());
-                q = q.Where(a =>
-                    (a.UserName ?? "").ToLower().Contains(name) ||
-                    (a.UserId ?? "").ToLower().Contains(name));
-            }
+                q = await FilterByActorNameAsync(q, filter.userName);
 
             if (filter.actionType.HasValue)
             {
                 var at = filter.actionType.Value.ToString();
-                q = q.Where(a => a.ActionType == at);
+                q = q.Where(a => a.EventType == at);
             }
 
             if (filter.tableNames != null && filter.tableNames.Count > 0)
@@ -71,15 +65,22 @@ namespace Application.Services.Reports
                     .ToList();
 
                 if (set.Count > 0)
-                    q = q.Where(a => set.Contains((a.TableName ?? "").ToLower()));
+                    q = q.Where(a => set.Contains((a.EntityType ?? "").ToLower()));
             }
 
             ApplyDateRangeForExport(ref q, filter.From, filter.To, out var periodText);
 
-            q = q.OrderByDescending(a => a.Timestamp);
+            q = q.OrderByDescending(a => a.OccurredAt);
 
             var list = await q.ToListAsync();
             var rows = _mapper.Map<List<AuditLogReportRowDto>>(list);
+            var names = await _users.GetDisplayNamesByIdsAsync(list.Select(x => x.ActorUserId).Where(id => !string.IsNullOrWhiteSpace(id))!);
+            for (var i = 0; i < rows.Count; i++)
+            {
+                var actorId = list[i].ActorUserId;
+                if (!string.IsNullOrWhiteSpace(actorId) && names.TryGetValue(actorId, out var name))
+                    rows[i].UserName = name;
+            }
 
             var opt = new ExportOptions
             {
@@ -101,6 +102,9 @@ namespace Application.Services.Reports
                     ["TableName"] = "اسم الجدول",
                     ["ActionType"] = "الإجراء",
                     ["UserName"] = "المستخدم",
+                    ["EntityId"] = "معرف الكيان",
+                    ["CenterId"] = "المركز",
+                    ["Result"] = "النتيجة",
                     ["Timestamp"] = "التاريخ",
                 }
             };
@@ -110,7 +114,17 @@ namespace Application.Services.Reports
                 : await _export.ExportToExcelAsync(rows, opt);
         }
 
-        private static void ApplyDateRangeForExport(ref IQueryable<AuditLog> q, DateTimeOffset? from, DateTimeOffset? to, out string? periodText)
+        private async Task<IQueryable<AuditEvent>> FilterByActorNameAsync(IQueryable<AuditEvent> query, string raw)
+        {
+            var term = SqlLikePatternEscape.EscapeForSqlServerLike(raw.Trim().ToLower());
+            var ids = await _users.QueryUsers()
+                .Where(u => (u.FullName ?? "").ToLower().Contains(term) || (u.UserName ?? "").ToLower().Contains(term))
+                .Select(u => u.Id)
+                .ToListAsync();
+            return query.Where(a => ids.Contains(a.ActorUserId!) || (a.ActorUserId ?? "").ToLower().Contains(term));
+        }
+
+        private static void ApplyDateRangeForExport(ref IQueryable<AuditEvent> q, DateTimeOffset? from, DateTimeOffset? to, out string? periodText)
         {
             periodText = null;
             if (!from.HasValue && !to.HasValue) return;
@@ -127,8 +141,8 @@ namespace Application.Services.Reports
                 endExclusive = (t.TimeOfDay == TimeSpan.Zero) ? t.AddDays(1) : t;
             }
 
-            if (start.HasValue) q = q.Where(a => a.Timestamp >= start.Value);
-            if (endExclusive.HasValue) q = q.Where(a => a.Timestamp < endExclusive.Value);
+            if (start.HasValue) q = q.Where(a => a.OccurredAt >= start.Value);
+            if (endExclusive.HasValue) q = q.Where(a => a.OccurredAt < endExclusive.Value);
 
             var fromText = from.HasValue ? from.Value.ToString("yyyy/MM/dd") : "—";
             var toText = to.HasValue ? to.Value.ToString("yyyy/MM/dd") : "—";
