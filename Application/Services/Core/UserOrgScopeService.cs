@@ -61,12 +61,27 @@ public class UserOrgScopeService : IUserOrgScopeService
         var permission = permissionName.Trim();
         if (!_resolver.UserHasBasePermission(userId, permission))
             throw new InvalidOrgStructureDataException("ليس لديك الصلاحية المطلوبة. نطاق المستخدم التنظيمي لا يمنح صلاحيات إضافية.");
+
+        var permissionId = await _permissions.FindActivePermissionIdByNameAsync(permission);
+        if (!permissionId.HasValue)
+            return Array.Empty<AccessibleOrgUnitDto>();
+
+        var directScopes = await _scopes.GetActiveScopesForPermissionAsync(userId, permissionId.Value);
+        // Permission without org scopes = global access → all active units
+        if (directScopes.Count == 0)
+        {
+            return (await _units.GetDropdownAsync()).Select(unit => new AccessibleOrgUnitDto
+            {
+                OrgUnitId = unit.OrgUnitId,
+                NameAr = unit.NameAr,
+                Code = unit.Code,
+                ScopeMode = ScopeModes.Subtree
+            }).ToList();
+        }
+
         var ids = await _resolver.GetAccessibleOrgUnitIdsAsync(userId, permission);
         if (ids.Count == 0) return Array.Empty<AccessibleOrgUnitDto>();
-        var permissionId = await _permissions.FindActivePermissionIdByNameAsync(permission);
-        var directScopes = permissionId.HasValue
-            ? await _scopes.GetActiveScopesForPermissionAsync(userId, permissionId.Value)
-            : Array.Empty<OrgScopeLink>();
+
         var directModes = directScopes.GroupBy(x => x.OrgUnitId)
             .ToDictionary(g => g.Key, g => g.Any(x => x.ScopeMode == ScopeModes.Subtree) ? ScopeModes.Subtree : ScopeModes.Self);
         return (await _units.GetByIdsAsync(ids)).Select(unit => new AccessibleOrgUnitDto

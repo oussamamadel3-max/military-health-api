@@ -83,8 +83,25 @@ public class OrgScopeResolverTests
     }
 
     [Fact]
-    public async Task InactiveScopes_AreIgnoredByRepositoryContract()
+    public async Task NoScopes_MeansEmptyUnitList_ForScopedResolver()
     {
         Assert.Empty(await Create(true, Array.Empty<OrgScopeLink>()).GetAccessibleOrgUnitIdsAsync("u", "P"));
+    }
+
+    [Fact]
+    public async Task NoScopes_CanAccessAnyOrgUnit_AsGlobal()
+    {
+        var anyUnit = Guid.NewGuid();
+        Assert.True(await Create(true, Array.Empty<OrgScopeLink>()).CanAccessOrgUnitAsync("u", "P", anyUnit));
+    }
+
+    [Fact]
+    public async Task Scoped_CanAccessOnlyResolvedUnits()
+    {
+        var root = Guid.NewGuid();
+        var other = Guid.NewGuid();
+        var resolver = Create(true, new[] { new OrgScopeLink(root, ScopeModes.Self) });
+        Assert.True(await resolver.CanAccessOrgUnitAsync("u", "P", root));
+        Assert.False(await resolver.CanAccessOrgUnitAsync("u", "P", other));
     }
 }

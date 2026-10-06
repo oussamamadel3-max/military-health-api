@@ -31,8 +31,17 @@ public class OrgScopeResolver : IOrgScopeResolver
         return ResolveScopedOrgUnitIds(scopes, links);
     }
 
-    public async Task<bool> CanAccessOrgUnitAsync(string userId, string permissionName, Guid orgUnitId, CancellationToken ct = default) =>
-        (await GetAccessibleOrgUnitIdsAsync(userId, permissionName, ct)).Contains(orgUnitId);
+    public async Task<bool> CanAccessOrgUnitAsync(string userId, string permissionName, Guid orgUnitId, CancellationToken ct = default)
+    {
+        if (!UserHasBasePermission(userId, permissionName)) return false;
+        var permissionId = await _permissionRepository.FindActivePermissionIdByNameAsync(permissionName.Trim(), ct);
+        if (!permissionId.HasValue) return false;
+        var scopes = await _scopes.GetActiveScopesForPermissionAsync(userId, permissionId.Value, ct);
+        // Permission without org scopes = global access
+        if (scopes.Count == 0) return true;
+        var links = await _units.GetNonArchivedParentLinksAsync(ct);
+        return ResolveScopedOrgUnitIds(scopes, links).Contains(orgUnitId);
+    }
 
     public static IReadOnlyList<Guid> ResolveScopedOrgUnitIds(
         IEnumerable<OrgScopeLink> scopes, IEnumerable<(Guid Id, Guid? ParentId)> nonArchivedLinks)
