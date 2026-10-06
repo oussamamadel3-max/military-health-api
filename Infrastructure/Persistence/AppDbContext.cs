@@ -2,6 +2,7 @@ using Application.Interfaces.Services;
 using Application.Dtos.AuthDtos;
 using Domain.Entities;
 using Domain.Entities.Auth;
+using Domain.Entities.Core;
 using Domain.Interfaces;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -38,6 +39,10 @@ public class AppDbContext : DbContext
     public DbSet<UserRefreshToken> UserRefreshTokens { get; set; } = null!;
     public DbSet<AuditLog> AuditLogs { get; set; } = null!;
     #endregion
+
+    public DbSet<OrgUnitType> OrgUnitTypes { get; set; } = null!;
+    public DbSet<OrgUnit> OrgUnits { get; set; } = null!;
+    public DbSet<UserOrgScope> UserOrgScopes { get; set; } = null!;
 
     public DbSet<Attachment> Attachments { get; set; } = null!;
 

@@ -1,4 +1,5 @@
 using Domain.Entities.Auth;
+using Domain.Entities.Core;
 using Infrastructure.Persistence;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -194,6 +195,29 @@ namespace Infrastructure.Persistence
                 await context.SaveChangesAsync();
             }
 
+
+            async Task EnsureOrgUnitTypesAsync()
+            {
+                var types = new (string Code, string NameAr, short Order)[]
+                {
+                    ("HQ", "المقر الرئيسي", 1),
+                    ("DIRECTORATE", "مديرية", 2),
+                    ("DEPARTMENT", "إدارة", 3),
+                    ("BRANCH", "فرع", 4),
+                    ("UNIT", "وحدة", 5)
+                };
+                foreach (var (code, name, order) in types)
+                {
+                    if (!await context.OrgUnitTypes.AnyAsync(x => x.Code == code))
+                        context.OrgUnitTypes.Add(new OrgUnitType
+                        {
+                            OrgUnitTypeId = Guid.NewGuid(), Code = code, NameAr = name,
+                            DisplayOrder = order, IsActive = true
+                        });
+                }
+                await context.SaveChangesAsync();
+            }
+
             async Task CleanupObsoletePermissionsAsync()
             {
                 var obsolete = await context.Permissions
@@ -231,6 +255,11 @@ namespace Infrastructure.Persistence
                     .ToListAsync();
                 if (rolePerms.Count > 0)
                     context.RolePermissions.RemoveRange(rolePerms);
+
+                var orgScopes = await context.UserOrgScopes
+                    .Where(s => obsoleteIds.Contains(s.PermissionId))
+                    .ToListAsync();
+                context.UserOrgScopes.RemoveRange(orgScopes);
 
                 context.Permissions.RemoveRange(obsolete);
                 await context.SaveChangesAsync();
@@ -302,7 +331,17 @@ namespace Infrastructure.Persistence
 
                 ("Dashboard.Read", "قراءة لوحة التحكم"),
                 ("Dashboard.Export", "تصدير تقرير لوحة التحكم"),
+                ("OrgStructure.Read", "قراءة الهيكل التنظيمي"),
+                ("OrgStructure.Create", "إنشاء وحدات تنظيمية"),
+                ("OrgStructure.Edit", "تعديل الوحدات التنظيمية"),
+                ("OrgStructure.Delete", "حذف أو أرشفة الوحدات التنظيمية"),
+                ("UserOrgScope.Read", "قراءة نطاقات المستخدمين التنظيمية"),
+                ("UserOrgScope.Create", "إنشاء نطاقات المستخدمين التنظيمية"),
+                ("UserOrgScope.Edit", "تعديل نطاقات المستخدمين التنظيمية"),
+                ("UserOrgScope.Delete", "حذف نطاقات المستخدمين التنظيمية")
             };
+
+            await EnsureOrgUnitTypesAsync();
 
             // ============================
             // 5) المستخدمون
