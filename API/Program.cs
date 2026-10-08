@@ -2,6 +2,7 @@ using API.Extensions;
 using API.Middleware;
 using API.RateLimiting;
 using Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -69,17 +70,19 @@ app.MapHealthChecks("/health").DisableRateLimiting();
 
 #region ================== DATABASE SEED ==================
 
-using (var scope = app.Services.CreateScope())
+// Design-time EF commands build this entry point. Seeding here would migrate before review.
+if (!EF.IsDesignTime)
 {
+    using var scope = app.Services.CreateScope();
     var services = scope.ServiceProvider;
     try
     {
         await DbInitializer.SeedAsync(services);
-        Console.WriteLine("✅ Database seeding completed successfully.");
+        Console.WriteLine("Database seeding completed successfully.");
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"❌ Error during database seeding: {ex.Message}");
+        Console.WriteLine($"Error during database seeding: {ex.Message}");
         throw;
     }
 }

@@ -1,3 +1,4 @@
+using Application.Common.Security;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Domain.Enums;
@@ -8,26 +9,29 @@ namespace Application.Services.AuthServices
     {
         private readonly IUserRepository _userRepository;
         private readonly IRoleRepository _roleRepository;
-        private readonly IPermissionRepository _permissionRepository;
+        private readonly IAccessContextRepository _access;
+        private readonly ICurrentCenterService _currentCenter;
 
         public UserPermissionService(
             IUserRepository userRepository,
             IRoleRepository roleRepository,
-            IPermissionRepository permissionRepository)
+            IAccessContextRepository access,
+            ICurrentCenterService currentCenter)
         {
             _userRepository = userRepository;
             _roleRepository = roleRepository;
-            _permissionRepository = permissionRepository;
+            _access = access;
+            _currentCenter = currentCenter;
         }
 
         public bool HasPermission(string userId, string permissionName)
+            => GetPermissionNames(userId).Contains(permissionName, StringComparer.OrdinalIgnoreCase);
+
+        public IReadOnlyList<string> GetPermissionNames(string userId)
         {
-            var userPermissions = _userRepository.GetDirectPermissionNamesAsync(userId).GetAwaiter().GetResult();
-            var rolePermissions = _permissionRepository.GetPermissionNamesViaRolesAsync(userId).GetAwaiter().GetResult();
-
-            var allPermissions = userPermissions.Concat(rolePermissions).ToList();
-
-            return allPermissions.Contains(permissionName);
+            var snapshot = _access.LoadAsync(userId).GetAwaiter().GetResult();
+            var centerId = _currentCenter.IsCentralContext ? null : _currentCenter.CenterId;
+            return CenterPermissionEvaluator.Resolve(snapshot.Roles, snapshot.Directs, snapshot.Links, centerId);
         }
 
         public FieldAccessType GetFieldAccess(string userId, string entityName, string fieldName)

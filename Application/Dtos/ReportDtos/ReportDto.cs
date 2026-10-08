@@ -12,6 +12,9 @@ namespace Application.Dtos.ReportDtos
         public string TableName { get; set; } = "";
         public string ActionType { get; set; } = "";
         public string UserName { get; set; } = "";
+        public string? EntityId { get; set; }
+        public string? CenterId { get; set; }
+        public string? Result { get; set; }
         public DateTimeOffset Timestamp { get; set; }
     }
 }

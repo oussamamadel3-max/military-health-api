@@ -1,3 +1,4 @@
+using Application.Common.Security;
 using MapsterMapper;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
@@ -124,15 +125,19 @@ namespace Application.Services.AuthServices
             var role = await _roleManager.FindByIdAsync(id)
                 ?? throw new RoleNotFoundException("الدور غير موجود.");
 
-            await SecurityStampHelper.InvalidateUsersWithRoleAsync(
-                _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, id);
+            if (!role.IsActive)
+                return;
 
-            var result = await _roleManager.DeleteAsync(role);
+            IamRetention.DeactivateRole(role, _currentUserService.UserId);
+            var result = await _roleManager.UpdateAsync(role);
             if (!result.Succeeded)
             {
                 var errors = result.Errors.Select(e => e.Description);
                 throw new InvalidRoleDataException(string.Join(", ", errors));
             }
+
+            await SecurityStampHelper.InvalidateUsersWithRoleAsync(
+                _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, id);
         }
         #endregion
 
@@ -302,7 +307,9 @@ namespace Application.Services.AuthServices
             IamAdminGuard.EnsureAssignableWithinActorPermissions(
                 activePermissions.Select(p => p.Name), _permissionGate.GetPermissions());
 
-            var existingRolePerms = await _roleRepository.GetRolePermissionsAsync(dto.RoleId);
+            var existingRolePerms = (await _roleRepository.GetRolePermissionsAsync(dto.RoleId))
+                .Where(rp => rp.IsActive)
+                .ToList();
 
             var existingIds = existingRolePerms
                 .Select(rp => rp.PermissionId)
@@ -320,14 +327,22 @@ namespace Application.Services.AuthServices
             try
             {
                 if (toRemove.Any())
-                    _roleRepository.RemoveRolePermissions(toRemove);
+                {
+                    var actorId = AssignmentStamp.RequireActor(_currentUserService.UserId);
+                    foreach (var link in toRemove)
+                        IamRetention.Revoke(link, actorId, IamRetention.RolePermissionWithdrawn);
+                }
 
                 if (toAdd.Any())
                 {
+                    var actorId = AssignmentStamp.RequireActor(_currentUserService.UserId);
                     var addRows = toAdd.Select(pid => new RolePermission
                     {
                         RoleId = dto.RoleId,
-                        PermissionId = pid
+                        PermissionId = pid,
+                        GrantedByUserId = actorId,
+                        GrantedAt = DateTimeOffset.UtcNow,
+                        IsActive = true
                     });
                     _roleRepository.AddRolePermissions(addRows);
                 }
@@ -406,10 +421,14 @@ namespace Application.Services.AuthServices
                 var toAdd = validIds;
                 if (toAdd.Count > 0)
                 {
+                    var actorId = AssignmentStamp.RequireActor(_currentUserService.UserId);
                     var rolePermissions = toAdd.Select(pid => new RolePermission
                     {
                         RoleId = role.Id,
-                        PermissionId = pid
+                        PermissionId = pid,
+                        GrantedByUserId = actorId,
+                        GrantedAt = DateTimeOffset.UtcNow,
+                        IsActive = true
                     });
 
                     _roleRepository.AddRolePermissions(rolePermissions);

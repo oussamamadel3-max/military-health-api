@@ -1,4 +1,3 @@
-using Domain.Common;
 using Domain.Interfaces;
 using Microsoft.AspNetCore.Identity;
 
@@ -18,6 +17,4 @@ public class Role : IdentityRole, IAuditableEntity
     /// صلاحيات الحقول المرتبطة بهذا الدور (جدول ربط مع FieldPermission)
     /// </summary>
     public IList<RoleFieldPermission> RoleFieldPermissions { get; set; } = new List<RoleFieldPermission>();
-
-    public long GetPrimaryKey() => AuditPrimaryKey.FromString(Id);
 }

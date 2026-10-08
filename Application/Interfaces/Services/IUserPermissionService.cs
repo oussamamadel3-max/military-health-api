@@ -6,6 +6,7 @@ namespace Application.Interfaces.Services
     {
 
         bool HasPermission(string userId, string permissionName);
+        IReadOnlyList<string> GetPermissionNames(string userId);
         FieldAccessType GetFieldAccess(string userId, string entityName, string fieldName);
 
     }

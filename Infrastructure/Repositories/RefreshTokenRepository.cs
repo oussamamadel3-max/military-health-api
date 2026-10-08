@@ -33,14 +33,23 @@ public class RefreshTokenRepository : IRefreshTokenRepository
 
         var affected = await _context.UserRefreshTokens
             .Where(rt => rt.Id == candidate.Id && !rt.IsRevoked && rt.ExpiryDate >= now)
-            .ExecuteUpdateAsync(s => s.SetProperty(rt => rt.IsRevoked, true), cancellationToken);
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(rt => rt.IsRevoked, true)
+                .SetProperty(rt => rt.RevokedAt, DateTimeOffset.UtcNow)
+                .SetProperty(rt => rt.RevokeReason, "revoked"), cancellationToken);
 
         return affected == 1 ? candidate : null;
     }
 
     public void Remove(UserRefreshToken token) => _context.UserRefreshTokens.Remove(token);
 
-    public void MarkRevoked(UserRefreshToken token) => token.IsRevoked = true;
+    public void MarkRevoked(UserRefreshToken token)
+    {
+        token.IsRevoked = true;
+        token.RevokedAt = DateTimeOffset.UtcNow;
+        if (string.IsNullOrWhiteSpace(token.RevokeReason))
+            token.RevokeReason = "revoked";
+    }
 
     public async Task<List<UserRefreshToken>> GetActiveByUserIdAsync(string userId, CancellationToken cancellationToken = default)
         => await _context.UserRefreshTokens
@@ -51,6 +60,9 @@ public class RefreshTokenRepository : IRefreshTokenRepository
     {
         await _context.UserRefreshTokens
             .Where(rt => !rt.IsRevoked)
-            .ExecuteUpdateAsync(s => s.SetProperty(rt => rt.IsRevoked, true), cancellationToken);
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(rt => rt.IsRevoked, true)
+                .SetProperty(rt => rt.RevokedAt, DateTimeOffset.UtcNow)
+                .SetProperty(rt => rt.RevokeReason, "revoked"), cancellationToken);
     }
 }

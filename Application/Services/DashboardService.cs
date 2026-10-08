@@ -2,7 +2,7 @@ using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Application.Dtos.DashboardDtos;
-using Domain.Entities;
+using Domain.Entities.Audit;
 using MapsterMapper;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,15 +11,18 @@ namespace Application.Services.Dashboard
     public class DashboardService : IDashboardService
     {
         private readonly IAuditLogRepository _auditLogRepository;
+        private readonly IUserRepository _users;
         private readonly IUserContextService _userCtx;
         private readonly IMapper _mapper;
 
         public DashboardService(
             IAuditLogRepository auditLogRepository,
+            IUserRepository users,
             IUserContextService userCtx,
             IMapper mapper)
         {
             _auditLogRepository = auditLogRepository;
+            _users = users;
             _userCtx = userCtx;
             _mapper = mapper;
         }
@@ -109,33 +112,40 @@ public async Task<DashboardStatsDto> GetAsync(DashboardFilter f)
             var auditQ = _auditLogRepository.Query();
 
             if (start.HasValue || endEx.HasValue)
-                auditQ = ApplyRange(auditQ, start, endEx, a => a.Timestamp);
+                auditQ = ApplyRange(auditQ, start, endEx, a => a.OccurredAt);
 
             var recentLogs = await auditQ
-                .OrderByDescending(a => a.Timestamp)
+                .OrderByDescending(a => a.OccurredAt)
                 .Take(f.RecentCount <= 0 ? 10 : f.RecentCount)
                 .ToListAsync();
 
             var recent = _mapper.Map<List<RecentActivityDto>>(recentLogs);
+            var names = await _users.GetDisplayNamesByIdsAsync(recent.Select(x => x.UserId).Where(id => !string.IsNullOrWhiteSpace(id)));
+            foreach (var item in recent)
+            {
+                if (names.TryGetValue(item.UserId, out var name))
+                    item.UserName = name;
+            }
 
             var topUsersRaw = await (from a in auditQ
-                                     group a by new { a.UserId, a.UserName } into g
+                                     group a by a.ActorUserId into g
                                      select new
                                      {
-                                         UserId = g.Key.UserId ?? "",
-                                         UserName = g.Key.UserName ?? "",
+                                         UserId = g.Key ?? "",
+                                         UserName = "",
                                          ActionsCount = g.LongCount(),
-                                         LastActivity = g.Max(x => x.Timestamp)
+                                         LastActivity = g.Max(x => x.OccurredAt)
                                      })
                 .OrderByDescending(x => x.ActionsCount)
                 .ThenByDescending(x => x.LastActivity)
                 .Take(f.TopUsersCount <= 0 ? 5 : f.TopUsersCount)
                 .ToListAsync();
 
+            var topNames = await _users.GetDisplayNamesByIdsAsync(topUsersRaw.Select(x => x.UserId).Where(id => !string.IsNullOrWhiteSpace(id)));
             var topUsers = topUsersRaw.Select(x => new ActiveUserStatsDto
             {
                 UserId = x.UserId,
-                UserName = x.UserName,
+                UserName = topNames.TryGetValue(x.UserId, out var name) ? name : x.UserId,
                 ActionsCount = x.ActionsCount,
                 LastActivityAt = x.LastActivity.UtcDateTime.ToString("o")
             }).ToList();

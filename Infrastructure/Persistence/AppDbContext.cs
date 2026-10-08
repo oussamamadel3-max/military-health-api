@@ -1,32 +1,35 @@
 using Application.Interfaces.Services;
 using Application.Dtos.AuthDtos;
-using Domain.Entities;
+using Domain.Entities.Archive;
+using Domain.Entities.Audit;
 using Domain.Entities.Auth;
+using Domain.Entities.Clinical;
 using Domain.Entities.Core;
+using Domain.Entities.Export;
+using Domain.Entities.Medical;
+using Domain.Entities.Patient;
 using Domain.Interfaces;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-
 namespace Infrastructure.Persistence;
 
 public class AppDbContext : DbContext
 {
-    private readonly IServiceScopeFactory _scopeFactory;
     private readonly AuditInterceptor _auditInterceptor;
     private readonly ICurrentUserService _currentUser;
+    private readonly ICurrentCenterService _currentCenter;
+    private bool _inAuditSave;
 
     public AppDbContext(
         DbContextOptions<AppDbContext> options,
-        IServiceScopeFactory scopeFactory,
         ICurrentUserService currentUser,
+        ICurrentCenterService currentCenter,
         AuditInterceptor auditInterceptor) : base(options)
     {
-        _scopeFactory = scopeFactory;
         _currentUser = currentUser;
+        _currentCenter = currentCenter;
         _auditInterceptor = auditInterceptor;
     }
 
-    #region DbSets Authorization
     public DbSet<User> Users { get; set; } = null!;
     public DbSet<Permission> Permissions { get; set; } = null!;
     public DbSet<Role> Roles { get; set; } = null!;
@@ -37,21 +40,61 @@ public class AppDbContext : DbContext
     public DbSet<UserFieldPermission> UserFieldPermissions { get; set; } = null!;
     public DbSet<RoleFieldPermission> RoleFieldPermissions { get; set; } = null!;
     public DbSet<UserRefreshToken> UserRefreshTokens { get; set; } = null!;
-    public DbSet<AuditLog> AuditLogs { get; set; } = null!;
-    #endregion
+    public DbSet<UserCenter> UserCenters { get; set; } = null!;
+    public DbSet<UserClinicAssignment> UserClinicAssignments { get; set; } = null!;
+    public DbSet<PasswordPolicy> PasswordPolicies { get; set; } = null!;
+    public DbSet<UserPasswordHistory> UserPasswordHistories { get; set; } = null!;
+    public DbSet<UserProfile> UserProfiles { get; set; } = null!;
+    public DbSet<UserContact> UserContacts { get; set; } = null!;
 
-    public DbSet<OrgUnitType> OrgUnitTypes { get; set; } = null!;
-    public DbSet<OrgUnit> OrgUnits { get; set; } = null!;
-    public DbSet<UserOrgScope> UserOrgScopes { get; set; } = null!;
+    public DbSet<MedicalCenter> MedicalCenters { get; set; } = null!;
+    public DbSet<RecruitmentCenter> RecruitmentCenters { get; set; } = null!;
+    public DbSet<Clinic> Clinics { get; set; } = null!;
+    public DbSet<CenterClinic> CenterClinics { get; set; } = null!;
+    public DbSet<ResultStatus> ResultStatuses { get; set; } = null!;
+    public DbSet<RequiredActionType> RequiredActionTypes { get; set; } = null!;
+    public DbSet<BmiCategory> BmiCategories { get; set; } = null!;
+    public DbSet<MaritalStatus> MaritalStatuses { get; set; } = null!;
+    public DbSet<BloodType> BloodTypes { get; set; } = null!;
+    public DbSet<ConsultationType> ConsultationTypes { get; set; } = null!;
+    public DbSet<InvestigationType> InvestigationTypes { get; set; } = null!;
+    public DbSet<ValidationRule> ValidationRules { get; set; } = null!;
+    public DbSet<FileAsset> FileAssets { get; set; } = null!;
 
-    public DbSet<Attachment> Attachments { get; set; } = null!;
+    public DbSet<Member> Members { get; set; } = null!;
+    public DbSet<MemberCenterIdentity> MemberCenterIdentities { get; set; } = null!;
+    public DbSet<MemberTransfer> MemberTransfers { get; set; } = null!;
+    public DbSet<MemberGeneralNote> MemberGeneralNotes { get; set; } = null!;
+
+    public DbSet<MedicalExam> MedicalExams { get; set; } = null!;
+    public DbSet<ClinicAssessment> ClinicAssessments { get; set; } = null!;
+    public DbSet<EyeExamDetail> EyeExamDetails { get; set; } = null!;
+    public DbSet<EyeRefractionDetail> EyeRefractionDetails { get; set; } = null!;
+    public DbSet<InternalExamDetail> InternalExamDetails { get; set; } = null!;
+    public DbSet<SurgeryExamDetail> SurgeryExamDetails { get; set; } = null!;
+    public DbSet<OrthopedicExamDetail> OrthopedicExamDetails { get; set; } = null!;
+    public DbSet<EntExamDetail> EntExamDetails { get; set; } = null!;
+    public DbSet<DeferredAction> DeferredActions { get; set; } = null!;
+    public DbSet<FinalDecision> FinalDecisions { get; set; } = null!;
+    public DbSet<FinalDecisionHistory> FinalDecisionHistories { get; set; } = null!;
+    public DbSet<SupervisorObjection> SupervisorObjections { get; set; } = null!;
+
+    public DbSet<Consultation> Consultations { get; set; } = null!;
+    public DbSet<Investigation> Investigations { get; set; } = null!;
+    public DbSet<MedicalAttachment> MedicalAttachments { get; set; } = null!;
+
+    public DbSet<RecruitmentExportBatch> RecruitmentExportBatches { get; set; } = null!;
+    public DbSet<RecruitmentExportItem> RecruitmentExportItems { get; set; } = null!;
+
+    public DbSet<MemberArchive> MemberArchives { get; set; } = null!;
+
+    public DbSet<AuditEvent> AuditEvents { get; set; } = null!;
+    public DbSet<CrossCenterAccess> CrossCenterAccesses { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
-
         base.OnModelCreating(modelBuilder);
-
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
     }
 
@@ -63,49 +106,62 @@ public class AppDbContext : DbContext
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        var auditLogsToSave = new List<AuditLog>();
+        if (_inAuditSave)
+            return await base.SaveChangesAsync(cancellationToken);
+
+        if (Database.CurrentTransaction != null)
+            return await SaveWithAuditAsync(cancellationToken);
+
+        var strategy = Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await Database.BeginTransactionAsync(cancellationToken);
+            var result = await SaveWithAuditAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return result;
+        });
+    }
+
+    /// <summary>
+    /// العملية وسجلات التدقيق في المعاملة نفسها. فشل التدقيق يلغي العملية.
+    /// إذا كانت هناك معاملة خارجية، لا تُفتح معاملة متداخلة ولا يُنفَّذ Commit هنا.
+    /// </summary>
+    private async Task<int> SaveWithAuditAsync(CancellationToken cancellationToken)
+    {
+        var auditEvents = new List<AuditEvent>();
         var currentUserDto = new CurrentUserDto
         {
             UserId = _currentUser.UserId,
             UserName = _currentUser.UserName,
             IPAddress = _currentUser.IPAddress
         };
+        var centerId = _currentCenter.IsCentralContext ? null : _currentCenter.CenterId;
 
-        var entriesForPostSaveAudit = ChangeTracker.Entries()
+        var addedEntries = ChangeTracker.Entries()
             .Where(e => e.Entity is IAuditableEntity && e.State == EntityState.Added)
             .ToList();
 
-        AuditLogger.LogChanges(ChangeTracker, auditLogsToSave, currentUserDto, EntityState.Modified, EntityState.Deleted);
+        AuditLogger.LogChanges(ChangeTracker, auditEvents, currentUserDto, _currentUser, centerId, EntityState.Modified, EntityState.Deleted);
 
-        var result = await base.SaveChangesAsync(cancellationToken);
-
-        if (entriesForPostSaveAudit.Any())
-        {
-            AuditLogger.LogEntriesList(entriesForPostSaveAudit, auditLogsToSave, currentUserDto, EntityState.Added);
-        }
-
-        if (auditLogsToSave.Any())
-        {
-            // نسخ القائمة لأن ChangeTracker قد يتغيّر بعد العودة
-            var snapshot = auditLogsToSave.ToList();
-            _ = Task.Run(async () => await SaveAuditLogsInBackground(snapshot));
-        }
-
-        return result;
-    }
-
-    private async Task SaveAuditLogsInBackground(List<AuditLog> auditLogs)
-    {
+        _inAuditSave = true;
         try
         {
-            using var scope = _scopeFactory.CreateScope();
-            var auditContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            auditContext.AuditLogs.AddRange(auditLogs);
-            await auditContext.SaveChangesAsync();
+            var result = await base.SaveChangesAsync(cancellationToken);
+
+            if (addedEntries.Count > 0)
+                AuditLogger.LogEntriesList(addedEntries, auditEvents, currentUserDto, _currentUser, centerId, EntityState.Added);
+
+            if (auditEvents.Count > 0)
+            {
+                AuditEvents.AddRange(auditEvents);
+                await base.SaveChangesAsync(cancellationToken);
+            }
+
+            return result;
         }
-        catch (Exception ex)
+        finally
         {
-            System.Diagnostics.Trace.TraceError($"Failed to persist audit logs: {ex}");
+            _inAuditSave = false;
         }
     }
 }

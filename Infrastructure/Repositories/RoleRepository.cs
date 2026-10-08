@@ -1,3 +1,4 @@
+using Application.Common.Security;
 using Application.Interfaces.Repositories;
 using Domain.Entities.Auth;
 using Infrastructure.Persistence;
@@ -52,7 +53,7 @@ public class RoleRepository : IRoleRepository
     {
         var ids = roleIds.ToList();
         return await _context.RolePermissions
-            .Where(rp => ids.Contains(rp.RoleId))
+            .Where(rp => ids.Contains(rp.RoleId) && rp.IsActive)
             .Include(rp => rp.Permission)
             .Where(rp => rp.Permission != null && rp.Permission.IsActive)
             .ToListAsync(cancellationToken);
@@ -62,7 +63,7 @@ public class RoleRepository : IRoleRepository
     {
         var ids = roleIds.ToList();
         return await _context.RolePermissions
-            .Where(rp => ids.Contains(rp.RoleId) && rp.Permission != null && rp.Permission.IsActive)
+            .Where(rp => ids.Contains(rp.RoleId) && rp.IsActive && rp.Permission != null && rp.Permission.IsActive)
             .Select(rp => rp.PermissionId)
             .Distinct()
             .ToListAsync(cancellationToken);
@@ -103,14 +104,35 @@ public class RoleRepository : IRoleRepository
     public async Task<RolePermission?> FindRolePermissionAsync(string roleId, Guid permissionId, CancellationToken cancellationToken = default)
         => await _context.RolePermissions.FirstOrDefaultAsync(rp => rp.RoleId == roleId && rp.PermissionId == permissionId, cancellationToken);
 
-    public void AddRolePermissions(IEnumerable<RolePermission> links) => _context.RolePermissions.AddRange(links);
-    public void RemoveRolePermissions(IEnumerable<RolePermission> links) => _context.RolePermissions.RemoveRange(links);
+    public void AddRolePermissions(IEnumerable<RolePermission> links)
+    {
+        foreach (var incoming in links)
+        {
+            var existing = _context.RolePermissions
+                .Where(x => x.RoleId == incoming.RoleId && x.PermissionId == incoming.PermissionId)
+                .OrderByDescending(x => x.IsActive)
+                .ThenByDescending(x => x.RevokedAt)
+                .FirstOrDefault();
+            if (existing is { IsActive: true })
+                continue;
+            if (existing != null)
+            {
+                IamRetention.Reactivate(existing, incoming.GrantedByUserId, incoming.GrantedAt);
+                continue;
+            }
+
+            _context.RolePermissions.Add(incoming);
+        }
+    }
+
+    public void RemoveRolePermissions(IEnumerable<RolePermission> links)
+        => throw new InvalidOperationException("Physical delete of role permissions is disabled. Revoke the assignment.");
 
     public async Task<Dictionary<string, int>> GetAssignedUserCountsAsync(IEnumerable<string> roleIds, CancellationToken cancellationToken = default)
     {
         var ids = roleIds.ToList();
         return await _context.UserRoleAssociations
-            .Where(ura => ids.Contains(ura.RoleId))
+            .Where(ura => ids.Contains(ura.RoleId) && ura.IsActive)
             .GroupBy(ura => ura.RoleId)
             .Select(g => new { RoleId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.RoleId, x => x.Count, cancellationToken);

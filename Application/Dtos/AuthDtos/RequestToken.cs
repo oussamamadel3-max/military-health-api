@@ -49,10 +49,8 @@ namespace Application.Dtos.AuthDtos
         /// <summary>
         /// معرّف المالك كنص (long) لتجنب فقدان الدقة في JavaScript عند التعامل مع Attachments.
         /// </summary>
-        public string AttachmentOwnerId { get; set; } = "0";
-
-        public Guid? ProfilePhotoAttachmentId { get; set; }
-        public string? ProfilePhotoUrl { get; set; }
+        public Guid? ProfileFileAssetId { get; set; }
+        public string? ProfileFileUrl { get; set; }
 
         public List<string> Roles { get; set; } = new();
         public List<string> Permissions { get; set; } = new();

@@ -159,6 +159,7 @@ public class TokenServiceRefreshTests
             userRepo.Object,
             roleRepo.Object,
             refreshRepo.Object,
+            EmptyAccess(),
             uow.Object,
             MsOptions.Create(new JwtSettings
             {
@@ -179,12 +180,21 @@ public class TokenServiceRefreshTests
         Assert.NotEqual(result.RefreshToken, stored.Token);
     }
 
+    private static IAccessContextRepository EmptyAccess()
+    {
+        var access = new Mock<IAccessContextRepository>();
+        access.Setup(a => a.LoadAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AccessSnapshot());
+        return access.Object;
+    }
+
     private static TokenService CreateTokenService(IRefreshTokenRepository refreshRepo, IUnitOfWork uow)
     {
         return new TokenService(
             Mock.Of<IUserRepository>(),
             Mock.Of<IRoleRepository>(),
             refreshRepo,
+            EmptyAccess(),
             uow,
             MsOptions.Create(new JwtSettings
             {

@@ -1,3 +1,4 @@
+using Application.Common.Security;
 using Application.Dtos.AuthDtos;
 using Application.Exceptions;
 using Application.Interfaces.Repositories;
@@ -19,7 +20,9 @@ namespace Application.Services.AuthServices
         private readonly IUserRepository _userRepository;
         private readonly IRoleRepository _roleRepository;
         private readonly IPermissionRepository _permissionRepository;
-        private readonly IAttachmentRepository _attachmentRepository;
+        private readonly IAccessContextRepository _access;
+        private readonly ICurrentCenterService _currentCenter;
+        private readonly IAttachmentRepository _files;
         private readonly IMapper _mapper;
         private readonly ILoginLockoutService _loginLockout;
 
@@ -35,7 +38,9 @@ namespace Application.Services.AuthServices
             IUserRepository userRepository,
             IRoleRepository roleRepository,
             IPermissionRepository permissionRepository,
-            IAttachmentRepository attachmentRepository,
+            IAccessContextRepository access,
+            ICurrentCenterService currentCenter,
+            IAttachmentRepository files,
             IMapper mapper,
             ILoginLockoutService loginLockout)
         {
@@ -46,7 +51,9 @@ namespace Application.Services.AuthServices
             _userRepository = userRepository;
             _roleRepository = roleRepository;
             _permissionRepository = permissionRepository;
-            _attachmentRepository = attachmentRepository;
+            _access = access;
+            _currentCenter = currentCenter;
+            _files = files;
             _mapper = mapper;
             _loginLockout = loginLockout;
         }
@@ -127,29 +134,24 @@ namespace Application.Services.AuthServices
                 .Distinct()
                 .ToListAsync();
 
-            var rolePerms = await _permissionRepository.GetPermissionNamesViaRolesAsync(userId);
-            var directPerms = await _userRepository.GetDirectPermissionNamesAsync(userId, activeOnly: false);
-
-            var permissions = directPerms
-                .Concat(rolePerms)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            var snapshot = await _access.LoadAsync(userId);
+            var centerId = _currentCenter.IsCentralContext ? null : _currentCenter.CenterId;
+            var permissions = CenterPermissionEvaluator.Resolve(snapshot.Roles, snapshot.Directs, snapshot.Links, centerId).ToList();
+            var scopedRoles = CenterPermissionEvaluator.ApplicableRoleNames(snapshot.Roles, centerId);
 
             var me = _mapper.Map<MeResponseDto>(user);
-            me.Roles = roles.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+            me.Roles = scopedRoles.ToList();
             me.Permissions = permissions;
-            me.AttachmentOwnerId = user.GetPrimaryKey().ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-            var ownerId = user.GetPrimaryKey();
-            var latestAttachment = (await _attachmentRepository.GetByOwnerAsync(ownerId, new[] { "User" }))
-                .OrderByDescending(a => a.UploadedAt)
-                .FirstOrDefault();
-
-            if (latestAttachment is not null)
+            var profile = await _files.FindTrackedProfileAsync(user.Id);
+            if (profile?.ProfileFileAssetId is Guid photoId)
             {
-                me.ProfilePhotoAttachmentId = latestAttachment.AttachmentId;
-                me.ProfilePhotoUrl = $"/api/attachments/download/{latestAttachment.AttachmentId}";
+                var photo = await _files.FindByIdAsync(photoId);
+                if (photo != null)
+                {
+                    me.ProfileFileAssetId = photo.FileAssetId;
+                    me.ProfileFileUrl = $"/api/attachments/download/{photo.FileAssetId}";
+                }
             }
 
             return me;
@@ -163,12 +165,12 @@ namespace Application.Services.AuthServices
             return Task.FromResult(userId);
         }
 
-        public async Task<(TokenResponseDto Tokens, string UserId)> RefreshSessionAsync(string? refreshToken)
+        public async Task<(TokenResponseDto Tokens, string UserId)> RefreshSessionAsync(string? refreshToken, Guid? activeCenterId = null)
         {
             if (string.IsNullOrWhiteSpace(refreshToken))
                 throw new InvalidSessionException("رمز التحديث مفقود.");
 
-            var tokens = await _tokenService.RefreshAccessTokenAsync(refreshToken);
+            var tokens = await _tokenService.RefreshAccessTokenAsync(refreshToken, activeCenterId);
             var userId = ExtractUserIdFromAccessToken(tokens.AccessToken)
                 ?? throw new InvalidSessionException("تعذر استخراج بيانات المستخدم من التوكن.");
 

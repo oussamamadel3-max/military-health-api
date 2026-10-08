@@ -1,4 +1,6 @@
+using System.IdentityModel.Tokens.Jwt;
 using API.Infrastructure;
+using Application.Common.Security;
 using API.RateLimiting;
 using Application.Dtos.AuthDtos;
 using Application.Interfaces.Services;
@@ -62,7 +64,8 @@ namespace API.Controllers.AuthControllers
         public async Task<IResult> Refresh()
         {
             var refreshToken = _cookieService.TryGetRefreshToken(Request);
-            var (tokens, userId) = await _authService.RefreshSessionAsync(refreshToken);
+            var activeCenterId = ReadActiveCenter(_cookieService.TryGetAccessToken(Request));
+            var (tokens, userId) = await _authService.RefreshSessionAsync(refreshToken, activeCenterId);
             _cookieService.SetAuthCookies(Response, tokens.AccessToken, tokens.RefreshToken);
             _csrfService.IssueCsrf(Response, userId, out var csrfToken);
 
@@ -77,6 +80,21 @@ namespace API.Controllers.AuthControllers
             await _authService.LogoutAsync(refreshToken);
             _cookieService.ClearAuthCookies(Response);
             return ApiResponse.Success("تم تسجيل الخروج بنجاح.");
+        }
+
+        private static Guid? ReadActiveCenter(string? accessToken)
+        {
+            if (string.IsNullOrWhiteSpace(accessToken))
+                return null;
+            var handler = new JwtSecurityTokenHandler();
+            if (!handler.CanReadToken(accessToken))
+                return null;
+            var jwt = handler.ReadJwtToken(accessToken);
+            var scope = jwt.Claims.FirstOrDefault(c => c.Type == CenterClaimTypes.Scope)?.Value;
+            if (!string.Equals(scope, CenterClaimTypes.Center, StringComparison.OrdinalIgnoreCase))
+                return null;
+            var raw = jwt.Claims.FirstOrDefault(c => c.Type == CenterClaimTypes.CenterId)?.Value;
+            return Guid.TryParse(raw, out var id) ? id : null;
         }
     }
 }

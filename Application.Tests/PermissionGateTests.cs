@@ -1,5 +1,6 @@
 using Application.Common.Permissions;
 using Application.Exceptions;
+using Application.Interfaces.Services;
 using Application.Services.AuthServices;
 using Microsoft.AspNetCore.Http;
 using Moq;
@@ -16,6 +17,7 @@ public class PermissionGateTests
             identity.AddClaim(new Claim("permissions", p));
         // Role name alone must not grant access
         identity.AddClaim(new Claim(ClaimTypes.Role, "SuperAdmin"));
+        identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, "user-1"));
 
         var http = new DefaultHttpContext
         {
@@ -23,7 +25,15 @@ public class PermissionGateTests
         };
         var accessor = new Mock<IHttpContextAccessor>();
         accessor.Setup(a => a.HttpContext).Returns(http);
-        return new PermissionGate(accessor.Object);
+        return new PermissionGate(accessor.Object, PermissionGateFactory.PermissionService(http));
+    }
+
+    private static IUserPermissionService PermissionService(HttpContext http)
+    {
+        var permissions = new Mock<IUserPermissionService>();
+        permissions.Setup(p => p.GetPermissionNames(It.IsAny<string>()))
+            .Returns(() => http.User.Claims.Where(c => c.Type == "permissions").Select(c => c.Value).ToList());
+        return permissions.Object;
     }
 
     [Fact]
@@ -46,12 +56,13 @@ public class PermissionGateTests
     public void EnsureAll_accepts_when_all_permissions_present_without_SuperAdmin_role_claim_needed()
     {
         var identity = new ClaimsIdentity("test");
+        identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, "user-1"));
         identity.AddClaim(new Claim("permissions", SystemPermissions.UserManagement.Create));
         identity.AddClaim(new Claim("permissions", SystemPermissions.UserManagement.AssignRoles));
         var http = new DefaultHttpContext { User = new ClaimsPrincipal(identity) };
         var accessor = new Mock<IHttpContextAccessor>();
         accessor.Setup(a => a.HttpContext).Returns(http);
-        var gate = new PermissionGate(accessor.Object);
+        var gate = new PermissionGate(accessor.Object, PermissionService(http));
 
         gate.EnsureAll(
             SystemPermissions.UserManagement.Create,
@@ -127,12 +138,13 @@ public class AuthorizePermissionAttributeTests
     public void Attribute_requires_all_listed_permissions()
     {
         var identity = new ClaimsIdentity("Bearer", ClaimTypes.Name, ClaimTypes.Role);
+        identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, "user-1"));
         identity.AddClaim(new Claim("permissions", SystemPermissions.UserManagement.Create));
         var http = new DefaultHttpContext { User = new ClaimsPrincipal(identity) };
 
         var accessor = new Mock<IHttpContextAccessor>();
         accessor.Setup(a => a.HttpContext).Returns(http);
-        var gate = new PermissionGate(accessor.Object);
+        var gate = new PermissionGate(accessor.Object, PermissionGateFactory.PermissionService(http));
 
         Assert.Throws<ForbiddenPermissionException>(() =>
             gate.EnsureAll(SystemPermissions.UserManagement.Create, SystemPermissions.UserManagement.AssignRoles));
@@ -140,5 +152,16 @@ public class AuthorizePermissionAttributeTests
         identity.AddClaim(new Claim("permissions", SystemPermissions.UserManagement.AssignRoles));
         http.User = new ClaimsPrincipal(identity);
         gate.EnsureAll(SystemPermissions.UserManagement.Create, SystemPermissions.UserManagement.AssignRoles);
+    }
+}
+
+static class PermissionGateFactory
+{
+    public static IUserPermissionService PermissionService(HttpContext http)
+    {
+        var permissions = new Mock<IUserPermissionService>();
+        permissions.Setup(p => p.GetPermissionNames(It.IsAny<string>()))
+            .Returns(() => http.User.Claims.Where(c => c.Type == "permissions").Select(c => c.Value).ToList());
+        return permissions.Object;
     }
 }
