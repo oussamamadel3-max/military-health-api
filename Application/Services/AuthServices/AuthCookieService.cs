@@ -52,9 +52,6 @@ public class AuthCookieService
     public string? TryGetRefreshToken(HttpRequest request)
         => request.Cookies.TryGetValue(AuthCookieNames.RefreshToken, out var token) ? token : null;
 
-    public string? TryGetAccessToken(HttpRequest request)
-        => request.Cookies.TryGetValue(AuthCookieNames.AccessToken, out var token) ? token : null;
-
     public string? TryGetCsrfSignature(HttpRequest request)
         => request.Cookies.TryGetValue(AuthCookieNames.CsrfSignature, out var sig) ? sig : null;
 

@@ -1,10 +1,10 @@
-using Domain.Entities.Audit;
+using Domain.Entities;
 
 namespace Application.Interfaces.Repositories;
 
 public interface IAuditLogRepository
 {
-    IQueryable<AuditEvent> Query(bool asNoTracking = true);
-    Task<AuditEvent?> GetByIdAsync(long eventId, IQueryable<AuditEvent> scopedQuery, CancellationToken cancellationToken = default);
+    IQueryable<AuditLog> Query(bool asNoTracking = true);
+    Task<AuditLog?> GetByIdAsync(long logId, IQueryable<AuditLog> scopedQuery, CancellationToken cancellationToken = default);
     Task<List<string>> GetEntityTypeNamesAsync(CancellationToken cancellationToken = default);
 }

@@ -1,3 +1,4 @@
+using Domain.Common;
 using Domain.Interfaces;
 using Microsoft.AspNetCore.Identity;
 
@@ -20,6 +21,6 @@ public class User : IdentityUser, IAuditableEntity
     /// صلاحيات الحقول الخاصة بالمستخدم (جدول ربط مع FieldPermission)
     /// </summary>
     public IList<UserFieldPermission> UserFieldPermissions { get; set; } = new List<UserFieldPermission>();
-    public UserProfile? Profile { get; set; }
-    public IList<UserContact> Contacts { get; set; } = new List<UserContact>();
+
+    public long GetPrimaryKey() => AuditPrimaryKey.FromString(Id);
 }

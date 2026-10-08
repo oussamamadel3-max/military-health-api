@@ -5,10 +5,8 @@ namespace Application.Dtos.DashboardDtos
         public long Id { get; set; }
         public string UserId { get; set; } = "";
         public string UserName { get; set; } = "";
-        public string Action { get; set; } = "";
-        public string? EntityId { get; set; }
-        public Guid? CenterId { get; set; }
-        public string? Result { get; set; }
+        public string Action { get; set; } = "";     // Added/Modified/Deleted/Login...
+        public long? RecordId { get; set; }
         public string Timestamp { get; set; } = "";  // ISO
     }
 

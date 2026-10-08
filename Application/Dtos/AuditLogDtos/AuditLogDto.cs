@@ -11,10 +11,7 @@ namespace Application.ModelsDto.AuditLogDtos
         public string UserName { get; set; } = null!;
         public string ActionType { get; set; } = null!;
         public string TableName { get; set; } = null!;
-        public string? EntityId { get; set; }
-        public Guid? CenterId { get; set; }
-        public string? Result { get; set; }
-        public string? ContextScope { get; set; }
+        public long RecordId { get; set; }
 
         public string? ChangeSummary { get; set; }
         public DateTimeOffset Timestamp { get; set; }
@@ -29,6 +26,7 @@ namespace Application.ModelsDto.AuditLogDtos
         public string? ChangedFields { get; set; }
         public string? OldValue { get; set; }
         public string? NewValue { get; set; }
+        public string? IPAddress { get; set; }
     }
 
     public class CreateAuditLogDto
@@ -36,7 +34,7 @@ namespace Application.ModelsDto.AuditLogDtos
         public string UserId { get; set; }
         public string ActionType { get; set; } = null!;
         public string TableName { get; set; } = null!;
-        public string? EntityId { get; set; }
+        public long RecordId { get; set; }
         public string? OldValue { get; set; }
         public string? NewValue { get; set; }
         public string? UserName { get; set; }         // اختياري

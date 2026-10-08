@@ -40,7 +40,7 @@ public class FileStorageService : IFileStorageService
         );
     }
 
-    public async Task<(string FilePath, long FileSize)> SaveFileAsync(IFormFile file, string entityType, string entityKey)
+    public async Task<(string FilePath, long FileSize)> SaveFileAsync(IFormFile file, string entityType, long entityId)
     {
         if (file == null || file.Length == 0)
             throw new InvalidFileException("الملف فارغ.");
@@ -145,16 +145,6 @@ public class FileStorageService : IFileStorageService
         }
 
         return true;
-    }
-
-    public byte[] ReadFileBytes(string relativePath)
-    {
-        var fullPath = GetFullPath(relativePath);
-        if (relativePath.Contains("..", StringComparison.Ordinal))
-            throw new InvalidFileException("مسار الملف غير صالح.");
-        if (!File.Exists(fullPath))
-            throw new InvalidFileException("الملف الفيزيائي غير موجود على الخادم.");
-        return File.ReadAllBytes(fullPath);
     }
 
     public string GetFullPath(string relativePath)

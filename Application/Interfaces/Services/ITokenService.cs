@@ -4,8 +4,8 @@ namespace Application.Interfaces.Services
 {
     public interface ITokenService
     {
-        Task<TokenGenerationResultDto> GenerateTokensAsync(string userId, Guid? activeCenterId = null);
-        Task<TokenResponseDto> RefreshAccessTokenAsync(string refreshToken, Guid? activeCenterId = null);
+        Task<TokenGenerationResultDto> GenerateTokensAsync(string userId);
+        Task<TokenResponseDto> RefreshAccessTokenAsync(string refreshToken);
         Task<bool> RevokeRefreshTokenAsync(string refreshToken);
     }
 

@@ -8,7 +8,6 @@ public class RoleFieldPermissionConfiguration : IEntityTypeConfiguration<RoleFie
 {
     public void Configure(EntityTypeBuilder<RoleFieldPermission> builder)
     {
-        builder.ToTable("RoleFieldPermissions", "iam");
         builder.HasKey(rfp => rfp.Id);
 
         builder.HasOne(rfp => rfp.Role)

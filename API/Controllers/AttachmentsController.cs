@@ -23,8 +23,8 @@ namespace API.Controllers
         }
 
         // Upload file
-        [HttpPost("upload/{entityType}/{entityId}")]
-        public async Task<IResult> Upload(string entityType, string entityId, IFormFile file, string? description = null)
+        [HttpPost("upload/{entityType}/{entityId:long}")]
+        public async Task<IResult> Upload(string entityType, long entityId, IFormFile file, string? description = null)
         {
             if (!AttachmentRouteConstraints.IsValidEntityType(entityType))
                 throw new InvalidUserDataException("نوع الكيان غير صالح.");
@@ -36,8 +36,42 @@ namespace API.Controllers
             return ApiResponse.Success("تم رفع المرفق بنجاح.", result);
         }
 
-        [HttpGet("{entityType}/{entityId}")]
-        public async Task<IResult> GetByEntity(string entityType, string entityId)
+        // Upload multiple temp attachments for Document (OwnerId = 0)
+        [HttpPost("upload-temp/document")]
+        [Consumes("multipart/form-data")]
+        public async Task<IResult> UploadTempForDocument([FromForm] List<IFormFile> files)
+        {
+            if (files == null || files.Count == 0 || files.All(f => f == null || f.Length == 0))
+                throw new InvalidUserDataException("لم يتم تحديد ملفات.");
+
+            var results = new List<AttachmentReadDto>();
+
+            foreach (var file in files.Where(f => f?.Length > 0))
+            {
+                var up = await _service.UploadAsync(
+                    entityId: 0,
+                    entityType: "Document",
+                    file: file,
+                    description: null
+                );
+                results.Add(up);
+            }
+
+            return ApiResponse.Success("تم رفع المرفقات المؤقتة بنجاح.", results);
+        }
+
+        [HttpPost("delete-temp")]
+        public async Task<IResult> DeleteTemp([FromBody][MinLength(1, ErrorMessage = "لم يتم تحديد مرفقات.")] List<Guid> attachmentIds)
+        {
+            foreach (var id in attachmentIds)
+                await _service.DeleteAsync(id);
+
+            return ApiResponse.Success("تم حذف المرفقات المؤقتة.");
+        }
+
+        // Get attachments for entity
+        [HttpGet("{entityType}/{entityId:long}")]
+        public async Task<IResult> GetByEntity(string entityType, long entityId)
         {
             if (!AttachmentRouteConstraints.IsValidEntityType(entityType))
                 throw new InvalidUserDataException("نوع الكيان غير صالح.");
@@ -63,8 +97,8 @@ namespace API.Controllers
         }
 
         // Link to entity
-        [HttpPost("link/{attachmentId:Guid}/{entityId}/{entityType}")]
-        public async Task<IResult> Link(Guid attachmentId, string entityId, string entityType)
+        [HttpPost("link/{attachmentId:Guid}/{entityId:long}/{entityType}")]
+        public async Task<IResult> Link(Guid attachmentId, long entityId, string entityType)
         {
             if (!AttachmentRouteConstraints.IsValidEntityType(entityType))
                 throw new InvalidUserDataException("نوع الكيان غير صالح.");
@@ -89,8 +123,8 @@ namespace API.Controllers
         }
 
         // تنزيل كل المرفقات كـ Zip لوثيقة
-        [HttpGet("download-zip/{entityType}/{entityId}")]
-        public async Task<IActionResult> DownloadZip(string entityType, string entityId)
+        [HttpGet("download-zip/{entityType}/{entityId:long}")]
+        public async Task<IActionResult> DownloadZip(string entityType, long entityId)
         {
             if (!AttachmentRouteConstraints.IsValidEntityType(entityType))
                 throw new InvalidUserDataException("نوع الكيان غير صالح.");

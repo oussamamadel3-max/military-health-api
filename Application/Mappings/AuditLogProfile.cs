@@ -1,7 +1,7 @@
 using Application.Dtos.DashboardDtos;
 using Application.Dtos.ReportDtos;
 using Application.ModelsDto.AuditLogDtos;
-using Domain.Entities.Audit;
+using Domain.Entities;
 using Mapster;
 
 namespace Application.Mappings
@@ -10,56 +10,25 @@ namespace Application.Mappings
     {
         public void Register(TypeAdapterConfig config)
         {
-            config.NewConfig<AuditEvent, AuditLogListDto>()
-                .Map(dest => dest.LogId, src => src.EventId)
-                .Map(dest => dest.UserId, src => src.ActorUserId ?? string.Empty)
-                .Map(dest => dest.UserName, src => string.Empty)
-                .Map(dest => dest.ActionType, src => src.EventType)
-                .Map(dest => dest.TableName, src => src.EntityType ?? string.Empty)
-                .Map(dest => dest.EntityId, src => src.EntityId)
-                .Map(dest => dest.CenterId, src => src.CenterId)
-                .Map(dest => dest.Result, src => src.Result)
-                .Map(dest => dest.ContextScope, src => src.ContextScope)
-                .Map(dest => dest.ChangeSummary, src => src.ReasonText)
-                .Map(dest => dest.Timestamp, src => src.OccurredAt)
-                .Map(dest => dest.IPAddress, src => src.IPAddress == null ? null : src.IPAddress.ToString());
+            config.NewConfig<AuditLog, AuditLogListDto>();
+            config.NewConfig<AuditLog, AuditLogDetailsDto>();
+            config.NewConfig<CreateAuditLogDto, AuditLog>()
+                .Map(dest => dest.Timestamp, _ => DateTime.Now);
 
-            config.NewConfig<AuditEvent, AuditLogDetailsDto>()
-                .Map(dest => dest.LogId, src => src.EventId)
-                .Map(dest => dest.UserId, src => src.ActorUserId ?? string.Empty)
-                .Map(dest => dest.UserName, src => string.Empty)
-                .Map(dest => dest.ActionType, src => src.EventType)
-                .Map(dest => dest.TableName, src => src.EntityType ?? string.Empty)
-                .Map(dest => dest.EntityId, src => src.EntityId)
-                .Map(dest => dest.CenterId, src => src.CenterId)
-                .Map(dest => dest.Result, src => src.Result)
-                .Map(dest => dest.ContextScope, src => src.ContextScope)
-                .Map(dest => dest.ChangeSummary, src => src.ReasonText)
-                .Map(dest => dest.Timestamp, src => src.OccurredAt)
-                .Map(dest => dest.IPAddress, src => src.IPAddress == null ? null : src.IPAddress.ToString())
-                .Map(dest => dest.OldValue, src => src.OldValues)
-                .Map(dest => dest.NewValue, src => src.NewValues)
-                .Ignore(dest => dest.ChangedFields);
+            config.NewConfig<AuditLog, AuditLogReportRowDto>()
+                .Map(dest => dest.LogId, src => src.LogId.ToString())
+                .Map(dest => dest.UserName, src => src.UserName ?? string.Empty)
+                .Map(dest => dest.ActionType, src => src.ActionType ?? string.Empty)
+                .Map(dest => dest.TableName, src => src.TableName ?? string.Empty)
+                .Map(dest => dest.Timestamp, src => src.Timestamp);
 
-            config.NewConfig<AuditEvent, AuditLogReportRowDto>()
-                .Map(dest => dest.LogId, src => src.EventId.ToString())
-                .Map(dest => dest.UserName, src => src.ActorUserId ?? string.Empty)
-                .Map(dest => dest.ActionType, src => src.EventType)
-                .Map(dest => dest.TableName, src => src.EntityType ?? string.Empty)
-                .Map(dest => dest.EntityId, src => src.EntityId)
-                .Map(dest => dest.CenterId, src => src.CenterId == null ? null : src.CenterId.ToString())
-                .Map(dest => dest.Result, src => src.Result)
-                .Map(dest => dest.Timestamp, src => src.OccurredAt);
-
-            config.NewConfig<AuditEvent, RecentActivityDto>()
-                .Map(dest => dest.Id, src => src.EventId)
-                .Map(dest => dest.UserId, src => src.ActorUserId ?? string.Empty)
-                .Map(dest => dest.UserName, src => string.Empty)
-                .Map(dest => dest.Action, src => src.EventType)
-                .Map(dest => dest.EntityId, src => src.EntityId)
-                .Map(dest => dest.CenterId, src => src.CenterId)
-                .Map(dest => dest.Result, src => src.Result)
-                .Map(dest => dest.Timestamp, src => src.OccurredAt.ToString("O"));
+            config.NewConfig<AuditLog, RecentActivityDto>()
+                .Map(dest => dest.Id, src => src.LogId)
+                .Map(dest => dest.UserId, src => src.UserId ?? string.Empty)
+                .Map(dest => dest.UserName, src => src.UserName ?? string.Empty)
+                .Map(dest => dest.Action, src => src.ActionType ?? string.Empty)
+                .Map(dest => dest.RecordId, src => src.RecordId)
+                .Map(dest => dest.Timestamp, src => src.Timestamp.ToString("O"));
         }
     }
 }

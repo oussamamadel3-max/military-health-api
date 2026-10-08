@@ -1,4 +1,3 @@
-using Application.Common.Security;
 using Application.Common.Localization;
 using Application.Common.Permissions;
 using Application.Interfaces;
@@ -134,18 +133,9 @@ namespace Application.Services.AuthServices
 
             var existing = await _permissionRepository.FindRolePermissionAsync(roleId, permissionId);
 
-            if (existing is { IsActive: true })
-            {
-                IamRetention.Revoke(existing, AssignmentStamp.RequireActor(_currentUserService.UserId), IamRetention.RolePermissionWithdrawn);
-                await _unitOfWork.SaveChangesAsync();
-                await SecurityStampHelper.InvalidateUsersWithRoleAsync(
-                    _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, roleId);
-                return;
-            }
-
             if (existing != null)
             {
-                IamRetention.Reactivate(existing, AssignmentStamp.RequireActor(_currentUserService.UserId), DateTimeOffset.UtcNow);
+                _permissionRepository.RemoveRolePermission(existing);
                 await _unitOfWork.SaveChangesAsync();
                 await SecurityStampHelper.InvalidateUsersWithRoleAsync(
                     _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, roleId);
@@ -158,10 +148,7 @@ namespace Application.Services.AuthServices
             var rolePermission = new RolePermission
             {
                 RoleId = roleId,
-                PermissionId = permissionId,
-                GrantedByUserId = AssignmentStamp.RequireActor(_currentUserService.UserId),
-                GrantedAt = DateTimeOffset.UtcNow,
-                IsActive = true
+                PermissionId = permissionId
             };
 
             _permissionRepository.AddRolePermission(rolePermission);

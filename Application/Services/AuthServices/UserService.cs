@@ -1,4 +1,3 @@
-using Application.Common.Security;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
@@ -123,7 +122,7 @@ public class UserService : IUserService
                 throw new InvalidUserDataException(string.Join(", ", createErrors));
             }
 
-            var associations = rolesFromDb.Select(r => NewRoleLink(user.Id, r.Id)).ToList();
+            var associations = rolesFromDb.Select(r => new UserRoleAssociation { UserId = user.Id, RoleId = r.Id }).ToList();
             _userRepository.AddRoleAssociations(associations);
 
             var rolePermissions = await _roleRepository.GetActivePermissionIdsForRolesAsync(roleIds);
@@ -132,7 +131,7 @@ public class UserService : IUserService
 
             var newPermissions = rolePermissions
                 .Where(p => !existingUserPermissions.Contains(p))
-                .Select(p => NewPermissionLink(user.Id, p))
+                .Select(p => new UserPermission { UserId = user.Id, PermissionId = p })
                 .ToList();
 
             if (newPermissions.Any()) _userRepository.AddUserPermissions(newPermissions);
@@ -232,16 +231,9 @@ public class UserService : IUserService
         await IamAdminGuard.EnsureNotLastIamAdminBeforeDisableOrDeleteAsync(
             _userRepository, _roleRepository, user.Id);
 
-        if (!user.IsActive)
-            return;
-
-        IamRetention.DeactivateUser(user);
-        var result = await _userManager.UpdateAsync(user);
+        var result = await _userManager.DeleteAsync(user);
         if (!result.Succeeded)
             throw new InvalidUserDataException(string.Join(", ", result.Errors.Select(e => e.Description)));
-
-        await SecurityStampHelper.InvalidateUserTokensAsync(
-            _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id);
     }
     #endregion
 
@@ -325,7 +317,7 @@ public class UserService : IUserService
             .ToListAsync();
 
         var directPermsLookup = directPermEntities
-            .Where(up => up.Permission?.Name != null)
+            .Where(up => up.PermissionId.HasValue && up.Permission?.Name != null)
             .GroupBy(x => x.UserId)
             .ToDictionary(
                 g => g.Key,
@@ -380,7 +372,7 @@ public class UserService : IUserService
         var directPermissionEntities = await _userRepository.QueryUserPermissions()
             .Where(up => up.UserId == user.Id)
             .Include(up => up.Permission)
-            .Where(up => up.Permission != null && !string.IsNullOrWhiteSpace(up.Permission.Name))
+            .Where(up => up.PermissionId.HasValue && up.Permission != null && !string.IsNullOrWhiteSpace(up.Permission.Name))
             .ToListAsync();
 
         var permissionsLite = _mapper.Map<List<PermissionLiteDto>>(directPermissionEntities)
@@ -509,9 +501,7 @@ public class UserService : IUserService
 
         if (rolesProvided && finalRoleIdsForEscalation != null)
         {
-            var current = (await _userRepository.GetRoleAssociationsAsync(user.Id))
-                .Where(c => c.IsActive)
-                .ToList();
+            var current = await _userRepository.GetRoleAssociationsAsync(user.Id);
             var currentIds = new HashSet<string>(current.Select(c => c.RoleId), StringComparer.OrdinalIgnoreCase);
             var finalIncomingIds = finalRoleIdsForEscalation.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
@@ -521,12 +511,16 @@ public class UserService : IUserService
             if (toRemove.Any())
             {
                 var removeRows = current.Where(c => toRemove.Contains(c.RoleId, StringComparer.OrdinalIgnoreCase)).ToList();
-                RevokeRoleAssignments(removeRows);
+                _userRepository.RemoveRoleAssociations(removeRows);
             }
 
             if (toAdd.Any())
             {
-                var addRows = toAdd.Select(rid => NewRoleLink(user.Id, rid));
+                var addRows = toAdd.Select(rid => new UserRoleAssociation
+                {
+                    UserId = user.Id,
+                    RoleId = rid
+                });
                 _userRepository.AddRoleAssociations(addRows);
             }
 
@@ -542,7 +536,7 @@ public class UserService : IUserService
         }
 
         var roleAssociationEntities = await _userRepository.QueryRoleAssociations()
-            .Where(ura => ura.UserId == user.Id && ura.IsActive)
+            .Where(ura => ura.UserId == user.Id)
             .Include(ura => ura.Role)
             .ToListAsync();
         var rolesLite = _mapper.Map<List<RoleLiteDto>>(roleAssociationEntities);
@@ -744,16 +738,21 @@ public class UserService : IUserService
             if (toRemove.Any())
             {
                 var removeRows = await _userRepository.QueryRoleAssociations(asNoTracking: false)
-                    .Where(ura => ura.UserId == user.Id && ura.IsActive && toRemove.Contains(ura.RoleId))
+                    .Where(ura => ura.UserId == user.Id && toRemove.Contains(ura.RoleId))
                     .ToListAsync();
 
-                RevokeRoleAssignments(removeRows);
+                _userRepository.RemoveRoleAssociations(removeRows);
                 await _unitOfWork.SaveChangesAsync();
             }
 
             if (toAdd.Any())
             {
-                var addRows = toAdd.Select(rid => NewRoleLink(user.Id, rid));
+                var addRows = toAdd.Select(rid => new UserRoleAssociation
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = user.Id,
+                    RoleId = rid
+                });
                 _userRepository.AddRoleAssociations(addRows);
                 await _unitOfWork.SaveChangesAsync();
             }
@@ -822,16 +821,21 @@ public class UserService : IUserService
             if (toRemove.Any())
             {
                 var removeRows = await _userRepository.QueryUserPermissions(asNoTracking: false)
-                    .Where(up => up.UserId == user.Id && up.IsActive && toRemove.Contains(up.PermissionId))
+                    .Where(up => up.UserId == user.Id && up.PermissionId.HasValue && toRemove.Contains(up.PermissionId.Value))
                     .ToListAsync();
 
-                RevokeDirectPermissions(removeRows);
+                _userRepository.RemoveUserPermissions(removeRows);
                 await _unitOfWork.SaveChangesAsync();
             }
 
             if (toAdd.Any())
             {
-                var addRows = toAdd.Select(pid => NewPermissionLink(user.Id, pid));
+                var addRows = toAdd.Select(pid => new UserPermission
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = user.Id,
+                    PermissionId = pid
+                });
                 _userRepository.AddUserPermissions(addRows);
                 await _unitOfWork.SaveChangesAsync();
             }
@@ -932,7 +936,12 @@ public class UserService : IUserService
 
                 if (rolesToAdd.Any())
                 {
-                    var newAssociations = rolesToAdd.Select(rid => NewRoleLink(userId, rid)).ToList();
+                    var newAssociations = rolesToAdd.Select(rid => new UserRoleAssociation
+                    {
+                        Id = Guid.NewGuid(),
+                        UserId = userId,
+                        RoleId = rid
+                    }).ToList();
 
                     _userRepository.AddRoleAssociations(newAssociations);
                 }
@@ -940,10 +949,10 @@ public class UserService : IUserService
                 if (rolesToRemove.Any())
                 {
                     var toRemove = await _userRepository.QueryRoleAssociations(asNoTracking: false)
-                        .Where(ura => ura.UserId == userId && ura.IsActive && rolesToRemove.Contains(ura.RoleId))
+                        .Where(ura => ura.UserId == userId && rolesToRemove.Contains(ura.RoleId))
                         .ToListAsync();
 
-                    RevokeRoleAssignments(toRemove);
+                    _userRepository.RemoveRoleAssociations(toRemove);
                 }
             }
 
@@ -980,41 +989,7 @@ public class UserService : IUserService
     }
     #endregion
 
-        private void RevokeRoleAssignments(IEnumerable<UserRoleAssociation> rows)
-        {
-            var actor = AssignmentStamp.RequireActor(_currentUserService.UserId);
-            foreach (var row in rows)
-                IamRetention.Revoke(row, actor, IamRetention.RoleWithdrawn);
-        }
-
-        private void RevokeDirectPermissions(IEnumerable<UserPermission> rows)
-        {
-            var actor = AssignmentStamp.RequireActor(_currentUserService.UserId);
-            foreach (var row in rows)
-                IamRetention.Revoke(row, actor, IamRetention.DirectPermissionWithdrawn);
-        }
-
-        private UserRoleAssociation NewRoleLink(string userId, string roleId) => new()
-        {
-            Id = Guid.NewGuid(),
-            UserId = userId,
-            RoleId = roleId,
-            AssignedByUserId = AssignmentStamp.RequireActor(_currentUserService.UserId),
-            AssignedAt = DateTimeOffset.UtcNow,
-            IsActive = true
-        };
-
-        private UserPermission NewPermissionLink(string userId, Guid permissionId) => new()
-        {
-            Id = Guid.NewGuid(),
-            UserId = userId,
-            PermissionId = permissionId,
-            GrantedByUserId = AssignmentStamp.RequireActor(_currentUserService.UserId),
-            GrantedAt = DateTimeOffset.UtcNow,
-            IsActive = true
-        };
-
-        private async Task SyncRoleDerivedPermissionsAsync(string userId)
+    private async Task SyncRoleDerivedPermissionsAsync(string userId)
     {
         var finalRoleIds = await _userRepository.GetActiveRoleIdsAsync(userId);
 
@@ -1024,7 +999,7 @@ public class UserService : IUserService
 
         var toAddPerms = finalRolePermissionIds
             .Except(existingUserPermissionIds)
-            .Select(pid => NewPermissionLink(userId, pid))
+            .Select(pid => new UserPermission { UserId = userId, PermissionId = pid })
             .ToList();
         if (toAddPerms.Any())
             _userRepository.AddUserPermissions(toAddPerms);
@@ -1032,10 +1007,10 @@ public class UserService : IUserService
         var stillNeededPerms = new HashSet<Guid>(finalRolePermissionIds);
         var userPermsToRemove = await _userRepository.GetUserPermissionsAsync(userId);
         userPermsToRemove = userPermsToRemove
-            .Where(up => up.IsActive && !stillNeededPerms.Contains(up.PermissionId))
+            .Where(up => up.PermissionId != null && !stillNeededPerms.Contains(up.PermissionId!.Value))
             .ToList();
         if (userPermsToRemove.Any())
-            RevokeDirectPermissions(userPermsToRemove);
+            _userRepository.RemoveUserPermissions(userPermsToRemove);
 
         await _unitOfWork.SaveChangesAsync();
 

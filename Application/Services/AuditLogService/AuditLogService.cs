@@ -6,7 +6,7 @@ using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Application.ModelsDto.AuditLogDtos;
 using MapsterMapper;
-using Domain.Entities.Audit;
+using Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace Application.Services
@@ -14,18 +14,15 @@ namespace Application.Services
     public class AuditLogService : IAuditLogService
     {
         private readonly IAuditLogRepository _auditLogs;
-        private readonly IUserRepository _users;
         private readonly ICurrentUserService _currentUser;
         private readonly IMapper _mapper;
 
         public AuditLogService(
             IAuditLogRepository auditLogs,
-            IUserRepository users,
             IMapper mapper,
             ICurrentUserService currentUser)
         {
             _auditLogs = auditLogs;
-            _users = users;
             _mapper = mapper;
             _currentUser = currentUser;
         }
@@ -34,14 +31,12 @@ namespace Application.Services
         public async Task<AuditLogDetailsDto> GetByIdAsync(long id)
         {
             var scoped = _auditLogs.Query()
-                         .Where(a => a.EventId == id);
+                         .Where(a => a.LogId == id);
 
             var entity = await scoped.FirstOrDefaultAsync()
                 ?? throw new ReportNotFoundException("سجل التدقيق غير موجود.");
 
-            var dto = _mapper.Map<AuditLogDetailsDto>(entity);
-            await FillNamesAsync(new[] { dto });
-            return dto;
+            return _mapper.Map<AuditLogDetailsDto>(entity);
         }
 
         #endregion
@@ -53,7 +48,7 @@ namespace Application.Services
             if (pageSize < 1) pageSize = 10;
 
             var scoped = _auditLogs.Query()
-                         .OrderByDescending(a => a.OccurredAt);
+                         .OrderByDescending(a => a.Timestamp);
 
             var total = await scoped.CountAsync();
 
@@ -63,7 +58,6 @@ namespace Application.Services
                 .ToListAsync();
 
             var mapped = _mapper.Map<List<AuditLogListDto>>(items);
-            await FillNamesAsync(mapped);
             return new PaginatedList<AuditLogListDto>(mapped, total, pageNumber, pageSize);
         }
 
@@ -79,15 +73,24 @@ namespace Application.Services
             var scoped = _auditLogs.Query();
 
             if (!string.IsNullOrWhiteSpace(auditLogFilter.searchUserName))
-                scoped = await FilterByActorNameAsync(scoped, auditLogFilter.searchUserName);
+            {
+                var s = SqlLikePatternEscape.EscapeForSqlServerLike(auditLogFilter.searchUserName.Trim().ToLower());
+                scoped = scoped.Where(a =>
+                    (a.UserName ?? "").ToLower().Contains(s));
+            }
 
             if (!string.IsNullOrWhiteSpace(auditLogFilter.userName))
-                scoped = await FilterByActorNameAsync(scoped, auditLogFilter.userName);
+            {
+                var s = SqlLikePatternEscape.EscapeForSqlServerLike(auditLogFilter.userName.Trim().ToLower());
+                scoped = scoped.Where(a =>
+                    (a.UserName ?? "").ToLower().Contains(s) ||
+                    (a.UserId ?? "").ToLower().Contains(s));
+            }
 
             if (auditLogFilter.actionType.HasValue)
             {
                 var at = auditLogFilter.actionType.Value.ToString();
-                scoped = scoped.Where(a => a.EventType == at);
+                scoped = scoped.Where(a => a.ActionType == at);
             }
 
             if (auditLogFilter.tableNames != null && auditLogFilter.tableNames.Count > 0)
@@ -99,12 +102,12 @@ namespace Application.Services
                     .ToList();
 
                 if (set.Count > 0)
-                    scoped = scoped.Where(a => set.Contains((a.EntityType ?? "").ToLower()));
+                    scoped = scoped.Where(a => set.Contains((a.TableName ?? "").ToLower()));
             }
 
             ApplyDateRange(ref scoped, auditLogFilter.From, auditLogFilter.To);
 
-            scoped = scoped.OrderByDescending(a => a.OccurredAt);
+            scoped = scoped.OrderByDescending(a => a.Timestamp);
 
             var total = await scoped.CountAsync();
 
@@ -114,33 +117,11 @@ namespace Application.Services
                 .ToListAsync();
 
             var mapped = _mapper.Map<List<AuditLogListDto>>(list);
-            await FillNamesAsync(mapped);
 
             return new PaginatedList<AuditLogListDto>(mapped, total, pageNumber, pageSize);
         }
 
-        private async Task<IQueryable<AuditEvent>> FilterByActorNameAsync(IQueryable<AuditEvent> query, string raw)
-        {
-            var term = SqlLikePatternEscape.EscapeForSqlServerLike(raw.Trim().ToLower());
-            var ids = await _users.QueryUsers()
-                .Where(u => (u.FullName ?? "").ToLower().Contains(term) || (u.UserName ?? "").ToLower().Contains(term))
-                .Select(u => u.Id)
-                .ToListAsync();
-            return query.Where(a => ids.Contains(a.ActorUserId!) || (a.ActorUserId ?? "").ToLower().Contains(term));
-        }
-
-        private async Task FillNamesAsync(IEnumerable<AuditLogListDto> items)
-        {
-            var list = items.ToList();
-            var names = await _users.GetDisplayNamesByIdsAsync(list.Select(x => x.UserId).Where(id => !string.IsNullOrWhiteSpace(id)));
-            foreach (var item in list)
-            {
-                if (names.TryGetValue(item.UserId, out var name))
-                    item.UserName = name;
-            }
-        }
-
-        private static void ApplyDateRange(ref IQueryable<AuditEvent> q, DateTimeOffset? from, DateTimeOffset? to)
+        private static void ApplyDateRange(ref IQueryable<AuditLog> q, DateTimeOffset? from, DateTimeOffset? to)
         {
             if (!from.HasValue && !to.HasValue) return;
 
@@ -161,8 +142,8 @@ namespace Application.Services
                     : t;
             }
 
-            if (start.HasValue) q = q.Where(a => a.OccurredAt >= start.Value);
-            if (endExclusive.HasValue) q = q.Where(a => a.OccurredAt < endExclusive.Value);
+            if (start.HasValue) q = q.Where(a => a.Timestamp >= start.Value);
+            if (endExclusive.HasValue) q = q.Where(a => a.Timestamp < endExclusive.Value);
         }
 
         #endregion
@@ -173,7 +154,7 @@ namespace Application.Services
             var scoped = _auditLogs.Query();
 
             var grouped = await scoped
-                .GroupBy(a => a.EventType)
+                .GroupBy(a => a.ActionType)
                 .Select(g => new { ActionType = g.Key, Count = g.LongCount() })
                 .ToListAsync();
 

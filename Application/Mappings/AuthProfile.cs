@@ -52,8 +52,9 @@ namespace Application.Mappings
                 .Map(dest => dest.FullName, src => src.FullName ?? string.Empty)
                 .Map(dest => dest.Phone, src => src.PhoneNumber)
                 .Map(dest => dest.CreationDate, src => src.CreationDate)
-                .Ignore(dest => dest.ProfileFileAssetId)
-                .Ignore(dest => dest.ProfileFileUrl)
+                .Ignore(dest => dest.AttachmentOwnerId)
+                .Ignore(dest => dest.ProfilePhotoAttachmentId)
+                .Ignore(dest => dest.ProfilePhotoUrl)
                 .Ignore(dest => dest.Roles)
                 .Ignore(dest => dest.Permissions);
 
@@ -130,7 +131,7 @@ namespace Application.Mappings
                 .Map(dest => dest.PermissionName, src => AuthDisplayNames.PermissionAr(src.Permission != null ? src.Permission.Name : null));
 
             config.NewConfig<UserPermission, PermissionLiteDto>()
-                .Map(dest => dest.PermissionId, src => src.PermissionId.ToString())
+                .Map(dest => dest.PermissionId, src => (src.PermissionId ?? Guid.Empty).ToString())
                 .Map(dest => dest.PermissionName, src => AuthDisplayNames.PermissionAr(src.Permission != null ? src.Permission.Name : null));
         }
     }

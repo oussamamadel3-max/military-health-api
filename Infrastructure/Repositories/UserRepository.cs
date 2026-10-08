@@ -1,4 +1,3 @@
-using Application.Common.Security;
 using Application.Interfaces.Repositories;
 using Domain.Entities.Auth;
 using Infrastructure.Persistence;
@@ -49,7 +48,7 @@ public class UserRepository : IUserRepository
     public async Task<List<string>> GetActiveRoleNamesAsync(string userId, CancellationToken cancellationToken = default)
     {
         return await _context.UserRoleAssociations
-            .Where(ura => ura.UserId == userId && ura.IsActive && ura.Role != null && ura.Role.IsActive)
+            .Where(ura => ura.UserId == userId && ura.Role != null && ura.Role.IsActive)
             .Select(ura => ura.Role!.Name!)
             .Where(n => !string.IsNullOrEmpty(n))
             .Distinct()
@@ -59,14 +58,14 @@ public class UserRepository : IUserRepository
     public async Task<List<string>> GetActiveRoleIdsAsync(string userId, CancellationToken cancellationToken = default)
     {
         return await _context.UserRoleAssociations
-            .Where(ura => ura.UserId == userId && ura.IsActive && ura.Role != null && ura.Role.IsActive)
+            .Where(ura => ura.UserId == userId && ura.Role != null && ura.Role.IsActive)
             .Select(ura => ura.RoleId)
             .ToListAsync(cancellationToken);
     }
 
     public async Task<List<string>> GetDirectPermissionNamesAsync(string userId, bool activeOnly = false, CancellationToken cancellationToken = default)
     {
-        var query = _context.UserPermissions.Where(up => up.UserId == userId && up.IsActive);
+        var query = _context.UserPermissions.Where(up => up.UserId == userId);
         if (activeOnly) query = query.Where(up => up.Permission != null && up.Permission.IsActive);
         return await query
             .Select(up => up.Permission!.Name)
@@ -97,52 +96,16 @@ public class UserRepository : IUserRepository
     }
 
     public void AddRoleAssociations(IEnumerable<UserRoleAssociation> associations)
-    {
-        foreach (var incoming in associations)
-        {
-            var existing = _context.UserRoleAssociations
-                .Where(x => x.UserId == incoming.UserId && x.RoleId == incoming.RoleId && x.CenterId == incoming.CenterId)
-                .OrderByDescending(x => x.IsActive)
-                .ThenByDescending(x => x.RevokedAt)
-                .FirstOrDefault();
-            if (existing is { IsActive: true })
-                continue;
-            if (existing != null)
-            {
-                IamRetention.Reactivate(existing, incoming.AssignedByUserId, incoming.AssignedAt);
-                continue;
-            }
-
-            _context.UserRoleAssociations.Add(incoming);
-        }
-    }
+        => _context.UserRoleAssociations.AddRange(associations);
 
     public void RemoveRoleAssociations(IEnumerable<UserRoleAssociation> associations)
-        => throw new InvalidOperationException("Physical delete of user role assignments is disabled. Revoke the assignment.");
+        => _context.UserRoleAssociations.RemoveRange(associations);
 
     public void AddUserPermissions(IEnumerable<UserPermission> permissions)
-    {
-        foreach (var incoming in permissions)
-        {
-            var existing = _context.UserPermissions
-                .Where(x => x.UserId == incoming.UserId && x.PermissionId == incoming.PermissionId && x.CenterId == incoming.CenterId)
-                .OrderByDescending(x => x.IsActive)
-                .ThenByDescending(x => x.RevokedAt)
-                .FirstOrDefault();
-            if (existing is { IsActive: true })
-                continue;
-            if (existing != null)
-            {
-                IamRetention.Reactivate(existing, incoming.GrantedByUserId, incoming.GrantedAt);
-                continue;
-            }
-
-            _context.UserPermissions.Add(incoming);
-        }
-    }
+        => _context.UserPermissions.AddRange(permissions);
 
     public void RemoveUserPermissions(IEnumerable<UserPermission> permissions)
-        => throw new InvalidOperationException("Physical delete of direct user permissions is disabled. Revoke the assignment.");
+        => _context.UserPermissions.RemoveRange(permissions);
 
     public void AddUserFieldPermissions(IEnumerable<UserFieldPermission> permissions)
         => _context.UserFieldPermissions.AddRange(permissions);
@@ -158,8 +121,8 @@ public class UserRepository : IUserRepository
 
     public async Task<List<Guid>> GetDirectPermissionIdsAsync(string userId, CancellationToken cancellationToken = default)
         => await _context.UserPermissions
-            .Where(up => up.UserId == userId && up.IsActive)
-            .Select(up => up.PermissionId)
+            .Where(up => up.UserId == userId && up.PermissionId != null)
+            .Select(up => up.PermissionId!.Value)
             .ToListAsync(cancellationToken);
 
     public async Task<List<Guid>> GetDirectFieldPermissionIdsAsync(string userId, CancellationToken cancellationToken = default)
@@ -167,7 +130,7 @@ public class UserRepository : IUserRepository
 
     public async Task<List<string>> GetUserIdsByRoleIdAsync(string roleId, CancellationToken cancellationToken = default)
         => await _context.UserRoleAssociations
-            .Where(ura => ura.RoleId == roleId && ura.IsActive)
+            .Where(ura => ura.RoleId == roleId)
             .Select(ura => ura.UserId)
             .Distinct()
             .ToListAsync(cancellationToken);

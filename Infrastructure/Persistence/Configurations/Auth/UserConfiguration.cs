@@ -8,7 +8,6 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
 {
     public void Configure(EntityTypeBuilder<User> builder)
     {
-        builder.ToTable("Users", "iam");
         builder.HasMany(u => u.UserPermissions)
             .WithOne(up => up.User)
             .HasForeignKey(up => up.UserId);

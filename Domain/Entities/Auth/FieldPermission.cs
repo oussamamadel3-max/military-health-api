@@ -1,3 +1,4 @@
+using Domain.Common;
 using Domain.Enums;
 using Domain.Interfaces;
 
@@ -17,5 +18,7 @@ public class FieldPermission : IAuditableEntity
 
     public ICollection<UserFieldPermission> UserFieldPermissions { get; set; } = new List<UserFieldPermission>();
     public ICollection<RoleFieldPermission> RoleFieldPermissions { get; set; } = new List<RoleFieldPermission>();
+
+    public long GetPrimaryKey() => AuditPrimaryKey.FromGuid(Id);
 }
 

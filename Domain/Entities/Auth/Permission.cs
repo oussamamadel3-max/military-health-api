@@ -1,3 +1,4 @@
+using Domain.Common;
 using Domain.Interfaces;
 
 namespace Domain.Entities.Auth;
@@ -9,4 +10,6 @@ public class Permission : IAuditableEntity
     public bool IsActive { get; set; } = true;
     public IList<RolePermission>? RolePermissions { get; set; }
     public IList<UserPermission>? UserPermissions { get; set; }
+
+    public long GetPrimaryKey() => AuditPrimaryKey.FromGuid(Id);
 }

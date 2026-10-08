@@ -17,8 +17,6 @@
   <ItemGroup>
     <EmbeddedResource Include="Resources\Fonts\Amiri-Regular.ttf" />
     <EmbeddedResource Include="Resources\Images\logo-192x192.png" />
-    <EmbeddedResource Include="Persistence\Sql\InitialDatabaseObjects.Up.sql" />
-    <EmbeddedResource Include="Persistence\Sql\InitialDatabaseObjects.Down.sql" />
   </ItemGroup>
 
   <ItemGroup>

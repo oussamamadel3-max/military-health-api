@@ -1,12 +1,13 @@
+using System.Text.RegularExpressions;
+
 namespace API.Validation;
 
 public static class AttachmentRouteConstraints
 {
-    private static readonly HashSet<string> Supported = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "Member", "Consultation", "Investigation", "UserProfile"
-    };
+    private static readonly Regex EntityTypePattern = new(
+        @"^[A-Za-z][A-Za-z0-9_]{0,99}$",
+        RegexOptions.Compiled);
 
     public static bool IsValidEntityType(string? entityType) =>
-        !string.IsNullOrEmpty(entityType) && Supported.Contains(entityType);
+        !string.IsNullOrEmpty(entityType) && EntityTypePattern.IsMatch(entityType);
 }

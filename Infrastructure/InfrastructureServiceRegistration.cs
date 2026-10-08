@@ -3,13 +3,13 @@ using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Application.Services;
-using Application.Services.Audit;
 using Application.Services.AttachmentService;
 using Application.Services.AuthServices;
 using Application.Services.Dashboard;
 using Application.Services.FileStorageService;
 using Application.Services.Reports;
 using Application.Services.Sanitization;
+using Application.Services.Core;
 using Infrastructure.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -33,8 +33,9 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
         services.AddScoped<IAttachmentRepository, AttachmentRepository>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
-        services.AddScoped<IAccessContextRepository, AccessContextRepository>();
-        services.AddScoped<ICrossCenterAccessRepository, CrossCenterAccessRepository>();
+        services.AddScoped<IOrgUnitTypeRepository, OrgUnitTypeRepository>();
+        services.AddScoped<IOrgUnitRepository, OrgUnitRepository>();
+        services.AddScoped<IUserOrgScopeRepository, UserOrgScopeRepository>();
         #endregion
 
         #region Auth HTTP services
@@ -52,21 +53,23 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IUserPermissionService, UserPermissionService>();
         services.AddScoped<IPermissionGate, PermissionGate>();
         services.AddScoped<ICurrentUserService, CurrentUserService>();
-        services.AddScoped<ICurrentCenterService, CurrentCenterService>();
-        services.AddScoped<IActiveCenterService, ActiveCenterService>();
         services.AddScoped<ITokenService, TokenService>();
         services.AddScoped<FieldPermissionHelper>();
         services.AddScoped<IUserContextService, HttpUserContextService>();
         #endregion
 
         #region Application services
-        services.AddScoped<ICrossCenterAccessService, CrossCenterAccessService>();
         services.AddScoped<IAuditLogService, AuditLogService>();
         services.AddScoped<IAttachmentService, AttachmentService>();
         services.AddScoped<IFileStorageService, FileStorageService>();
         services.AddScoped<IDashboardService, DashboardService>();
         services.AddScoped<IExportService, ExportService>();
         services.AddScoped<IReportsService, ReportsService>();
+        services.AddScoped<IOrgUnitTypeService, OrgUnitTypeService>();
+        services.AddScoped<IOrgUnitService, OrgUnitService>();
+        services.AddScoped<IUserOrgScopeService, UserOrgScopeService>();
+        services.AddScoped<IOrgScopeResolver, OrgScopeResolver>();
+        services.AddScoped<IOrgAccessService, OrgAccessService>();
         #endregion
 
         return services;
