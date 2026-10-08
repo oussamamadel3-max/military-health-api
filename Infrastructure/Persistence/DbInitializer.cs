@@ -1,7 +1,6 @@
+using Application.Common.Permissions;
 using Application.Common.Security;
 using Domain.Entities.Auth;
-using Domain.Entities.Core;
-using Infrastructure.Persistence;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -24,7 +23,7 @@ namespace Infrastructure.Persistence
             // Helpers
             // ============================
 
-            async Task<Role> EnsureRoleAsync(string name, string normalized)
+            async Task<Role> EnsureRoleAsync(string name, string normalized, string? descriptionAr = null)
             {
                 var role = await roleManager.Roles.FirstOrDefaultAsync(r => r.Name == name);
                 if (role == null)
@@ -34,6 +33,7 @@ namespace Infrastructure.Persistence
                         Id = Guid.NewGuid().ToString(),
                         Name = name,
                         NormalizedName = normalized,
+                        Description = descriptionAr,
                         IsActive = true,
                         CreatedAt = DateTime.Now
                     };
@@ -41,10 +41,22 @@ namespace Infrastructure.Persistence
                     if (!res.Succeeded)
                         throw new Exception($"تعذر إنشاء الدور {name}: " + string.Join(", ", res.Errors.Select(e => e.Description)));
                 }
-                else if (!role.IsActive)
+                else
                 {
-                    role.IsActive = true;
-                    await roleManager.UpdateAsync(role);
+                    var dirty = false;
+                    if (!role.IsActive)
+                    {
+                        role.IsActive = true;
+                        dirty = true;
+                    }
+                    if (!string.IsNullOrWhiteSpace(descriptionAr) &&
+                        !string.Equals(role.Description, descriptionAr, StringComparison.Ordinal))
+                    {
+                        role.Description = descriptionAr;
+                        dirty = true;
+                    }
+                    if (dirty)
+                        await roleManager.UpdateAsync(role);
                 }
                 return role;
             }
@@ -279,18 +291,29 @@ namespace Infrastructure.Persistence
                 await context.SaveChangesAsync();
             }
 
-            async Task EnsureAllPermissionsAssignedToRoleAsync(string roleId, string grantedByUserId, IEnumerable<(string Name, string? Desc)> catalog)
+            async Task EnsurePermissionsAssignedToRoleAsync(
+                string roleId,
+                string grantedByUserId,
+                IEnumerable<string> permissionNames)
             {
-                foreach (var (name, desc) in catalog)
-                    await EnsurePermissionAsync(name, desc);
+                var names = permissionNames
+                    .Where(n => !string.IsNullOrWhiteSpace(n))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
+                if (names.Count == 0) return;
 
-                var allPerms = await context.Permissions.AsNoTracking().Where(p => p.IsActive).ToListAsync();
+                var perms = await context.Permissions
+                    .Where(p => p.Name != null && names.Contains(p.Name))
+                    .ToListAsync();
                 var existingRolePerms = await context.RolePermissions
                     .Where(rp => rp.RoleId == roleId)
                     .ToListAsync();
 
-                foreach (var perm in allPerms)
+                foreach (var perm in perms)
                 {
+                    if (!perm.IsActive)
+                        continue;
+
                     var matches = existingRolePerms.Where(rp => rp.PermissionId == perm.Id).ToList();
                     if (matches.Any(rp => rp.IsActive))
                         continue;
@@ -315,53 +338,29 @@ namespace Infrastructure.Persistence
 
 
             // ============================
-            // 2) الأدوار
+            // 2) أدوار SRS §6.2 (مدير النظام المركزي = SuperAdmin في القالب)
             // ============================
-            var roleSuperAdmin = await EnsureRoleAsync("SuperAdmin", "SUPERADMIN");
-
-            // ============================
-            // 3) الصلاحيات (كتالوج النظام — تُسند لدور SuperAdmin فقط عبر Seed)
-            // ============================
-            var systemPermissions = new (string Name, string? Desc)[]
+            var seededRoles = new Dictionary<string, Role>(StringComparer.Ordinal);
+            foreach (var roleDef in MilitaryHealthSeedCatalog.Roles)
             {
-                ("UserManagement.Read", "قراءة بيانات المستخدمين"),
-                ("UserManagement.Create", "إنشاء مستخدمين جدد"),
-                ("UserManagement.Edit", "تعديل بيانات المستخدمين"),
-                ("UserManagement.Delete", "حذف المستخدمين"),
-                ("UserManagement.ChangeStatus", "تغيير حالة المستخدمين"),
-                ("UserManagement.AssignRoles", "إسناد أدوار للمستخدمين"),
-                ("UserManagement.AssignPermissions", "إسناد صلاحيات مباشرة للمستخدمين"),
-                ("UserManagement.ResetPassword", "إعادة تعيين كلمة مرور مستخدم"),
-                ("UserManagement.RemoveFieldPermissions", "إزالة صلاحيات الحقول عن مستخدم"),
+                seededRoles[roleDef.Name] = await EnsureRoleAsync(
+                    roleDef.Name,
+                    roleDef.NormalizedName,
+                    roleDef.DescriptionAr);
+            }
 
-                ("RoleManagement.Read", "قراءة الأدوار"),
-                ("RoleManagement.Create", "إنشاء أدوار"),
-                ("RoleManagement.Edit", "تعديل بيانات الأدوار"),
-                ("RoleManagement.Delete", "حذف الأدوار"),
-                ("RoleManagement.ChangeStatus", "تغيير حالة الأدوار"),
-                ("RoleManagement.AssignPermissions", "إسناد صلاحيات للأدوار"),
-
-                ("PermissionManagement.Read", "قراءة تعريفات الصلاحيات"),
-                ("PermissionManagement.ChangeStatus", "تغيير حالة الصلاحيات"),
-
-                ("FieldPermissionManagement.Read", "قراءة صلاحيات الحقول"),
-                ("FieldPermissionManagement.Create", "إنشاء صلاحيات حقول"),
-                ("FieldPermissionManagement.Edit", "تعديل صلاحيات الحقول"),
-                ("FieldPermissionManagement.Delete", "حذف صلاحيات الحقول"),
-                ("FieldPermissionManagement.ChangeAccessType", "تغيير نوع وصول صلاحية الحقل"),
-
-                ("AuditLog.Read", "قراءة سجلات التدقيق"),
-                ("AuditLog.Export", "تصدير تقرير السجل"),
-
-                ("Dashboard.Read", "قراءة لوحة التحكم"),
-                ("Dashboard.Export", "تصدير تقرير لوحة التحكم")
-            };
+            var roleSuperAdmin = seededRoles["SuperAdmin"];
+            var templateBootstrapPermissions = MilitaryHealthSeedCatalog.TemplateBootstrapPermissions;
 
             // ============================
-            // 5) المستخدمون
+            // 3) كتالوج الصلاحيات: قالب IAM + عمليات SRS §7.5
             // ============================
+            foreach (var perm in MilitaryHealthSeedCatalog.AllCatalogPermissions)
+                await EnsurePermissionAsync(perm.Name, perm.DescriptionAr);
 
-            // SuperAdmin (بدون فرع/قسم)
+            // ============================
+            // 5) المستخدم bootstrap فقط (بدون مستخدمين تشغيليين إضافيين)
+            // ============================
             var superAdmin = await EnsureUserAsync(
                 userName: "superAdmin",
                 email: "superAdmin@gmail.com",
@@ -370,19 +369,36 @@ namespace Infrastructure.Persistence
                 attachRoles: new[] { roleSuperAdmin }
             );
 
-            // أنشئ الصلاحيات وأسند كل صلاحيات النظام لدور SuperAdmin (إضافة الناقص فقط)
             await MigratePermissionNameAsync("ReportsAuditLogs.Export", "AuditLog.Export", "تصدير تقرير السجل", superAdmin.Id);
             await MigratePermissionNameAsync("ReportsDashboard.Export", "Dashboard.Export", "تصدير تقرير لوحة التحكم", superAdmin.Id);
-            await EnsureAllPermissionsAssignedToRoleAsync(roleSuperAdmin.Id, superAdmin.Id, systemPermissions);
 
-            // مزامنة UserPermissions للمستخدم seed مع الكتالوج (إضافة الناقص فقط؛ بلا إعادة ضبط كلمة المرور)
-            await EnsurePermissionsAndAssignToUserAsync(superAdmin.Id, systemPermissions);
+            // صلاحيات القالب تبقى على دور SuperAdmin وعلى إسناده المباشر الحالي دون توسيعها إلى صلاحيات المجال
+            await EnsurePermissionsAssignedToRoleAsync(
+                roleSuperAdmin.Id,
+                superAdmin.Id,
+                templateBootstrapPermissions.Select(p => p.Name));
 
-            // تنظيف صلاحيات قديمة بعد إضافة البدائل
+            // روابط Role–Permission من مصفوفة SRS §7.5 فقط (إضافة/إعادة تفعيل الناقص؛ بلا حذف روابط قائمة)
+            var grantsByRole = MilitaryHealthSeedCatalog.GrantsByRoleName();
+            foreach (var (roleName, permissionNames) in grantsByRole)
+            {
+                if (!seededRoles.TryGetValue(roleName, out var role))
+                    throw new InvalidOperationException($"دور المصفوفة غير موجود في كتالوج الأدوار: {roleName}");
+
+                await EnsurePermissionsAssignedToRoleAsync(role.Id, superAdmin.Id, permissionNames);
+            }
+
+            // مزامنة UserPermissions للمستخدم bootstrap مع كتالوج القالب فقط
+            await EnsurePermissionsAndAssignToUserAsync(superAdmin.Id, templateBootstrapPermissions);
+
             await CleanupObsoletePermissionsAsync(superAdmin.Id);
 
-            // بعد التنظيف أعد ضمان إسناد كل المتبقي لدور SuperAdmin
-            await EnsureAllPermissionsAssignedToRoleAsync(roleSuperAdmin.Id, superAdmin.Id, systemPermissions);
+            await EnsurePermissionsAssignedToRoleAsync(
+                roleSuperAdmin.Id,
+                superAdmin.Id,
+                templateBootstrapPermissions.Select(p => p.Name));
+            if (grantsByRole.TryGetValue("SuperAdmin", out var superAdminMatrix))
+                await EnsurePermissionsAssignedToRoleAsync(roleSuperAdmin.Id, superAdmin.Id, superAdminMatrix);
         }
     }
 }

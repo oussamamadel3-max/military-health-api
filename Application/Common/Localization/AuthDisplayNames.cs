@@ -5,8 +5,22 @@ namespace Application.Common.Localization
         private static readonly Dictionary<string, string> RoleMap =
             new(StringComparer.OrdinalIgnoreCase)
             {
-                ["SuperAdmin"] = "مدير النظام",
-                ["SUPERADMIN"] = "مدير النظام",
+                ["SuperAdmin"] = "مدير النظام المركزي",
+                ["SUPERADMIN"] = "مدير النظام المركزي",
+                ["CenterManager"] = "مدير المركز",
+                ["CENTERMANAGER"] = "مدير المركز",
+                ["ReceptionClerk"] = "أمين الاستقبال",
+                ["RECEPTIONCLERK"] = "أمين الاستقبال",
+                ["ClinicDoctor"] = "طبيب العيادة",
+                ["CLINICDOCTOR"] = "طبيب العيادة",
+                ["Supervisor"] = "المشرف",
+                ["SUPERVISOR"] = "المشرف",
+                ["CenterOfficer"] = "المسؤول",
+                ["CENTEROFFICER"] = "المسؤول",
+                ["ArchiveClerk"] = "الديوان",
+                ["ARCHIVECLERK"] = "الديوان",
+                ["Auditor"] = "المدقق",
+                ["AUDITOR"] = "المدقق",
             };
 
         private static readonly Dictionary<string, string> PermissionMap =
@@ -40,9 +54,32 @@ namespace Application.Common.Localization
 
                 ["AuditLog.Read"] = "قراءة سجلات التدقيق",
                 ["AuditLog.Export"] = "تصدير تقرير السجل",
+                ["AuditLog.Modify"] = "تعديل أو حذف سجل التدقيق",
 
                 ["Dashboard.Read"] = "قراءة لوحة التحكم",
                 ["Dashboard.Export"] = "تصدير تقرير لوحة التحكم",
+
+                ["Centers.Manage"] = "إدارة المراكز الصحية",
+                ["UserCenters.Manage"] = "إسناد المستخدمين إلى المراكز",
+                ["Members.CreateUpdate"] = "إنشاء ملف المنتسب وتعديله",
+                ["Members.View"] = "البحث وعرض ملف المنتسب",
+                ["Members.PrintReceipt"] = "طباعة الإيصال والباركود",
+                ["Members.GeneralNotes"] = "إدخال الملاحظات العامة للمريض",
+                ["Members.Import"] = "استيراد معلومات المرضى من Excel",
+                ["Members.Export"] = "تصدير معلومات المرضى إلى Excel",
+                ["Members.Transfer"] = "نقل ملف منتسب بين المراكز",
+                ["Clinical.ExamWrite"] = "تسجيل فحص العيادة وتعديله",
+                ["Clinical.AssessmentWrite"] = "تسجيل تقييم العيادة",
+                ["Clinical.DeferredAction"] = "تحديد الإجراء المطلوب للحالة المؤجلة",
+                ["Clinical.FinalDecision"] = "إصدار القرار النهائي المعتمد وتعديله",
+                ["Medical.ConsultationsInvestigations"] = "تسجيل الاستشارات والاستقصاءات ورفع المرفقات",
+                ["Medical.AttachmentsRead"] = "فتح المرفقات الطبية وتنزيلها",
+                ["Export.Recruitment"] = "التصدير للتجنيد",
+                ["Export.ViewHistory"] = "عرض سجل الملفات المصدَّرة",
+                ["Reports.Local"] = "التقارير المحلية",
+                ["Reports.Central"] = "التقارير المركزية والمقارنة بين المراكز",
+                ["Archive.ViewPrint"] = "الأرشيف والتقرير الكامل والطباعة",
+                ["System.ReferenceData"] = "إدارة القوائم المرجعية وثوابت النظام",
             };
 
         private static readonly Dictionary<string, string> ModuleMap =
@@ -54,6 +91,15 @@ namespace Application.Common.Localization
                 ["FieldPermissionManagement"] = "إدارة صلاحيات الحقول",
                 ["AuditLog"] = "سجل التدقيق",
                 ["Dashboard"] = "لوحة الإحصائيات",
+                ["Centers"] = "المراكز الصحية",
+                ["UserCenters"] = "إسناد المراكز",
+                ["Members"] = "ملفات المنتسبين",
+                ["Clinical"] = "الفحوص السريرية",
+                ["Medical"] = "الاستشارات والاستقصاءات",
+                ["Export"] = "التصدير",
+                ["Reports"] = "التقارير",
+                ["Archive"] = "الأرشيف",
+                ["System"] = "إعدادات النظام",
             };
 
         private static readonly Dictionary<string, string> ActionMap =
@@ -70,6 +116,26 @@ namespace Application.Common.Localization
                 ["ResetPassword"] = "إعادة تعيين كلمة المرور",
                 ["RemoveFieldPermissions"] = "إزالة صلاحيات الحقول",
                 ["ChangeAccessType"] = "تغيير نوع الوصول",
+                ["Manage"] = "إدارة",
+                ["CreateUpdate"] = "إنشاء وتعديل",
+                ["View"] = "عرض",
+                ["PrintReceipt"] = "طباعة الإيصال",
+                ["GeneralNotes"] = "الملاحظات العامة",
+                ["Import"] = "استيراد",
+                ["Transfer"] = "نقل",
+                ["ExamWrite"] = "تسجيل الفحص",
+                ["AssessmentWrite"] = "تسجيل التقييم",
+                ["DeferredAction"] = "الإجراء المؤجل",
+                ["FinalDecision"] = "القرار النهائي",
+                ["ConsultationsInvestigations"] = "الاستشارات والاستقصاءات",
+                ["AttachmentsRead"] = "فتح المرفقات",
+                ["Recruitment"] = "التصدير للتجنيد",
+                ["ViewHistory"] = "عرض السجل",
+                ["Local"] = "محلي",
+                ["Central"] = "مركزي",
+                ["ViewPrint"] = "عرض وطباعة",
+                ["ReferenceData"] = "البيانات المرجعية",
+                ["Modify"] = "تعديل",
             };
 
         public static string RoleAr(string? roleNameOrNormalized)
