@@ -44,9 +44,9 @@ public class AuthCookieService
     public void ClearAuthCookies(HttpResponse response)
     {
         var secure = !_environment.IsDevelopment();
-        response.Cookies.Delete(AuthCookieNames.AccessToken, new CookieOptions { Path = "/", Secure = secure });
-        response.Cookies.Delete(AuthCookieNames.RefreshToken, new CookieOptions { Path = "/", Secure = secure });
-        response.Cookies.Delete(AuthCookieNames.CsrfSignature, new CookieOptions { Path = "/", Secure = secure });
+        response.Cookies.Delete(AuthCookieNames.AccessToken, BuildClearOptions(secure));
+        response.Cookies.Delete(AuthCookieNames.RefreshToken, BuildClearOptions(secure));
+        response.Cookies.Delete(AuthCookieNames.CsrfSignature, BuildClearOptions(secure));
     }
 
     public string? TryGetRefreshToken(HttpRequest request)
@@ -65,6 +65,15 @@ public class AuthCookieService
         SameSite = SameSiteMode.Lax,
         Path = path,
         Expires = expires,
+        IsEssential = true,
+    };
+
+    private static CookieOptions BuildClearOptions(bool secure) => new()
+    {
+        HttpOnly = true,
+        Secure = secure,
+        SameSite = SameSiteMode.Lax,
+        Path = "/",
         IsEssential = true,
     };
 }

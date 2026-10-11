@@ -209,21 +209,38 @@ namespace Application.Services.AuthServices
         public async Task<(TokenResponseDto Tokens, string UserId)> RefreshSessionAsync(string? refreshToken, Guid? activeCenterId = null)
         {
             if (string.IsNullOrWhiteSpace(refreshToken))
-                throw new InvalidSessionException("رمز التحديث مفقود.");
+            {
+                await RecordLoginAsync(null, false, SessionRefresh.Missing, SessionRefresh.ReasonText(SessionRefresh.Missing), activeCenterId, "Refresh");
+                throw new InvalidSessionException(SessionRefresh.RejectedMessage, SessionRefresh.Missing);
+            }
 
-            var tokens = await _tokenService.RefreshAccessTokenAsync(refreshToken, activeCenterId);
-            var userId = ExtractUserIdFromAccessToken(tokens.AccessToken)
-                ?? throw new InvalidSessionException("تعذر استخراج بيانات المستخدم من التوكن.");
-
-            return (tokens, userId);
+            try
+            {
+                var tokens = await _tokenService.RefreshAccessTokenAsync(refreshToken, activeCenterId);
+                var userId = ExtractUserIdFromAccessToken(tokens.AccessToken)
+                    ?? throw new InvalidSessionException(SessionRefresh.RejectedMessage, SessionRefresh.Invalid);
+                return (tokens, userId);
+            }
+            catch (InvalidSessionException ex) when (!string.IsNullOrEmpty(ex.ReasonCode))
+            {
+                await RecordLoginAsync(
+                    ex.SubjectUserId,
+                    false,
+                    ex.ReasonCode,
+                    SessionRefresh.ReasonText(ex.ReasonCode),
+                    activeCenterId,
+                    "Refresh");
+                throw;
+            }
         }
 
-        public async Task LogoutAsync(string? refreshToken)
+        public async Task LogoutAsync(string? refreshToken, Guid? activeCenterId = null)
         {
             if (!string.IsNullOrWhiteSpace(refreshToken))
-            {
                 await _tokenService.RevokeRefreshTokenAsync(refreshToken);
-            }
+
+            var actor = string.IsNullOrWhiteSpace(_currentUser.UserId) ? null : _currentUser.UserId;
+            await RecordLoginAsync(actor, true, SessionRefresh.LogoutReason, "تسجيل الخروج", activeCenterId, "Logout");
         }
 
         private static LoginResponseDto BuildSession(
@@ -257,12 +274,13 @@ namespace Application.Services.AuthServices
             bool succeeded,
             string reasonCode,
             string reasonText,
-            Guid? centerId)
+            Guid? centerId,
+            string eventType = "Login")
         {
             if (succeeded)
-                _logger.LogInformation("Login succeeded for user {UserId} with reason {Reason}", userId, reasonCode);
+                _logger.LogInformation("{EventType} succeeded for user {UserId} with reason {Reason}", eventType, userId, reasonCode);
             else
-                _logger.LogWarning("Login failed for user {UserId} with reason {Reason}", userId, reasonCode);
+                _logger.LogWarning("{EventType} failed for user {UserId} with reason {Reason}", eventType, userId, reasonCode);
 
             var actor = string.IsNullOrWhiteSpace(userId) ? null : userId;
             var hasCenter = centerId.HasValue;
@@ -272,7 +290,7 @@ namespace Application.Services.AuthServices
                 ActorUserId = actor,
                 ContextScope = hasCenter ? CenterClaimTypes.Center : CenterClaimTypes.Central,
                 CenterId = hasCenter ? centerId : null,
-                EventType = "Login",
+                EventType = eventType,
                 Result = succeeded ? "SUCCESS" : "FAILURE",
                 EntityType = actor == null ? null : nameof(User),
                 EntityId = actor,

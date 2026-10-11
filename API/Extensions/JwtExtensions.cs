@@ -95,6 +95,16 @@ namespace API.Extensions
                                 : "Token has been invalidated. Please login again.");
                             return;
                         }
+
+                        var sessionFamily = context.Principal?.FindFirst(SessionFamilyGate.ClaimType)?.Value;
+                        var refreshTokens = context.HttpContext.RequestServices.GetRequiredService<IRefreshTokenRepository>();
+                        var familyActive = Guid.TryParse(sessionFamily, out var familyId)
+                            && await refreshTokens.HasActiveInFamilyAsync(familyId, DateTime.UtcNow);
+                        if (!SessionFamilyGate.AllowsAccess(sessionFamily, familyActive))
+                        {
+                            context.Fail("Session ended");
+                            return;
+                        }
                     },
                     OnChallenge = async context =>
                     {

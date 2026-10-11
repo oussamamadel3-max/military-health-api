@@ -70,7 +70,7 @@ namespace API.Controllers.AuthControllers
             _cookieService.SetAuthCookies(Response, tokens.AccessToken, tokens.RefreshToken);
             _csrfService.IssueCsrf(Response, userId, out var csrfToken);
 
-            return ApiResponse.Success("Session refreshed successfully", new CsrfResponseDto { CsrfToken = csrfToken });
+            return ApiResponse.Success("تم تجديد الجلسة بنجاح.", new CsrfResponseDto { CsrfToken = csrfToken });
         }
 
         [Authorize]
@@ -78,7 +78,8 @@ namespace API.Controllers.AuthControllers
         public async Task<IResult> Logout()
         {
             var refreshToken = _cookieService.TryGetRefreshToken(Request);
-            await _authService.LogoutAsync(refreshToken);
+            var activeCenterId = ReadActiveCenter(_cookieService.TryGetAccessToken(Request));
+            await _authService.LogoutAsync(refreshToken, activeCenterId);
             _cookieService.ClearAuthCookies(Response);
             return ApiResponse.Success("تم تسجيل الخروج بنجاح.");
         }
