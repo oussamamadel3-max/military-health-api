@@ -36,11 +36,12 @@ namespace API.Controllers.AuthControllers
         [HttpPost("[action]")]
         public async Task<IResult> Login([FromBody] RequestToken requestToken)
         {
-            var (tokens, userId) = await _authService.LoginAsync(requestToken);
-            _cookieService.SetAuthCookies(Response, tokens.AccessToken, tokens.RefreshToken);
-            _csrfService.IssueCsrf(Response, userId, out var csrfToken);
+            var result = await _authService.LoginAsync(requestToken);
+            _cookieService.SetAuthCookies(Response, result.Tokens.AccessToken, result.Tokens.RefreshToken);
+            _csrfService.IssueCsrf(Response, result.UserId, out var csrfToken);
+            result.Session.CsrfToken = csrfToken;
 
-            return ApiResponse.Success("تم تسجيل الدخول بنجاح.", new LoginResponseDto { CsrfToken = csrfToken });
+            return ApiResponse.Success("تم تسجيل الدخول بنجاح.", result.Session);
         }
 
         [Authorize]
@@ -48,7 +49,7 @@ namespace API.Controllers.AuthControllers
         public async Task<IResult> Me()
         {
             var meData = await _authService.GetMeAsync(_userContextService.UserId);
-            return ApiResponse.Success("User profile retrieved successfully", meData);
+            return ApiResponse.Success("تم جلب سياق المستخدم.", meData);
         }
 
         [Authorize]

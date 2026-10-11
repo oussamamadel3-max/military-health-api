@@ -1,4 +1,5 @@
 using Application.Attributes;
+using Application.Interfaces.Services;
 using System.ComponentModel.DataAnnotations;
 
 namespace Application.Dtos.AuthDtos
@@ -24,6 +25,25 @@ namespace Application.Dtos.AuthDtos
     public class LoginResponseDto
     {
         public string CsrfToken { get; set; } = string.Empty;
+        public string UserId { get; set; } = string.Empty;
+        public string UserName { get; set; } = string.Empty;
+        public string FullName { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public string? Phone { get; set; }
+        public List<string> Roles { get; set; } = new();
+        public List<string> Permissions { get; set; } = new();
+        public List<AssignedCenterDto> Centers { get; set; } = new();
+        public string CenterStatus { get; set; } = string.Empty;
+        public AssignedCenterDto? ActiveCenter { get; set; }
+        public bool OperationalAccess { get; set; }
+        public string? AccountMessage { get; set; }
+    }
+
+    public sealed class LoginResult
+    {
+        public TokenGenerationResultDto Tokens { get; init; } = new();
+        public string UserId { get; init; } = string.Empty;
+        public LoginResponseDto Session { get; init; } = new();
     }
 
     public class TokenResponseDto
@@ -54,6 +74,11 @@ namespace Application.Dtos.AuthDtos
 
         public List<string> Roles { get; set; } = new();
         public List<string> Permissions { get; set; } = new();
+        public List<AssignedCenterDto> Centers { get; set; } = new();
+        public string CenterStatus { get; set; } = string.Empty;
+        public AssignedCenterDto? ActiveCenter { get; set; }
+        public bool OperationalAccess { get; set; }
+        public string? AccountMessage { get; set; }
     }
 
     public class UpdateMyProfileRequest

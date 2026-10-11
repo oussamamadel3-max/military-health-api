@@ -14,6 +14,8 @@ public class AuditLogRepository : IAuditLogRepository
     public IQueryable<AuditEvent> Query(bool asNoTracking = true)
         => asNoTracking ? _context.AuditEvents.AsNoTracking() : _context.AuditEvents;
 
+    public void Add(AuditEvent auditEvent) => _context.AuditEvents.Add(auditEvent);
+
     public async Task<AuditEvent?> GetByIdAsync(long eventId, IQueryable<AuditEvent> scopedQuery, CancellationToken cancellationToken = default)
         => await scopedQuery.FirstOrDefaultAsync(a => a.EventId == eventId, cancellationToken);
 

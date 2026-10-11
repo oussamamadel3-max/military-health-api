@@ -55,7 +55,12 @@ namespace Application.Mappings
                 .Ignore(dest => dest.ProfileFileAssetId)
                 .Ignore(dest => dest.ProfileFileUrl)
                 .Ignore(dest => dest.Roles)
-                .Ignore(dest => dest.Permissions);
+                .Ignore(dest => dest.Permissions)
+                .Ignore(dest => dest.Centers)
+                .Ignore(dest => dest.CenterStatus)
+                .Ignore(dest => dest.ActiveCenter)
+                .Ignore(dest => dest.OperationalAccess)
+                .Ignore(dest => dest.AccountMessage);
 
             // Role Mappings
             config.NewConfig<Role, RoleDto>().TwoWays();
