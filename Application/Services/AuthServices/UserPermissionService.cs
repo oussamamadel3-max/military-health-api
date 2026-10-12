@@ -30,8 +30,18 @@ namespace Application.Services.AuthServices
         public IReadOnlyList<string> GetPermissionNames(string userId)
         {
             var snapshot = _access.LoadAsync(userId).GetAwaiter().GetResult();
-            var centerId = _currentCenter.IsCentralContext ? null : _currentCenter.CenterId;
+            var centerId = UsableCenterId(userId);
             return CenterPermissionEvaluator.Resolve(snapshot.Roles, snapshot.Directs, snapshot.Links, centerId);
+        }
+
+        private Guid? UsableCenterId(string userId)
+        {
+            if (_currentCenter.IsCentralContext || _currentCenter.CenterId is not Guid claimed)
+                return null;
+
+            return ActiveCenterSessionGate.ResolveClaimedCenter(
+                claimed,
+                _access.IsActivelyAssignedAsync(userId, claimed).GetAwaiter().GetResult());
         }
 
         public FieldAccessType GetFieldAccess(string userId, string entityName, string fieldName)

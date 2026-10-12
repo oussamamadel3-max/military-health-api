@@ -367,3 +367,15 @@ storage/
 storage/uploads/
 API/storage/
 API/storage/uploads/
+
+# Local agent kit — never commit or push
+/AGENTS.md
+/CURRENT_TASK.md
+/development-plan.md
+/development-tasks.md
+/docs/HowToRunAgent.md
+/docs/SRS.md
+/rules/
+/skills/
+/.cursor/
+/SRS_نظام_الصحة_العسكرية.docx

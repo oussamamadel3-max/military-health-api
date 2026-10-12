@@ -96,6 +96,7 @@ namespace API.Extensions
                             return;
                         }
 
+<<<<<<< HEAD
                         var sessionFamily = context.Principal?.FindFirst(SessionFamilyGate.ClaimType)?.Value;
                         var refreshTokens = context.HttpContext.RequestServices.GetRequiredService<IRefreshTokenRepository>();
                         var familyActive = Guid.TryParse(sessionFamily, out var familyId)
@@ -104,6 +105,21 @@ namespace API.Extensions
                         {
                             context.Fail("Session ended");
                             return;
+=======
+                        var claimedCenter = context.Principal?.FindFirst(CenterClaimTypes.CenterId)?.Value;
+                        if (Guid.TryParse(claimedCenter, out var claimedCenterId))
+                        {
+                            var access = context.HttpContext.RequestServices.GetRequiredService<IAccessContextRepository>();
+                            if (!await access.IsActivelyAssignedAsync(userId, claimedCenterId))
+                            {
+                                var snapshot = await access.LoadAsync(userId);
+                                var permissions = CenterPermissionEvaluator.Resolve(
+                                    snapshot.Roles, snapshot.Directs, snapshot.Links, null);
+                                var roles = CenterPermissionEvaluator.ApplicableRoleNames(snapshot.Roles, null);
+                                if (context.Principal?.Identity is ClaimsIdentity identity)
+                                    ActiveCenterSessionGate.RetainUnscopedContext(identity, permissions, roles);
+                            }
+>>>>>>> origin/feature/mh-p1-030-active-center
                         }
                     },
                     OnChallenge = async context =>

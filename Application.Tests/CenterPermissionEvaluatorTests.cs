@@ -1,9 +1,11 @@
 using Application.Common.Security;
 using Application.Dtos.AuthDtos;
 using Application.Exceptions;
+using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Application.Services.AuthServices;
+using Domain.Entities.Audit;
 using Moq;
 
 namespace Application.Tests;
@@ -99,11 +101,17 @@ public class CenterPermissionEvaluatorTests
         var current = new Mock<ICurrentUserService>();
         current.SetupGet(c => c.UserId).Returns("user-1");
         var tokens = new Mock<ITokenService>();
+        var center = new Mock<ICurrentCenterService>();
+        var audit = new Mock<IAuditLogRepository>();
+        var unit = new Mock<IUnitOfWork>();
+        unit.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
 
-        var service = new ActiveCenterService(access.Object, current.Object, tokens.Object);
+        var service = new ActiveCenterService(
+            access.Object, current.Object, center.Object, tokens.Object, audit.Object, unit.Object);
 
         await Assert.ThrowsAsync<ForbiddenPermissionException>(() => service.SelectAsync(CenterA));
         tokens.Verify(t => t.GenerateTokensAsync(It.IsAny<string>(), It.IsAny<Guid?>()), Times.Never);
+        audit.Verify(a => a.Add(It.Is<AuditEvent>(e => e.Result == "FAILURE" && e.EventType == "CenterChange")), Times.Once);
     }
 
     private static CenterPermissionEvaluator.RoleAssignment Role(string id, string name, Guid? center, bool active, bool roleActive)

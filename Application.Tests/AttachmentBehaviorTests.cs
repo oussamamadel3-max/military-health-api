@@ -272,7 +272,19 @@ public class AttachmentBehaviorTests
         var access = new Mock<IAccessContextRepository>();
         access.Setup(a => a.IsActivelyAssignedAsync("user-1", It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(assigned);
 
-        return new AttachmentService(files.Object, unit.Object, mapper.Object, storage, http.Object, user.Object, center.Object, access.Object);
+        var activeCenters = new Mock<IActiveCenterService>();
+        activeCenters
+            .Setup(s => s.RequireOperationalCenterAsync(It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                if (central || centerId is null)
+                    throw new InvalidUserDataException("العملية المحلية تتطلب مركزاً نشطاً.");
+                if (!assigned)
+                    throw new ForbiddenPermissionException("المستخدم غير مسند إلى المركز النشط أو أن الإسناد لم يعد فعالاً.");
+                return Task.FromResult(centerId.Value);
+            });
+
+        return new AttachmentService(files.Object, unit.Object, mapper.Object, storage, http.Object, user.Object, center.Object, access.Object, activeCenters.Object);
     }
 
     private static FileAsset SampleFile(Guid centerId, Guid? id = null) => new()
