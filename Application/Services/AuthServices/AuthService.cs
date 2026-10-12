@@ -168,11 +168,12 @@ namespace Application.Services.AuthServices
             if (user == null || !user.IsActive)
                 throw new UnauthenticatedUserException();
 
+            var centers = await _access.GetActiveCentersAsync(userId);
+            var claimedCenterId = _currentCenter.IsCentralContext ? null : _currentCenter.CenterId;
+            var centerId = LoginCenterContext.Describe(centers, claimedCenterId).ActiveCenter?.CenterId;
             var snapshot = await _access.LoadAsync(userId);
-            var centerId = _currentCenter.IsCentralContext ? null : _currentCenter.CenterId;
             var permissions = CenterPermissionEvaluator.Resolve(snapshot.Roles, snapshot.Directs, snapshot.Links, centerId).ToList();
             var scopedRoles = CenterPermissionEvaluator.ApplicableRoleNames(snapshot.Roles, centerId).ToList();
-            var centers = await _access.GetActiveCentersAsync(userId);
             var session = BuildSession(user, centers, centerId, scopedRoles, permissions);
 
             var me = _mapper.Map<MeResponseDto>(user);
@@ -243,7 +244,7 @@ namespace Application.Services.AuthServices
             await RecordLoginAsync(actor, true, SessionRefresh.LogoutReason, "تسجيل الخروج", activeCenterId, "Logout");
         }
 
-        private static LoginResponseDto BuildSession(
+        private static LoginSessionDto BuildSession(
             User user,
             IReadOnlyList<AssignedCenterDto> centers,
             Guid? sessionCenterId,
@@ -252,7 +253,7 @@ namespace Application.Services.AuthServices
         {
             var decision = LoginCenterContext.Describe(centers, sessionCenterId);
             var operational = LoginCenterContext.AllowsOperationalAccess(decision.Status, permissions.Count);
-            return new LoginResponseDto
+            return new LoginSessionDto
             {
                 UserId = user.Id,
                 UserName = user.UserName ?? string.Empty,

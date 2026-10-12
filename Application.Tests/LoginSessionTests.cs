@@ -250,7 +250,8 @@ public class LoginSessionTests
         Assert.Contains("[EnableRateLimiting(RateLimitPolicies.Login)]", controller, StringComparison.Ordinal);
         Assert.Contains("_cookieService.SetAuthCookies", controller, StringComparison.Ordinal);
         Assert.Contains("_csrfService.IssueCsrf", controller, StringComparison.Ordinal);
-        Assert.Contains("result.Session", controller, StringComparison.Ordinal);
+        Assert.Contains("new LoginResponseDto { CsrfToken = csrfToken }", controller, StringComparison.Ordinal);
+        Assert.DoesNotContain("result.Session", controller, StringComparison.Ordinal);
     }
 
     private static RequestToken Request(string userName) => new()
@@ -284,7 +285,7 @@ public class LoginSessionTests
         Permissions = permissions.ToList()
     };
 
-    private static void AssertNoSecrets(LoginResponseDto session)
+    private static void AssertNoSecrets(LoginSessionDto session)
     {
         var json = JsonSerializer.Serialize(session);
         Assert.DoesNotContain(Password, json, StringComparison.Ordinal);
