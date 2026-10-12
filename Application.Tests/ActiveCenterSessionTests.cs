@@ -223,6 +223,7 @@ public class ActiveCenterSessionTests
                 Id = Guid.NewGuid(),
                 UserId = userId,
                 Token = "hash",
+                SecurityStamp = user.SecurityStamp,
                 ExpiryDate = DateTime.UtcNow.AddDays(1)
             });
         refreshRepo.Setup(r => r.Add(It.IsAny<UserRefreshToken>()));

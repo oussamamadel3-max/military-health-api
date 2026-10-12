@@ -196,7 +196,6 @@ namespace Application.Services.AuthServices
                     throw Reject(SessionRefresh.Inactive, consumed.UserId);
                 }
 
-<<<<<<< HEAD
                 if (!AccessTokenSessionGate.IsAccessTokenAccepted(
                         userExists: true,
                         isActive: true,
@@ -209,8 +208,6 @@ namespace Application.Services.AuthServices
                     throw Reject(SessionRefresh.SecurityStamp, consumed.UserId);
                 }
 
-                var tokenResult = await GenerateTokensCoreAsync(consumed.UserId, activeCenterId, consumed);
-=======
                 var centerForSession = activeCenterId;
                 if (centerForSession is Guid requestedCenter &&
                     !await _access.IsActivelyAssignedAsync(consumed.UserId, requestedCenter))
@@ -218,8 +215,7 @@ namespace Application.Services.AuthServices
                     centerForSession = null;
                 }
 
-                var tokenResult = await GenerateTokensAsync(consumed.UserId, centerForSession);
->>>>>>> origin/feature/mh-p1-030-active-center
+                var tokenResult = await GenerateTokensCoreAsync(consumed.UserId, centerForSession, consumed);
                 await tx.CommitAsync();
 
                 return new TokenResponseDto

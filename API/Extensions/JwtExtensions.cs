@@ -96,7 +96,6 @@ namespace API.Extensions
                             return;
                         }
 
-<<<<<<< HEAD
                         var sessionFamily = context.Principal?.FindFirst(SessionFamilyGate.ClaimType)?.Value;
                         var refreshTokens = context.HttpContext.RequestServices.GetRequiredService<IRefreshTokenRepository>();
                         var familyActive = Guid.TryParse(sessionFamily, out var familyId)
@@ -105,7 +104,8 @@ namespace API.Extensions
                         {
                             context.Fail("Session ended");
                             return;
-=======
+                        }
+
                         var claimedCenter = context.Principal?.FindFirst(CenterClaimTypes.CenterId)?.Value;
                         if (Guid.TryParse(claimedCenter, out var claimedCenterId))
                         {
@@ -119,7 +119,6 @@ namespace API.Extensions
                                 if (context.Principal?.Identity is ClaimsIdentity identity)
                                     ActiveCenterSessionGate.RetainUnscopedContext(identity, permissions, roles);
                             }
->>>>>>> origin/feature/mh-p1-030-active-center
                         }
                     },
                     OnChallenge = async context =>
