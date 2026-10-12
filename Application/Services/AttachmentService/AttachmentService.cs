@@ -33,6 +33,7 @@ namespace Application.Services.AttachmentService
         private readonly ICurrentUserService _currentUser;
         private readonly ICurrentCenterService _center;
         private readonly IAccessContextRepository _access;
+        private readonly IActiveCenterService _activeCenters;
 
         public AttachmentService(
             IAttachmentRepository files,
@@ -42,7 +43,8 @@ namespace Application.Services.AttachmentService
             IHttpContextAccessor httpContextAccessor,
             ICurrentUserService currentUser,
             ICurrentCenterService center,
-            IAccessContextRepository access)
+            IAccessContextRepository access,
+            IActiveCenterService activeCenters)
         {
             _files = files;
             _unitOfWork = unitOfWork;
@@ -52,6 +54,7 @@ namespace Application.Services.AttachmentService
             _currentUser = currentUser;
             _center = center;
             _access = access;
+            _activeCenters = activeCenters;
         }
 
         public async Task<AttachmentReadDto> UploadAsync(string entityId, string entityType, IFormFile file, string? description = null)
@@ -304,15 +307,8 @@ namespace Application.Services.AttachmentService
                 ?? await _files.FindFirstActiveCenterIdAsync();
         }
 
-        private async Task<Guid> RequireActiveCenterAsync()
-        {
-            if (_center.IsCentralContext || _center.CenterId is not Guid centerId)
-                throw new InvalidUserDataException("العملية المحلية تتطلب مركزاً نشطاً.");
-            var userId = RequireUser();
-            if (!await _access.IsActivelyAssignedAsync(userId, centerId))
-                throw new ForbiddenPermissionException("المستخدم غير مسند إلى المركز النشط.");
-            return centerId;
-        }
+        private Task<Guid> RequireActiveCenterAsync()
+            => _activeCenters.RequireOperationalCenterAsync();
 
         private async Task EnsureSameCenterAsync(Guid? fileCenterId)
         {

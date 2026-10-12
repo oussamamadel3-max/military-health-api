@@ -30,7 +30,10 @@ public class ActiveCenterController : ControllerBase
     [HttpPost("select")]
     public async Task<IResult> Select([FromBody] SelectCenterRequest request, CancellationToken cancellationToken)
     {
-        var tokens = await _centers.SelectAsync(request.CenterId, cancellationToken);
+        var tokens = await _centers.SelectAsync(
+            request.CenterId,
+            _cookies.TryGetRefreshToken(Request),
+            cancellationToken);
         _cookies.SetAuthCookies(Response, tokens.AccessToken, tokens.RefreshToken);
         return ApiResponse.Success("تم تحديث المركز النشط.", new { tokens.Roles, tokens.Permissions, request.CenterId });
     }

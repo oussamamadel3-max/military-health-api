@@ -162,7 +162,14 @@ namespace Application.Services.AuthServices
                 if (user == null || !user.IsActive)
                     throw new InvalidSessionException("المستخدم غير موجود أو غير نشط");
 
-                var tokenResult = await GenerateTokensAsync(consumed.UserId, activeCenterId);
+                var centerForSession = activeCenterId;
+                if (centerForSession is Guid requestedCenter &&
+                    !await _access.IsActivelyAssignedAsync(consumed.UserId, requestedCenter))
+                {
+                    centerForSession = null;
+                }
+
+                var tokenResult = await GenerateTokensAsync(consumed.UserId, centerForSession);
                 await tx.CommitAsync();
 
                 return new TokenResponseDto
