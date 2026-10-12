@@ -1,8 +1,10 @@
 using Application.Common.Permissions;
 using Application.Exceptions;
+using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Application.Services.AuthServices;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using System.Security.Claims;
 
@@ -25,7 +27,12 @@ public class PermissionGateTests
         };
         var accessor = new Mock<IHttpContextAccessor>();
         accessor.Setup(a => a.HttpContext).Returns(http);
-        return new PermissionGate(accessor.Object, PermissionGateFactory.PermissionService(http));
+        return new PermissionGate(
+            accessor.Object,
+            PermissionGateFactory.PermissionService(http),
+            Mock.Of<IAccessContextRepository>(),
+            Mock.Of<ICurrentCenterService>(),
+            NullLogger<PermissionGate>.Instance);
     }
 
     private static IUserPermissionService PermissionService(HttpContext http)
@@ -48,8 +55,11 @@ public class PermissionGateTests
     public void EnsureAll_rejects_SuperAdmin_role_without_required_permission()
     {
         var gate = CreateGate(SystemPermissions.UserManagement.Edit);
-        Assert.Throws<ForbiddenPermissionException>(() =>
+        var error = Assert.Throws<ForbiddenPermissionException>(() =>
             gate.EnsureAll(SystemPermissions.UserManagement.ChangeStatus));
+        Assert.Equal(403, error.Status);
+        Assert.Equal("ليس لديك الصلاحية المطلوبة.", error.Message);
+        Assert.DoesNotContain(SystemPermissions.UserManagement.ChangeStatus, error.Message);
     }
 
     [Fact]
@@ -62,7 +72,12 @@ public class PermissionGateTests
         var http = new DefaultHttpContext { User = new ClaimsPrincipal(identity) };
         var accessor = new Mock<IHttpContextAccessor>();
         accessor.Setup(a => a.HttpContext).Returns(http);
-        var gate = new PermissionGate(accessor.Object, PermissionService(http));
+        var gate = new PermissionGate(
+            accessor.Object,
+            PermissionService(http),
+            Mock.Of<IAccessContextRepository>(),
+            Mock.Of<ICurrentCenterService>(),
+            NullLogger<PermissionGate>.Instance);
 
         gate.EnsureAll(
             SystemPermissions.UserManagement.Create,
@@ -144,7 +159,12 @@ public class AuthorizePermissionAttributeTests
 
         var accessor = new Mock<IHttpContextAccessor>();
         accessor.Setup(a => a.HttpContext).Returns(http);
-        var gate = new PermissionGate(accessor.Object, PermissionGateFactory.PermissionService(http));
+        var gate = new PermissionGate(
+            accessor.Object,
+            PermissionGateFactory.PermissionService(http),
+            Mock.Of<IAccessContextRepository>(),
+            Mock.Of<ICurrentCenterService>(),
+            NullLogger<PermissionGate>.Instance);
 
         Assert.Throws<ForbiddenPermissionException>(() =>
             gate.EnsureAll(SystemPermissions.UserManagement.Create, SystemPermissions.UserManagement.AssignRoles));
