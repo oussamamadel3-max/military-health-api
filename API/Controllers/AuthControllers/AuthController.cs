@@ -39,9 +39,8 @@ namespace API.Controllers.AuthControllers
             var result = await _authService.LoginAsync(requestToken);
             _cookieService.SetAuthCookies(Response, result.Tokens.AccessToken, result.Tokens.RefreshToken);
             _csrfService.IssueCsrf(Response, result.UserId, out var csrfToken);
-            result.Session.CsrfToken = csrfToken;
 
-            return ApiResponse.Success("تم تسجيل الدخول بنجاح.", result.Session);
+            return ApiResponse.Success("تم تسجيل الدخول بنجاح.", new LoginResponseDto { CsrfToken = csrfToken });
         }
 
         [Authorize]
