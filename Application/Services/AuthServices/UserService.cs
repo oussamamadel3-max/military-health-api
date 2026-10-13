@@ -9,6 +9,7 @@ using Application.Common.Permissions;
 using Application.Exceptions;
 using Application.Dtos.AuthDtos;
 using Domain.Entities.Auth;
+using PasswordPolicyRules = Application.Common.PasswordPolicy;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using MapsterMapper;
@@ -608,9 +609,13 @@ public class UserService : IUserService
     #region تغيير كلمة المرور (المستخدم نفسه)
     public async Task ChangeOwnPasswordAsync(ChangePasswordRequest request)
     {
-        var userId = _currentUserService.UserId ?? string.Empty;
-        var user = await _userManager.FindByIdAsync(userId)
-            ?? throw new UserNotFoundException(userId);
+        var user = await GetCurrentUserOrThrowAsync();
+
+        if (!string.Equals(request.NewPassword, request.ConfirmPassword, StringComparison.Ordinal))
+            throw new InvalidUserDataException(PasswordPolicyRules.ConfirmationMismatchMessage);
+
+        if (!PasswordPolicyRules.IsCompliant(request.NewPassword))
+            throw new InvalidUserDataException(PasswordPolicyRules.ComplexityErrorMessage);
 
         var result = await _userManager.ChangePasswordAsync(user, request.CurrentPassword, request.NewPassword);
         if (!result.Succeeded)

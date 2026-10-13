@@ -91,7 +91,7 @@ public class CreateUserDto
     public string? phone { get; set; }
 
     [Required]
-    [StringLength(128, MinimumLength = 8)]
+    [StringLength(PasswordPolicy.MaxLength, MinimumLength = PasswordPolicy.MinLength)]
     [RegularExpression(PasswordPolicy.ComplexityPattern, ErrorMessage = PasswordPolicy.ComplexityErrorMessage)]
     public string password { get; set; } = "";
     public bool isActive { get; set; } = true;
