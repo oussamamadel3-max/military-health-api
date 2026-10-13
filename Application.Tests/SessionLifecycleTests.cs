@@ -183,7 +183,7 @@ public class SessionLifecycleTests
     }
 
     [Fact]
-    public async Task Valid_refresh_returns_the_user_and_does_not_audit_a_failure()
+    public async Task Valid_refresh_returns_the_user_and_audits_success_without_token_contents()
     {
         var harness = new AuthHarness();
         harness.Tokens
@@ -198,7 +198,13 @@ public class SessionLifecycleTests
 
         Assert.Equal("user-1", userId);
         Assert.False(string.IsNullOrWhiteSpace(tokens.AccessToken));
-        Assert.Empty(harness.Audits);
+        var audit = Assert.Single(harness.Audits);
+        Assert.Equal("Refresh", audit.EventType);
+        Assert.Equal("SUCCESS", audit.Result);
+        Assert.Equal("user-1", audit.ActorUserId);
+        Assert.Equal(SessionRefresh.ReasonText(SessionRefresh.Succeeded), audit.ReasonText);
+        AssertNoToken(audit, RawRefresh);
+        AssertNoToken(audit, "rotated-refresh");
     }
 
     [Fact]

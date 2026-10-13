@@ -183,6 +183,7 @@ namespace Application.Services.AuthServices
             me.CenterStatus = session.CenterStatus;
             me.ActiveCenter = session.ActiveCenter;
             me.OperationalAccess = session.OperationalAccess;
+            me.CentralAuthority = CenterPermissionEvaluator.HasCentralAuthority(snapshot.Roles, snapshot.Directs);
             me.AccountMessage = session.AccountMessage;
 
             var profile = await _files.FindTrackedProfileAsync(user.Id);
@@ -220,6 +221,13 @@ namespace Application.Services.AuthServices
                 var tokens = await _tokenService.RefreshAccessTokenAsync(refreshToken, activeCenterId);
                 var userId = ExtractUserIdFromAccessToken(tokens.AccessToken)
                     ?? throw new InvalidSessionException(SessionRefresh.RejectedMessage, SessionRefresh.Invalid);
+                await RecordLoginAsync(
+                    userId,
+                    true,
+                    SessionRefresh.Succeeded,
+                    SessionRefresh.ReasonText(SessionRefresh.Succeeded),
+                    activeCenterId,
+                    "Refresh");
                 return (tokens, userId);
             }
             catch (InvalidSessionException ex) when (!string.IsNullOrEmpty(ex.ReasonCode))

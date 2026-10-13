@@ -163,6 +163,18 @@ public class AttachmentBehaviorTests
     }
 
     [Fact]
+    public async Task Medical_file_read_requires_attachments_permission()
+    {
+        var file = SampleFile(CenterId);
+        var files = new Mock<IAttachmentRepository>();
+        files.Setup(f => f.FindByIdAsync(file.FileAssetId, It.IsAny<CancellationToken>())).ReturnsAsync(file);
+        files.Setup(f => f.IsProfilePhotoAsync("user-1", file.FileAssetId, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        var service = CreateService(files, CenterId, assigned: true, allowMedicalRead: false);
+
+        await Assert.ThrowsAsync<ForbiddenPermissionException>(() => service.GetByIdAsync(file.FileAssetId));
+    }
+
+    [Fact]
     public async Task Deleted_file_cannot_be_downloaded()
     {
         var files = new Mock<IAttachmentRepository>();
@@ -237,7 +249,8 @@ public class AttachmentBehaviorTests
         Guid? centerId,
         bool assigned,
         bool central = false,
-        IFileStorageService? storage = null)
+        IFileStorageService? storage = null,
+        bool allowMedicalRead = true)
     {
         var unit = new Mock<IUnitOfWork>();
         unit.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
@@ -284,7 +297,31 @@ public class AttachmentBehaviorTests
                 return Task.FromResult(centerId.Value);
             });
 
-        return new AttachmentService(files.Object, unit.Object, mapper.Object, storage, http.Object, user.Object, center.Object, access.Object, activeCenters.Object);
+        var permissions = new Mock<IPermissionGate>();
+        if (allowMedicalRead)
+        {
+            permissions
+                .Setup(g => g.EnsureLocalAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(centerId ?? Guid.Empty);
+        }
+        else
+        {
+            permissions
+                .Setup(g => g.EnsureLocalAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new ForbiddenPermissionException());
+        }
+
+        return new AttachmentService(
+            files.Object,
+            unit.Object,
+            mapper.Object,
+            storage,
+            http.Object,
+            user.Object,
+            center.Object,
+            access.Object,
+            activeCenters.Object,
+            permissions.Object);
     }
 
     private static FileAsset SampleFile(Guid centerId, Guid? id = null) => new()

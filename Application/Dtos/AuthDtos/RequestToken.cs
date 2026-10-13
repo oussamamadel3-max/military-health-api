@@ -40,6 +40,7 @@ namespace Application.Dtos.AuthDtos
         public string CenterStatus { get; set; } = string.Empty;
         public AssignedCenterDto? ActiveCenter { get; set; }
         public bool OperationalAccess { get; set; }
+        public bool CentralAuthority { get; set; }
         public string? AccountMessage { get; set; }
     }
 
@@ -82,6 +83,7 @@ namespace Application.Dtos.AuthDtos
         public string CenterStatus { get; set; } = string.Empty;
         public AssignedCenterDto? ActiveCenter { get; set; }
         public bool OperationalAccess { get; set; }
+        public bool CentralAuthority { get; set; }
         public string? AccountMessage { get; set; }
     }
 

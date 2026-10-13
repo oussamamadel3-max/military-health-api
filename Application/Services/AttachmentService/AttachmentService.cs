@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Application.Common.Permissions;
 using Application.Dtos;
 using Application.Exceptions;
 using Application.Interfaces;
@@ -34,6 +35,7 @@ namespace Application.Services.AttachmentService
         private readonly ICurrentCenterService _center;
         private readonly IAccessContextRepository _access;
         private readonly IActiveCenterService _activeCenters;
+        private readonly IPermissionGate _permissions;
 
         public AttachmentService(
             IAttachmentRepository files,
@@ -44,7 +46,8 @@ namespace Application.Services.AttachmentService
             ICurrentUserService currentUser,
             ICurrentCenterService center,
             IAccessContextRepository access,
-            IActiveCenterService activeCenters)
+            IActiveCenterService activeCenters,
+            IPermissionGate permissions)
         {
             _files = files;
             _unitOfWork = unitOfWork;
@@ -55,6 +58,7 @@ namespace Application.Services.AttachmentService
             _center = center;
             _access = access;
             _activeCenters = activeCenters;
+            _permissions = permissions;
         }
 
         public async Task<AttachmentReadDto> UploadAsync(string entityId, string entityType, IFormFile file, string? description = null)
@@ -125,6 +129,8 @@ namespace Application.Services.AttachmentService
         public async Task<List<AttachmentReadDto>> GetAttachmentsForEntityAsync(string entityId, params string[] entityTypes)
         {
             var type = SingleType(entityTypes);
+            if (!IsOwnProfile(entityId, type))
+                await RequireMedicalReadAsync();
             var centerId = await RequireActiveCenterAsync();
             var files = await LoadFilesAsync(entityId, type, centerId);
             return files.Select(MapToDto).ToList();
@@ -164,6 +170,8 @@ namespace Application.Services.AttachmentService
         public async Task<(byte[] Bytes, string ZipName)> DownloadZipForEntityAsync(string entityId, params string[] entityTypes)
         {
             var type = SingleType(entityTypes);
+            if (!IsOwnProfile(entityId, type))
+                await RequireMedicalReadAsync();
             var centerId = await RequireActiveCenterAsync();
             var files = await LoadFilesAsync(entityId, type, centerId);
             if (files.Count == 0)
@@ -290,8 +298,16 @@ namespace Application.Services.AttachmentService
             if (await _files.IsProfilePhotoAsync(userId, id))
                 return file;
             await EnsureSameCenterAsync(file.CenterId);
+            await RequireMedicalReadAsync();
             return file;
         }
+
+        private bool IsOwnProfile(string entityId, string entityType)
+            => entityType.Equals(UserProfile, StringComparison.OrdinalIgnoreCase)
+               && string.Equals(entityId, RequireUser(), StringComparison.Ordinal);
+
+        private Task RequireMedicalReadAsync()
+            => _permissions.EnsureLocalAsync(MilitaryHealthPermissions.Medical.AttachmentsRead);
 
         private async Task<Guid?> ResolveProfilePhotoCenterAsync(string entityId)
         {

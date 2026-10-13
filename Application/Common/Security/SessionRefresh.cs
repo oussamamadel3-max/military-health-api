@@ -12,11 +12,13 @@ public static class SessionRefresh
     public const string SecurityStamp = "security_stamp";
 
     public const string LogoutReason = "logout";
+    public const string Succeeded = "succeeded";
     public const string RotatedReason = "rotated";
     public const string ReuseReason = "reuse";
 
     public static string ReasonText(string reasonCode) => reasonCode switch
     {
+        Succeeded => "تم تجديد الجلسة",
         Missing => "رفض تجديد الجلسة لغياب رمز التحديث",
         Expired => "رفض تجديد الجلسة لانتهاء رمز التحديث",
         Reused => "رفض تجديد الجلسة لأن رمز التحديث مستخدم أو ملغى",
