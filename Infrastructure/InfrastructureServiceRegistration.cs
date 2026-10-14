@@ -6,6 +6,7 @@ using Application.Services;
 using Application.Services.Audit;
 using Application.Services.AttachmentService;
 using Application.Services.AuthServices;
+using Application.Services.Centers;
 using Application.Services.Dashboard;
 using Application.Services.FileStorageService;
 using Application.Services.Reports;
@@ -35,6 +36,7 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
         services.AddScoped<IAccessContextRepository, AccessContextRepository>();
         services.AddScoped<ICrossCenterAccessRepository, CrossCenterAccessRepository>();
+        services.AddScoped<IMedicalCenterRepository, MedicalCenterRepository>();
         #endregion
 
         #region Auth HTTP services
@@ -67,6 +69,7 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IDashboardService, DashboardService>();
         services.AddScoped<IExportService, ExportService>();
         services.AddScoped<IReportsService, ReportsService>();
+        services.AddScoped<IMedicalCenterService, MedicalCenterService>();
         #endregion
 
         return services;
