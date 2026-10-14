@@ -1,6 +1,8 @@
+using Domain.Interfaces;
+
 namespace Domain.Entities.Core;
 
-public class ResultStatus
+public class ResultStatus : IAuditableEntity
 {
     public short StatusId { get; set; }
     public string Code { get; set; } = null!;

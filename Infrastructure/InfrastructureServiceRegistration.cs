@@ -8,6 +8,8 @@ using Application.Services.AttachmentService;
 using Application.Services.AuthServices;
 using Application.Services.Centers;
 using Application.Services.Dashboard;
+using Application.Services.ReferenceData;
+using Application.Services.ReferenceData.Handlers;
 using Application.Services.FileStorageService;
 using Application.Services.Reports;
 using Application.Services.Sanitization;
@@ -37,6 +39,7 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IAccessContextRepository, AccessContextRepository>();
         services.AddScoped<ICrossCenterAccessRepository, CrossCenterAccessRepository>();
         services.AddScoped<IMedicalCenterRepository, MedicalCenterRepository>();
+        services.AddScoped<IReferenceDataRepository, ReferenceDataRepository>();
         #endregion
 
         #region Auth HTTP services
@@ -70,6 +73,17 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IExportService, ExportService>();
         services.AddScoped<IReportsService, ReportsService>();
         services.AddScoped<IMedicalCenterService, MedicalCenterService>();
+        services.AddScoped<IReferenceCatalogHandler, RecruitmentCenterCatalogHandler>();
+        services.AddScoped<IReferenceCatalogHandler, ClinicCatalogHandler>();
+        services.AddScoped<IReferenceCatalogHandler, ResultStatusCatalogHandler>();
+        services.AddScoped<IReferenceCatalogHandler, RequiredActionTypeCatalogHandler>();
+        services.AddScoped<IReferenceCatalogHandler, MaritalStatusCatalogHandler>();
+        services.AddScoped<IReferenceCatalogHandler, BloodTypeCatalogHandler>();
+        services.AddScoped<IReferenceCatalogHandler, ConsultationTypeCatalogHandler>();
+        services.AddScoped<IReferenceCatalogHandler, InvestigationTypeCatalogHandler>();
+        services.AddScoped<IReferenceCatalogHandler, BmiCategoryCatalogHandler>();
+        services.AddScoped<IReferenceCatalogHandler, ValidationRuleCatalogHandler>();
+        services.AddScoped<IReferenceDataService, ReferenceDataService>();
         #endregion
 
         return services;
