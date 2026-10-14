@@ -10,7 +10,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace API.Controllers;
 
 /// <summary>
-/// إدارة المراكز الصحية (FR-008..FR-011). مسارات اختيار المركز النشط تبقى في ActiveCenterController تحت api/centers.
+/// إدارة المراكز الصحية وربط العيادات (MH-P2-030). مسارات اختيار المركز النشط تبقى في ActiveCenterController تحت api/centers.
 /// </summary>
 [ApiController]
 [Authorize]
@@ -18,8 +18,13 @@ namespace API.Controllers;
 public class CentersController : ControllerBase
 {
     private readonly IMedicalCenterService _centers;
+    private readonly ICenterClinicService _centerClinics;
 
-    public CentersController(IMedicalCenterService centers) => _centers = centers;
+    public CentersController(IMedicalCenterService centers, ICenterClinicService centerClinics)
+    {
+        _centers = centers;
+        _centerClinics = centerClinics;
+    }
 
     [HttpGet]
     [AuthorizePermission(MilitaryHealthPermissions.Centers.Manage)]
@@ -86,5 +91,60 @@ public class CentersController : ControllerBase
     {
         _ = centerId;
         throw new MedicalCenterPhysicalDeleteNotAllowedException();
+    }
+
+    [HttpGet("{centerId:guid}/clinics")]
+    [AuthorizePermission(MilitaryHealthPermissions.Centers.Manage)]
+    public async Task<IResult> GetCenterClinics(
+        Guid centerId,
+        [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
+        [FromQuery][Range(1, 500)] int pageSize = 10,
+        [FromQuery] bool? isActive = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _centerClinics.GetByCenterAsync(centerId, pageNumber, pageSize, isActive, cancellationToken);
+        return ApiResponse.Success("تم جلب عيادات المركز بنجاح.", result);
+    }
+
+    [HttpPost("{centerId:guid}/clinics")]
+    [AuthorizePermission(MilitaryHealthPermissions.Centers.Manage)]
+    public async Task<IResult> LinkClinic(
+        Guid centerId,
+        [FromBody] LinkCenterClinicDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        var linked = await _centerClinics.LinkAsync(centerId, dto, cancellationToken);
+        return ApiResponse.Success("تم ربط العيادة بالمركز بنجاح.", linked);
+    }
+
+    [HttpPost("{centerId:guid}/clinics/{centerClinicId:guid}/activate")]
+    [AuthorizePermission(MilitaryHealthPermissions.Centers.Manage)]
+    public async Task<IResult> ActivateClinicLink(
+        Guid centerId,
+        Guid centerClinicId,
+        CancellationToken cancellationToken = default)
+    {
+        var link = await _centerClinics.ActivateAsync(centerId, centerClinicId, cancellationToken);
+        return ApiResponse.Success("تم تفعيل ربط العيادة بالمركز بنجاح.", link);
+    }
+
+    [HttpPost("{centerId:guid}/clinics/{centerClinicId:guid}/deactivate")]
+    [AuthorizePermission(MilitaryHealthPermissions.Centers.Manage)]
+    public async Task<IResult> DeactivateClinicLink(
+        Guid centerId,
+        Guid centerClinicId,
+        CancellationToken cancellationToken = default)
+    {
+        var link = await _centerClinics.DeactivateAsync(centerId, centerClinicId, cancellationToken);
+        return ApiResponse.Success("تم تعطيل ربط العيادة بالمركز بنجاح.", link);
+    }
+
+    [HttpDelete("{centerId:guid}/clinics/{centerClinicId:guid}")]
+    [AuthorizePermission(MilitaryHealthPermissions.Centers.Manage)]
+    public IResult DeleteClinicLink(Guid centerId, Guid centerClinicId)
+    {
+        _ = centerId;
+        _ = centerClinicId;
+        throw new CenterClinicPhysicalDeleteNotAllowedException();
     }
 }

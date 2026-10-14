@@ -39,6 +39,7 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IAccessContextRepository, AccessContextRepository>();
         services.AddScoped<ICrossCenterAccessRepository, CrossCenterAccessRepository>();
         services.AddScoped<IMedicalCenterRepository, MedicalCenterRepository>();
+        services.AddScoped<ICenterClinicRepository, CenterClinicRepository>();
         services.AddScoped<IReferenceDataRepository, ReferenceDataRepository>();
         #endregion
 
@@ -73,6 +74,7 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IExportService, ExportService>();
         services.AddScoped<IReportsService, ReportsService>();
         services.AddScoped<IMedicalCenterService, MedicalCenterService>();
+        services.AddScoped<ICenterClinicService, CenterClinicService>();
         services.AddScoped<IReferenceCatalogHandler, RecruitmentCenterCatalogHandler>();
         services.AddScoped<IReferenceCatalogHandler, ClinicCatalogHandler>();
         services.AddScoped<IReferenceCatalogHandler, ResultStatusCatalogHandler>();
