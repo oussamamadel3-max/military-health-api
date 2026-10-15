@@ -15,10 +15,12 @@ namespace API.Controllers.AuthControllers
     public class UserController : ControllerBase
     {
         private readonly IUserService _userService;
+        private readonly IUserAssignmentService _userAssignments;
 
-        public UserController(IUserService userService)
+        public UserController(IUserService userService, IUserAssignmentService userAssignments)
         {
             _userService = userService;
+            _userAssignments = userAssignments;
         }
 
         [HttpPost("[action]")]
@@ -146,6 +148,46 @@ namespace API.Controllers.AuthControllers
         {
             var dropDownUsers = await _userService.GetDropDownUsersAsync();
             return ApiResponse.Success("تم جلب قائمة المستخدمين بنجاح.", dropDownUsers);
+        }
+
+        [HttpGet("[action]/{userId}")]
+        [AuthorizePermission(SystemPermissions.UserManagement.Read)]
+        public async Task<IResult> GetUserAssignments(string userId, CancellationToken cancellationToken)
+        {
+            var assignments = await _userAssignments.GetAssignmentsAsync(userId, cancellationToken);
+            return ApiResponse.Success("تم جلب إسنادات المستخدم بنجاح.", assignments);
+        }
+
+        [HttpPost("[action]")]
+        [AuthorizePermission(MilitaryHealthPermissions.UserCenters.Manage)]
+        public async Task<IResult> AssignUserCenter([FromBody] AssignUserCenterDto dto, CancellationToken cancellationToken)
+        {
+            var result = await _userAssignments.AssignCenterAsync(dto, cancellationToken);
+            return ApiResponse.Success("تم إسناد المركز بنجاح.", result);
+        }
+
+        [HttpPost("[action]")]
+        [AuthorizePermission(MilitaryHealthPermissions.UserCenters.Manage)]
+        public async Task<IResult> RevokeUserCenter([FromBody] RevokeUserCenterDto dto, CancellationToken cancellationToken)
+        {
+            await _userAssignments.RevokeCenterAsync(dto, cancellationToken);
+            return ApiResponse.Success("تم إلغاء إسناد المركز بنجاح.");
+        }
+
+        [HttpPost("[action]")]
+        [AuthorizePermission(SystemPermissions.UserManagement.AssignRoles)]
+        public async Task<IResult> AssignUserRole([FromBody] AssignUserRoleDto dto, CancellationToken cancellationToken)
+        {
+            var result = await _userAssignments.AssignRoleAsync(dto, cancellationToken);
+            return ApiResponse.Success("تم إسناد الدور بنجاح.", result);
+        }
+
+        [HttpPost("[action]")]
+        [AuthorizePermission(SystemPermissions.UserManagement.AssignRoles)]
+        public async Task<IResult> RevokeUserRole([FromBody] RevokeUserRoleDto dto, CancellationToken cancellationToken)
+        {
+            await _userAssignments.RevokeRoleAsync(dto, cancellationToken);
+            return ApiResponse.Success("تم إلغاء إسناد الدور بنجاح.");
         }
     }
 }
