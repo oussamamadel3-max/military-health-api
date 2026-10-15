@@ -9,6 +9,8 @@ public class RoleDto
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public bool? IsActive { get; set; }
+    /// <summary>دور أساسي من كتالوج SRS §6.2 (الثمانية).</summary>
+    public bool IsSystemRole { get; set; }
 }
 public class CreateRoleDto
 {
@@ -38,6 +40,8 @@ public class RoleDetailsDto
     public string Description { get; set; } = string.Empty;
 
     public bool IsActive { get; set; }
+    /// <summary>دور أساسي من كتالوج SRS §6.2 (الثمانية).</summary>
+    public bool IsSystemRole { get; set; }
     public int PermissionsCount { get; set; }
     public List<PermissionInfoDto> Permissions { get; set; } = new List<PermissionInfoDto>();
     public int AssignedUsersCount { get; set; }
