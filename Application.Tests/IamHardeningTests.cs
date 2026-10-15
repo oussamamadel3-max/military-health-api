@@ -88,9 +88,14 @@ public class IamHardeningTests
 
         var users = new Mock<IUserRepository>();
         users.Setup(r => r.GetUserIdsByRoleIdAsync(role.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new List<string>());
+        users.Setup(r => r.GetActiveUserIdsExceptAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<string>());
+        var roles = new Mock<IRoleRepository>();
+        roles.Setup(r => r.GetRolePermissionsForRolesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<RolePermission>());
         var service = new RoleService(
             manager.Object, users.Object, null!, null!, new TestCurrentUser(), Mock.Of<IPermissionGate>(),
-            Mock.Of<IRoleRepository>(), Mock.Of<IPermissionRepository>(), Mock.Of<IRefreshTokenRepository>(), Mock.Of<IUnitOfWork>());
+            roles.Object, Mock.Of<IPermissionRepository>(), Mock.Of<IRefreshTokenRepository>(), Mock.Of<IUnitOfWork>());
 
         await service.DeleteRoleAsync(role.Id);
 
@@ -112,7 +117,7 @@ public class IamHardeningTests
         uow.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
 
         var service = new PermissionService(
-            permissions.Object, Mock.Of<IUserRepository>(), Mock.Of<IRefreshTokenRepository>(), uow.Object,
+            permissions.Object, Mock.Of<IRoleRepository>(), Mock.Of<IUserRepository>(), Mock.Of<IRefreshTokenRepository>(), uow.Object,
             null!, null!, Mock.Of<IPermissionGate>(), new TestCurrentUser(), null!);
 
         await service.TogglePermissionStatusAsync(permission.Id);
