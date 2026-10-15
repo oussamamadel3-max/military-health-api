@@ -7,6 +7,11 @@ public interface IUserRepository
     Task<User?> GetByIdAsync(string id, bool asNoTracking = false, CancellationToken cancellationToken = default);
     Task<User?> FindByIdAsync(string id, CancellationToken cancellationToken = default);
     IQueryable<User> QueryUsers(bool asNoTracking = true);
+    /// <summary>
+    /// مستخدمو المراكز المشتركة مع الممثل، باستثناء من لديهم سلطة مركزية.
+    /// </summary>
+    IQueryable<User> QueryUsersManageableByLocalActor(string actorUserId, bool asNoTracking = true);
+    Task<bool> SharesActiveCenterAsync(string actorUserId, string targetUserId, CancellationToken cancellationToken = default);
     IQueryable<UserRoleAssociation> QueryRoleAssociations(bool asNoTracking = true);
     IQueryable<UserPermission> QueryUserPermissions(bool asNoTracking = true);
     Task<Dictionary<string, string>> GetDisplayNamesByIdsAsync(IEnumerable<string> userIds, CancellationToken cancellationToken = default);

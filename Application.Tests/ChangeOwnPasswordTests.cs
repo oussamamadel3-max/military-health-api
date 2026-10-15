@@ -113,6 +113,27 @@ public class ChangeOwnPasswordTests
     }
 
     [Fact]
+    public async Task Successful_change_clears_must_change_password_flag()
+    {
+        var harness = CreateHarness();
+        harness.User.MustChangePassword = true;
+        harness.UserManager
+            .Setup(m => m.ChangePasswordAsync(harness.User, "Current!1", StrongPassword))
+            .ReturnsAsync(IdentityResult.Success);
+        harness.UserManager
+            .Setup(m => m.UpdateAsync(harness.User))
+            .ReturnsAsync(IdentityResult.Success);
+        harness.UserManager
+            .Setup(m => m.UpdateSecurityStampAsync(harness.User))
+            .ReturnsAsync(IdentityResult.Success);
+
+        await harness.Service.ChangeOwnPasswordAsync(ValidRequest());
+
+        Assert.False(harness.User.MustChangePassword);
+        harness.UserManager.Verify(m => m.UpdateAsync(harness.User), Times.Once);
+    }
+
+    [Fact]
     public void Dto_rejects_weak_password_and_confirm_mismatch()
     {
         var weak = new ChangePasswordRequest
@@ -199,6 +220,10 @@ public class ChangeOwnPasswordTests
         var currentUser = new TestCurrentUser();
         currentUser.SetUser(user.Id, user.UserName!, "127.0.0.1");
 
+        var access = new Mock<IAccessContextRepository>();
+        access.Setup(a => a.LoadAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AccessSnapshot());
+
         var service = new UserService(
             manager.Object,
             null!,
@@ -207,6 +232,7 @@ public class ChangeOwnPasswordTests
             null!,
             null!,
             tokens.Object,
+            access.Object,
             uow.Object,
             Mock.Of<IPermissionGate>(),
             null!,

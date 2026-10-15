@@ -25,6 +25,7 @@ public class UserService : IUserService
     private readonly IPermissionRepository _permissionRepository;
     private readonly IFieldPermissionRepository _fieldPermissionRepository;
     private readonly IRefreshTokenRepository _refreshTokenRepository;
+    private readonly IAccessContextRepository _access;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IPermissionGate _permissionGate;
     private readonly JwtSettings _jwtSettings;
@@ -40,6 +41,7 @@ public class UserService : IUserService
         IPermissionRepository permissionRepository,
         IFieldPermissionRepository fieldPermissionRepository,
         IRefreshTokenRepository refreshTokenRepository,
+        IAccessContextRepository access,
         IUnitOfWork unitOfWork,
         IPermissionGate permissionGate,
         JwtSettings jwtSettings,
@@ -54,6 +56,7 @@ public class UserService : IUserService
         _permissionRepository = permissionRepository;
         _fieldPermissionRepository = fieldPermissionRepository;
         _refreshTokenRepository = refreshTokenRepository;
+        _access = access;
         _unitOfWork = unitOfWork;
         _permissionGate = permissionGate;
         _jwtSettings = jwtSettings;
@@ -71,6 +74,10 @@ public class UserService : IUserService
         if (string.IsNullOrWhiteSpace(createdUser.username)) errors.Add("اسم المستخدم مطلوب.");
         if (string.IsNullOrWhiteSpace(createdUser.email)) errors.Add("البريد الإلكتروني مطلوب.");
         if (string.IsNullOrWhiteSpace(createdUser.password)) errors.Add("كلمة المرور مطلوبة.");
+        if (!string.Equals(createdUser.password, createdUser.confirmPassword, StringComparison.Ordinal))
+            errors.Add(PasswordPolicyRules.ConfirmationMismatchMessage);
+        if (!PasswordPolicyRules.IsCompliant(createdUser.password))
+            errors.Add(PasswordPolicyRules.ComplexityErrorMessage);
         if (errors.Count > 0) throw new InvalidUserDataException("بيانات المستخدم غير صالحة.", new { errors });
 
         // منع التكرار (رمي استثناءات مخصصة)
@@ -114,12 +121,17 @@ public class UserService : IUserService
             user.Email = _textSanitizer.SanitizePlainText(createdUser.email) ?? createdUser.email;
             user.PhoneNumber = string.IsNullOrEmpty(createdUser.phone) ? null : _textSanitizer.SanitizePlainText(createdUser.phone);
             user.IsActive = createdUser.isActive;
+            user.MustChangePassword = createdUser.forcePasswordChange;
             user.CreationDate = DateTime.Now;
             user.FullName = _textSanitizer.SanitizePlainText(createdUser.fullName) ?? string.Empty;
 
             var createRes = await _userManager.CreateAsync(user, createdUser.password);
             if (!createRes.Succeeded)
             {
+                if (createRes.Errors.Any(e =>
+                        string.Equals(e.Code, "DuplicateUserName", StringComparison.OrdinalIgnoreCase)))
+                    throw new UsernameAlreadyExistsException(createdUser.username);
+
                 var createErrors = createRes.Errors.Select(e => e.Description);
                 throw new InvalidUserDataException(string.Join(", ", createErrors));
             }
@@ -148,6 +160,7 @@ public class UserService : IUserService
                 email = createdUser.email,
                 phone = createdUser.phone,
                 isActive = createdUser.isActive,
+                mustChangePassword = user.MustChangePassword,
                 roles = createdUser.roles?.ToList() ?? new List<string>()
             };
         }
@@ -171,6 +184,7 @@ public class UserService : IUserService
             required.Add(SystemPermissions.UserManagement.ChangeStatus);
 
         _permissionGate.EnsureAll(required.ToArray());
+        await EnsureCanManageTargetAsync(user.Id);
 
         if (statusChanging && updatedUser.IsActive == false)
         {
@@ -230,6 +244,8 @@ public class UserService : IUserService
         var user = await _userManager.FindByIdAsync(userId)
             ?? throw new UserNotFoundException(userId);
 
+        await EnsureCanManageTargetAsync(user.Id);
+
         await IamAdminGuard.EnsureNotLastIamAdminBeforeDisableOrDeleteAsync(
             _userRepository, _roleRepository, user.Id);
 
@@ -254,13 +270,15 @@ public class UserService : IUserService
         bool? isActive = null,
         string? roleId = null)
     {
+        _permissionGate.EnsureAll(SystemPermissions.UserManagement.Read);
+
         if (pageNumber < 1) pageNumber = 1;
         if (pageSize < 1) pageSize = 10;
         if (pageSize > 100) pageSize = 100;
 
         var currentUserId = _currentUserService.UserId ?? string.Empty;
 
-        IQueryable<User> baseQuery = _userRepository.QueryUsers();
+        IQueryable<User> baseQuery = await BuildManageableUsersQueryAsync();
 
         baseQuery = baseQuery.Where(u => u.Id != currentUserId);
 
@@ -362,9 +380,13 @@ public class UserService : IUserService
     #region جلب حسب المعرف 
     public async Task<UserListItemDto> GetUserAsync(string id)
     {
+        _permissionGate.EnsureAll(SystemPermissions.UserManagement.Read);
+
         var user = await _userRepository.QueryUsers()
             .FirstOrDefaultAsync(u => u.Id == id)
             ?? throw new UserNotFoundException(id);
+
+        await EnsureCanManageTargetAsync(user.Id);
 
         var roleAssociations = await _userRepository.QueryRoleAssociations()
             .Where(ura => ura.UserId == user.Id)
@@ -414,6 +436,7 @@ public class UserService : IUserService
         if (statusChanging) required.Add(SystemPermissions.UserManagement.ChangeStatus);
         if (rolesProvided) required.Add(SystemPermissions.UserManagement.AssignRoles);
         _permissionGate.EnsureAll(required.ToArray());
+        await EnsureCanManageTargetAsync(user.Id);
 
         if (statusChanging && dto.isActive == false)
         {
@@ -584,20 +607,26 @@ public class UserService : IUserService
         var user = await _userRepository.GetByIdAsync(id)
             ?? throw new UserNotFoundException(id);
 
+        await EnsureCanManageTargetAsync(user.Id);
+
         if (user.IsActive && !request.isActive)
         {
             await IamAdminGuard.EnsureNotLastIamAdminBeforeDisableOrDeleteAsync(
                 _userRepository, _roleRepository, user.Id);
         }
 
+        var wasActive = user.IsActive;
         user.IsActive = request.isActive;
 
         var updRes = await _userManager.UpdateAsync(user);
         if (!updRes.Succeeded)
             throw new InvalidUserDataException(string.Join(", ", updRes.Errors.Select(e => e.Description)));
 
-        await SecurityStampHelper.InvalidateUserTokensAsync(
-            _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, id);
+        if (wasActive && !user.IsActive)
+        {
+            await SecurityStampHelper.InvalidateUserTokensAsync(
+                _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, id);
+        }
 
         return new UpdateUserStatusRequest
         {
@@ -620,6 +649,14 @@ public class UserService : IUserService
         var result = await _userManager.ChangePasswordAsync(user, request.CurrentPassword, request.NewPassword);
         if (!result.Succeeded)
             throw new InvalidUserDataException(string.Join(", ", result.Errors.Select(e => e.Description)));
+
+        if (user.MustChangePassword)
+        {
+            user.MustChangePassword = false;
+            var clearFlag = await _userManager.UpdateAsync(user);
+            if (!clearFlag.Succeeded)
+                throw new InvalidUserDataException(string.Join(", ", clearFlag.Errors.Select(e => e.Description)));
+        }
 
         await SecurityStampHelper.InvalidateUserTokensAsync(
             _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id);
@@ -673,14 +710,30 @@ public class UserService : IUserService
     {
         _permissionGate.EnsureAll(SystemPermissions.UserManagement.ResetPassword);
 
+        if (!string.Equals(request.NewPassword, request.ConfirmPassword, StringComparison.Ordinal))
+            throw new InvalidUserDataException(PasswordPolicyRules.ConfirmationMismatchMessage);
+
+        if (!PasswordPolicyRules.IsCompliant(request.NewPassword))
+            throw new InvalidUserDataException(PasswordPolicyRules.ComplexityErrorMessage);
+
         var user = await _userManager.FindByIdAsync(request.UserId)
             ?? throw new UserNotFoundException(request.UserId);
+
+        await EnsureCanManageTargetAsync(user.Id);
+
+        if (!user.IsActive)
+            throw new InvalidUserDataException("الحساب معطّل. يجب تفعيل الحساب قبل إعادة تعيين كلمة المرور.");
 
         var resetToken = await _userManager.GeneratePasswordResetTokenAsync(user);
         var resetResult = await _userManager.ResetPasswordAsync(user, resetToken, request.NewPassword);
 
         if (!resetResult.Succeeded)
             throw new InvalidUserDataException(string.Join(", ", resetResult.Errors.Select(e => e.Description)));
+
+        user.MustChangePassword = true;
+        var flagResult = await _userManager.UpdateAsync(user);
+        if (!flagResult.Succeeded)
+            throw new InvalidUserDataException(string.Join(", ", flagResult.Errors.Select(e => e.Description)));
 
         await SecurityStampHelper.InvalidateUserTokensAsync(
             _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id);
@@ -694,6 +747,8 @@ public class UserService : IUserService
 
         var user = await _userManager.FindByIdAsync(dto.UserId)
             ?? throw new UserNotFoundException(dto.UserId);
+
+        await EnsureCanManageTargetAsync(user.Id);
 
         var incomingIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -791,6 +846,8 @@ public class UserService : IUserService
         var user = await _userManager.FindByIdAsync(dto.UserId)
             ?? throw new UserNotFoundException(dto.UserId);
 
+        await EnsureCanManageTargetAsync(user.Id);
+
         var incomingIds = new HashSet<Guid>();
         if (dto.PermissionId is { Count: > 0 })
             foreach (var pid in dto.PermissionId.Where(x => x != Guid.Empty))
@@ -870,6 +927,8 @@ public class UserService : IUserService
         var user = await _userManager.FindByIdAsync(dto.UserId)
             ?? throw new UserNotFoundException(dto.UserId);
 
+        await EnsureCanManageTargetAsync(user.Id);
+
         var userFieldPermissions = (await _userRepository.GetUserFieldPermissionsAsync(dto.UserId))
             .Where(ufp => dto.FieldPermissionIds.Contains(ufp.FieldPermissionId))
             .ToList();
@@ -897,6 +956,8 @@ public class UserService : IUserService
 
         var user = await _userManager.FindByIdAsync(userId)
             ?? throw new UserNotFoundException(userId);
+
+        await EnsureCanManageTargetAsync(user.Id);
 
         var roleIds = (updatedUser.RoleIds ?? new List<string>())
             .Where(x => !string.IsNullOrWhiteSpace(x))
@@ -976,7 +1037,9 @@ public class UserService : IUserService
     #region القائمة المنسدلة للمستخدمين
     public async Task<List<DropdownUserDto>> GetDropDownUsersAsync()
     {
-        var users = await _userRepository.QueryUsers()
+        _permissionGate.EnsureAll(SystemPermissions.UserManagement.Read);
+
+        var users = await (await BuildManageableUsersQueryAsync())
             .Where(u => u.IsActive)
             .OrderBy(u => u.UserName)
             .ToListAsync();
@@ -984,6 +1047,22 @@ public class UserService : IUserService
         return _mapper.Map<List<DropdownUserDto>>(users);
     }
     #endregion
+
+    private async Task EnsureCanManageTargetAsync(string targetUserId)
+    {
+        var actorId = _currentUserService.UserId ?? string.Empty;
+        await UserManagementScopeGuard.EnsureCanManageTargetAsync(
+            _access, _userRepository, actorId, targetUserId);
+    }
+
+    private async Task<IQueryable<User>> BuildManageableUsersQueryAsync()
+    {
+        var actorId = _currentUserService.UserId ?? string.Empty;
+        if (await UserManagementScopeGuard.ActorHasUnrestrictedScopeAsync(_access, actorId))
+            return _userRepository.QueryUsers();
+
+        return _userRepository.QueryUsersManageableByLocalActor(actorId);
+    }
 
         private void RevokeRoleAssignments(IEnumerable<UserRoleAssociation> rows)
         {

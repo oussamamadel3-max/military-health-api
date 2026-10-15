@@ -10,6 +10,11 @@ public class User : IdentityUser, IAuditableEntity
     public string? FullName { get; set; }
 
     /// <summary>
+    /// عند true يُمنع الوصول التشغيلي حتى يغيّر المستخدم كلمة مروره.
+    /// </summary>
+    public bool MustChangePassword { get; set; }
+
+    /// <summary>
     /// مستوى تصعيد حظر تسجيل الدخول (progressive lockout). يُصفَّر عند نجاح الدخول أو بعد فترة هدوء.
     /// </summary>
     public int LoginLockoutTier { get; set; }

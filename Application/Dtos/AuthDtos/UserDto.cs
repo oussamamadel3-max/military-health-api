@@ -94,7 +94,15 @@ public class CreateUserDto
     [StringLength(PasswordPolicy.MaxLength, MinimumLength = PasswordPolicy.MinLength)]
     [RegularExpression(PasswordPolicy.ComplexityPattern, ErrorMessage = PasswordPolicy.ComplexityErrorMessage)]
     public string password { get; set; } = "";
+
+    [Required(ErrorMessage = "تأكيد كلمة المرور مطلوب.")]
+    [Compare(nameof(password), ErrorMessage = PasswordPolicy.ConfirmationMismatchMessage)]
+    public string confirmPassword { get; set; } = "";
+
     public bool isActive { get; set; } = true;
+
+    /// <summary>افتراضي true: إلزام تغيير كلمة المرور عند أول دخول.</summary>
+    public bool forcePasswordChange { get; set; } = true;
 
     [Required(ErrorMessage = "يجب اختيار دور واحد على الأقل.")]
     [MinLength(1, ErrorMessage = "يجب اختيار دور واحد على الأقل.")]
@@ -109,6 +117,7 @@ public class CreatedUserResponseDto
     public string email { get; set; } = "";
     public string? phone { get; set; }
     public bool isActive { get; set; }
+    public bool mustChangePassword { get; set; }
     public List<string> roles { get; set; } = new();
 }
 
@@ -123,13 +132,12 @@ public class UserListItemDto
     public string email { get; set; } = string.Empty;
     public string? phone { get; set; }
     public bool isActive { get; set; }
+    public bool mustChangePassword { get; set; }
     public DateTime createdAt { get; set; }
     public int rolesCount { get; set; }
     public int permissionsCount { get; set; }
     public List<RoleLiteDto> roles { get; set; } = new();
     public List<PermissionLiteDto> Permissions { get; set; } = new();
-
-
 }
 public class UpdateUserWithRolesDto
 {

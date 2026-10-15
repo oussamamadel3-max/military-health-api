@@ -510,6 +510,11 @@ namespace Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasDefaultValue(0);
 
+                    b.Property<bool>("MustChangePassword")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<string>("NormalizedEmail")
                         .HasColumnType("text");
 
@@ -535,6 +540,11 @@ namespace Infrastructure.Migrations
                         .HasColumnType("text");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("NormalizedUserName")
+                        .IsUnique()
+                        .HasDatabaseName("IX_Users_NormalizedUserName")
+                        .HasFilter("\"NormalizedUserName\" IS NOT NULL");
 
                     b.ToTable("Users", "iam");
                 });

@@ -41,6 +41,7 @@ namespace Application.Dtos.AuthDtos
         public AssignedCenterDto? ActiveCenter { get; set; }
         public bool OperationalAccess { get; set; }
         public bool CentralAuthority { get; set; }
+        public bool MustChangePassword { get; set; }
         public string? AccountMessage { get; set; }
     }
 
@@ -84,6 +85,7 @@ namespace Application.Dtos.AuthDtos
         public AssignedCenterDto? ActiveCenter { get; set; }
         public bool OperationalAccess { get; set; }
         public bool CentralAuthority { get; set; }
+        public bool MustChangePassword { get; set; }
         public string? AccountMessage { get; set; }
     }
 

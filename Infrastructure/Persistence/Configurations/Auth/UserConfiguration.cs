@@ -16,8 +16,17 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(u => u.FullName)
             .HasMaxLength(250);
 
+        builder.Property(u => u.MustChangePassword)
+            .HasDefaultValue(false)
+            .IsRequired();
+
         builder.Property(u => u.LoginLockoutTier)
             .HasDefaultValue(0)
             .IsRequired();
+
+        builder.HasIndex(u => u.NormalizedUserName)
+            .IsUnique()
+            .HasDatabaseName("IX_Users_NormalizedUserName")
+            .HasFilter("\"NormalizedUserName\" IS NOT NULL");
     }
 }

@@ -14,6 +14,7 @@ namespace Application.Mappings
             config.NewConfig<CreateUserDto, User>()
                 .Ignore(dest => dest.Id)
                 .Ignore(dest => dest.SecurityStamp)
+                .Ignore(dest => dest.MustChangePassword)
                 .Map(dest => dest.CreationDate, _ => DateTime.Now);
             config.NewConfig<UpdateUserDto, User>()
                 .Ignore(dest => dest.Id);
@@ -25,6 +26,7 @@ namespace Application.Mappings
                 .Map(dest => dest.email, src => src.Email ?? string.Empty)
                 .Map(dest => dest.phone, src => src.PhoneNumber)
                 .Map(dest => dest.isActive, src => src.IsActive)
+                .Map(dest => dest.mustChangePassword, src => src.MustChangePassword)
                 .Map(dest => dest.createdAt, src => src.CreationDate)
                 .Ignore(dest => dest.rolesCount)
                 .Ignore(dest => dest.permissionsCount)
@@ -60,6 +62,8 @@ namespace Application.Mappings
                 .Ignore(dest => dest.CenterStatus)
                 .Ignore(dest => dest.ActiveCenter)
                 .Ignore(dest => dest.OperationalAccess)
+                .Ignore(dest => dest.CentralAuthority)
+                .Ignore(dest => dest.MustChangePassword)
                 .Ignore(dest => dest.AccountMessage);
 
             // Role Mappings

@@ -184,6 +184,7 @@ namespace Application.Services.AuthServices
             me.ActiveCenter = session.ActiveCenter;
             me.OperationalAccess = session.OperationalAccess;
             me.CentralAuthority = CenterPermissionEvaluator.HasCentralAuthority(snapshot.Roles, snapshot.Directs);
+            me.MustChangePassword = session.MustChangePassword;
             me.AccountMessage = session.AccountMessage;
 
             var profile = await _files.FindTrackedProfileAsync(user.Id);
@@ -260,7 +261,9 @@ namespace Application.Services.AuthServices
             IReadOnlyList<string> permissions)
         {
             var decision = LoginCenterContext.Describe(centers, sessionCenterId);
-            var operational = LoginCenterContext.AllowsOperationalAccess(decision.Status, permissions.Count);
+            var mustChangePassword = user.MustChangePassword;
+            var operational = LoginCenterContext.AllowsOperationalAccess(
+                decision.Status, permissions.Count, mustChangePassword);
             return new LoginSessionDto
             {
                 UserId = user.Id,
@@ -274,7 +277,9 @@ namespace Application.Services.AuthServices
                 CenterStatus = decision.Status,
                 ActiveCenter = decision.ActiveCenter,
                 OperationalAccess = operational,
-                AccountMessage = LoginCenterContext.AccountMessage(decision.Status, operational)
+                MustChangePassword = mustChangePassword,
+                AccountMessage = LoginCenterContext.AccountMessage(
+                    decision.Status, operational, mustChangePassword)
             };
         }
 

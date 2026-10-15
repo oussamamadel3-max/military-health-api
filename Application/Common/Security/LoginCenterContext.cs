@@ -15,6 +15,9 @@ public static class LoginCenterContext
     public const string NoPermissionMessage =
         "لا توجد صلاحيات تشغيلية فعّالة لحسابك. يرجى مراجعة الإدارة.";
 
+    public const string MustChangePasswordMessage =
+        "يجب تغيير كلمة المرور قبل استخدام النظام.";
+
     public readonly record struct Decision(string Status, AssignedCenterDto? ActiveCenter);
 
     public static Guid? CenterIdForNewSession(IReadOnlyList<AssignedCenterDto> centers)
@@ -38,6 +41,12 @@ public static class LoginCenterContext
     public static bool AllowsOperationalAccess(string status, int effectivePermissionCount)
         => (status == Automatic || status == Active) && effectivePermissionCount > 0;
 
+    public static bool AllowsOperationalAccess(
+        string status,
+        int effectivePermissionCount,
+        bool mustChangePassword)
+        => !mustChangePassword && AllowsOperationalAccess(status, effectivePermissionCount);
+
     public static string? AccountMessage(string status, bool operationalAccess)
     {
         if (status == None)
@@ -47,5 +56,13 @@ public static class LoginCenterContext
             return NoPermissionMessage;
 
         return null;
+    }
+
+    public static string? AccountMessage(string status, bool operationalAccess, bool mustChangePassword)
+    {
+        if (mustChangePassword)
+            return MustChangePasswordMessage;
+
+        return AccountMessage(status, operationalAccess);
     }
 }

@@ -85,6 +85,9 @@ namespace Application.Services.AuthServices
                 new Claim(JwtRegisteredClaimNames.Iat, new DateTimeOffset(now).ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64),
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
                 new Claim("security_stamp", user.SecurityStamp ?? Guid.NewGuid().ToString()),
+                new Claim(
+                    MustChangePasswordClaims.ClaimType,
+                    user.MustChangePassword ? MustChangePasswordClaims.RequiredValue : "false"),
                 new Claim(SessionFamilyGate.ClaimType, sessionFamilyId.ToString()),
                 new Claim(CenterClaimTypes.Scope, activeCenterId.HasValue ? CenterClaimTypes.Center : CenterClaimTypes.Central)
             };

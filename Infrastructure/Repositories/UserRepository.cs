@@ -25,6 +25,51 @@ public class UserRepository : IUserRepository
     public IQueryable<User> QueryUsers(bool asNoTracking = true)
         => asNoTracking ? _context.Users.AsNoTracking() : _context.Users;
 
+    public IQueryable<User> QueryUsersManageableByLocalActor(string actorUserId, bool asNoTracking = true)
+    {
+        var users = asNoTracking ? _context.Users.AsNoTracking() : _context.Users;
+        var actorCenterIds = _context.UserCenters.AsNoTracking()
+            .Where(uc => uc.UserId == actorUserId && uc.IsActive && uc.Center.IsActive)
+            .Select(uc => uc.CenterId);
+
+        return users.Where(u =>
+            _context.UserCenters.Any(uc =>
+                uc.UserId == u.Id
+                && uc.IsActive
+                && uc.Center.IsActive
+                && actorCenterIds.Contains(uc.CenterId))
+            && !_context.UserRoleAssociations.Any(a =>
+                a.UserId == u.Id && a.IsActive && a.CenterId == null && a.Role.IsActive)
+            && !_context.UserPermissions.Any(p =>
+                p.UserId == u.Id
+                && p.IsActive
+                && p.CenterId == null
+                && p.Permission != null
+                && p.Permission.IsActive));
+    }
+
+    public async Task<bool> SharesActiveCenterAsync(
+        string actorUserId,
+        string targetUserId,
+        CancellationToken cancellationToken = default)
+    {
+        var actorCenterIds = await _context.UserCenters.AsNoTracking()
+            .Where(uc => uc.UserId == actorUserId && uc.IsActive && uc.Center.IsActive)
+            .Select(uc => uc.CenterId)
+            .ToListAsync(cancellationToken);
+
+        if (actorCenterIds.Count == 0)
+            return false;
+
+        return await _context.UserCenters.AsNoTracking()
+            .AnyAsync(
+                uc => uc.UserId == targetUserId
+                    && uc.IsActive
+                    && uc.Center.IsActive
+                    && actorCenterIds.Contains(uc.CenterId),
+                cancellationToken);
+    }
+
     public IQueryable<UserRoleAssociation> QueryRoleAssociations(bool asNoTracking = true)
         => asNoTracking ? _context.UserRoleAssociations.AsNoTracking() : _context.UserRoleAssociations;
 

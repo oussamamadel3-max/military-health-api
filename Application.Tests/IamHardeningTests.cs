@@ -49,9 +49,23 @@ public class IamHardeningTests
         uow.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
         var gate = new Mock<IPermissionGate>();
 
+        var access = new Mock<IAccessContextRepository>();
+        access.Setup(a => a.LoadAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AccessSnapshot
+            {
+                Roles =
+                {
+                    new CenterPermissionEvaluator.RoleAssignment(
+                        "role-central", "SuperAdmin", null, true, true)
+                }
+            });
+
+        var actor = new TestCurrentUser();
+        actor.SetUser("actor-1", "admin", "127.0.0.1");
+
         var service = new UserService(
-            manager.Object, null!, users.Object, roles.Object, null!, null!, tokens.Object, uow.Object,
-            gate.Object, null!, new TestCurrentUser(), null!, null!);
+            manager.Object, null!, users.Object, roles.Object, null!, null!, tokens.Object, access.Object, uow.Object,
+            gate.Object, null!, actor, null!, null!);
 
         await service.Delete(user.Id);
 

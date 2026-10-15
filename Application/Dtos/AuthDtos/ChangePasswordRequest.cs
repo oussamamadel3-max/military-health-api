@@ -32,4 +32,8 @@ public class AdminChangePasswordRequest
         ErrorMessage = "كلمة المرور الجديدة يجب أن تكون بين 8 و128 محرفاً.")]
     [RegularExpression(PasswordPolicy.ComplexityPattern, ErrorMessage = PasswordPolicy.ComplexityErrorMessage)]
     public string NewPassword { get; set; } = string.Empty;
+
+    [Required(ErrorMessage = "تأكيد كلمة المرور مطلوب.")]
+    [Compare(nameof(NewPassword), ErrorMessage = PasswordPolicy.ConfirmationMismatchMessage)]
+    public string ConfirmPassword { get; set; } = string.Empty;
 }
