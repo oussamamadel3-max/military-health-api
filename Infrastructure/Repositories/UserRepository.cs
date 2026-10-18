@@ -76,6 +76,27 @@ public class UserRepository : IUserRepository
     public IQueryable<UserPermission> QueryUserPermissions(bool asNoTracking = true)
         => asNoTracking ? _context.UserPermissions.AsNoTracking() : _context.UserPermissions;
 
+    public IQueryable<UserCenter> QueryUserCenters(bool asNoTracking = true)
+        => asNoTracking ? _context.UserCenters.AsNoTracking() : _context.UserCenters;
+
+    public void AddUserCenters(IEnumerable<UserCenter> centers)
+    {
+        foreach (var incoming in centers)
+        {
+            var existing = _context.UserCenters
+                .FirstOrDefault(x => x.UserId == incoming.UserId && x.CenterId == incoming.CenterId);
+            if (existing is { IsActive: true })
+                continue;
+            if (existing != null)
+            {
+                IamRetention.Reactivate(existing, incoming.AssignedByUserId, incoming.AssignedAt);
+                continue;
+            }
+
+            _context.UserCenters.Add(incoming);
+        }
+    }
+
     public async Task<Dictionary<string, string>> GetDisplayNamesByIdsAsync(IEnumerable<string> userIds, CancellationToken cancellationToken = default)
     {
         var ids = userIds.Distinct().ToList();

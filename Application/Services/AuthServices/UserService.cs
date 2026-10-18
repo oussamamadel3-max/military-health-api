@@ -1100,7 +1100,16 @@ public class UserService : IUserService
 
         private async Task SyncRoleDerivedPermissionsAsync(string userId)
     {
-        var finalRoleIds = await _userRepository.GetActiveRoleIdsAsync(userId);
+        // الأدوار المقيدة بمركز تُحسب عبر CenterPermissionEvaluator ولا تُنسخ كصلاحيات مباشرة مركزية.
+        var finalRoleIds = await _userRepository.QueryRoleAssociations()
+            .Where(ura => ura.UserId == userId
+                && ura.IsActive
+                && ura.CenterId == null
+                && ura.Role != null
+                && ura.Role.IsActive)
+            .Select(ura => ura.RoleId)
+            .Distinct()
+            .ToListAsync();
 
         var finalRolePermissionIds = await _roleRepository.GetActivePermissionIdsForRolesAsync(finalRoleIds);
 

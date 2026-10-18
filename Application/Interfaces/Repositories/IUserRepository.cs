@@ -14,6 +14,8 @@ public interface IUserRepository
     Task<bool> SharesActiveCenterAsync(string actorUserId, string targetUserId, CancellationToken cancellationToken = default);
     IQueryable<UserRoleAssociation> QueryRoleAssociations(bool asNoTracking = true);
     IQueryable<UserPermission> QueryUserPermissions(bool asNoTracking = true);
+    IQueryable<UserCenter> QueryUserCenters(bool asNoTracking = true);
+    void AddUserCenters(IEnumerable<UserCenter> centers);
     Task<Dictionary<string, string>> GetDisplayNamesByIdsAsync(IEnumerable<string> userIds, CancellationToken cancellationToken = default);
     Task<List<UserRoleAssociation>> GetRoleAssociationsAsync(string userId, bool asNoTracking = false, CancellationToken cancellationToken = default);
     Task<List<string>> GetActiveRoleNamesAsync(string userId, CancellationToken cancellationToken = default);
