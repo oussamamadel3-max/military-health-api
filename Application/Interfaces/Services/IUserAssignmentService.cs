@@ -9,4 +9,5 @@ public interface IUserAssignmentService
     Task RevokeCenterAsync(RevokeUserCenterDto dto, CancellationToken cancellationToken = default);
     Task<UserRoleAssignmentDto> AssignRoleAsync(AssignUserRoleDto dto, CancellationToken cancellationToken = default);
     Task RevokeRoleAsync(RevokeUserRoleDto dto, CancellationToken cancellationToken = default);
+    Task<List<DropdownRoleDto>> GetAssignableRolesAsync(CancellationToken cancellationToken = default);
 }

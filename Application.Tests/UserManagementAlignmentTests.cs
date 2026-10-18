@@ -281,7 +281,9 @@ public class UserManagementAlignmentTests
             null!,
             actor,
             null!,
-            null!);
+            null!,
+            null!,
+            new TestCenter(null, true));
 
         return new AdminHarness(service, manager, gate, target, refreshToken);
     }

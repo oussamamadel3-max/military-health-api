@@ -23,6 +23,7 @@ public class UserAssignmentService : IUserAssignmentService
     private readonly IUnitOfWork _unitOfWork;
     private readonly IPermissionGate _permissionGate;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ICurrentCenterService _currentCenter;
 
     public UserAssignmentService(
         UserManager<User> userManager,
@@ -33,7 +34,8 @@ public class UserAssignmentService : IUserAssignmentService
         IRefreshTokenRepository refreshTokenRepository,
         IUnitOfWork unitOfWork,
         IPermissionGate permissionGate,
-        ICurrentUserService currentUserService)
+        ICurrentUserService currentUserService,
+        ICurrentCenterService currentCenter)
     {
         _userManager = userManager;
         _userRepository = userRepository;
@@ -44,6 +46,7 @@ public class UserAssignmentService : IUserAssignmentService
         _unitOfWork = unitOfWork;
         _permissionGate = permissionGate;
         _currentUserService = currentUserService;
+        _currentCenter = currentCenter;
     }
 
     public async Task<UserAssignmentsDto> GetAssignmentsAsync(
@@ -223,34 +226,37 @@ public class UserAssignmentService : IUserAssignmentService
         var actorId = AssignmentStamp.RequireActor(_currentUserService.UserId);
 
         await EnsureCanManageTargetAsync(user.Id, cancellationToken);
-        await UserManagementScopeGuard.EnsureCanAssignRoleScopeAsync(
-            _access, actorId, dto.CenterId, cancellationToken);
-
-        if (dto.CenterId is Guid centerId)
-        {
-            if (centerId == Guid.Empty)
-                throw new InvalidUserDataException("معرف المركز غير صالح.");
-
-            var center = await _centers.GetByIdAsync(centerId, asNoTracking: true, cancellationToken);
-            MedicalCenterActivityGuard.EnsureAcceptsNewRelations(center);
-
-            if (!await _access.IsActivelyAssignedAsync(user.Id, centerId, cancellationToken))
-                throw new InvalidUserDataException(
-                    "لا يمكن إسناد دور مقيد بمركز دون وجود إسناد فعّال للمستخدم إلى ذلك المركز.");
-        }
 
         var role = await _roleRepository.QueryRoles()
             .FirstOrDefaultAsync(r => r.Id == dto.RoleId, cancellationToken)
             ?? throw new RoleNotFoundException("الدور غير موجود.");
 
-        if (!role.IsActive)
-            throw new InvalidUserDataException("لا يمكن إسناد دور معطّل.");
+        var actorIsCentral = await UserManagementScopeGuard.ActorHasUnrestrictedScopeAsync(
+            _access, actorId, cancellationToken);
+        AssignableRolePolicy.EnsureAssignable(actorIsCentral, role.Name, role.IsActive);
 
-        var rolePermNames = (await _roleRepository.GetRolePermissionsForRolesAsync(new[] { role.Id }, cancellationToken))
-            .Select(rp => rp.Permission?.Name)
-            .Where(n => !string.IsNullOrWhiteSpace(n))
-            .Select(n => n!);
-        IamAdminGuard.EnsureAssignableWithinActorPermissions(rolePermNames, _permissionGate.GetPermissions());
+        var scopeCenterId = AssignableRolePolicy.ResolveSyncScope(
+            actorIsCentral,
+            [role.Name!],
+            dto.CenterId,
+            _currentCenter.CenterId,
+            _currentCenter.IsCentralContext);
+
+        if (scopeCenterId is Guid centerId)
+        {
+            var center = await _centers.GetByIdAsync(centerId, asNoTracking: true, cancellationToken);
+            MedicalCenterActivityGuard.EnsureAcceptsNewRelations(center);
+        }
+
+        await UserManagementScopeGuard.EnsureCanAssignRoleScopeAsync(
+            _access, actorId, scopeCenterId, cancellationToken);
+
+        if (scopeCenterId is Guid assignedCenterId &&
+            !await _access.IsActivelyAssignedAsync(user.Id, assignedCenterId, cancellationToken))
+        {
+            throw new InvalidUserDataException(
+                "لا يمكن إسناد دور مقيد بمركز دون وجود إسناد فعّال للمستخدم إلى ذلك المركز.");
+        }
 
         using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
         try
@@ -259,7 +265,7 @@ public class UserAssignmentService : IUserAssignmentService
                 .FirstOrDefaultAsync(
                     ura => ura.UserId == user.Id
                         && ura.RoleId == role.Id
-                        && ura.CenterId == dto.CenterId
+                        && ura.CenterId == scopeCenterId
                         && ura.IsActive,
                     cancellationToken);
 
@@ -280,7 +286,7 @@ public class UserAssignmentService : IUserAssignmentService
                     Id = Guid.NewGuid(),
                     UserId = user.Id,
                     RoleId = role.Id,
-                    CenterId = dto.CenterId,
+                    CenterId = scopeCenterId,
                     IsActive = true,
                     AssignedByUserId = actorId,
                     AssignedAt = assignedAt
@@ -308,7 +314,7 @@ public class UserAssignmentService : IUserAssignmentService
                 .FirstAsync(
                     ura => ura.UserId == user.Id
                         && ura.RoleId == role.Id
-                        && ura.CenterId == dto.CenterId
+                        && ura.CenterId == scopeCenterId
                         && ura.IsActive,
                     cancellationToken);
             return ToRoleDto(saved);
@@ -320,7 +326,7 @@ public class UserAssignmentService : IUserAssignmentService
                 .AnyAsync(
                     ura => ura.UserId == user.Id
                         && ura.RoleId == role.Id
-                        && ura.CenterId == dto.CenterId
+                        && ura.CenterId == scopeCenterId
                         && ura.IsActive,
                     cancellationToken);
             if (raced)
@@ -348,8 +354,28 @@ public class UserAssignmentService : IUserAssignmentService
         var actorId = AssignmentStamp.RequireActor(_currentUserService.UserId);
 
         await EnsureCanManageTargetAsync(user.Id, cancellationToken);
+
+        var role = await _roleRepository.QueryRoles()
+            .FirstOrDefaultAsync(r => r.Id == dto.RoleId, cancellationToken)
+            ?? throw new RoleNotFoundException("الدور غير موجود.");
+
+        var actorIsCentral = await UserManagementScopeGuard.ActorHasUnrestrictedScopeAsync(
+            _access, actorId, cancellationToken);
+        if (!actorIsCentral)
+            AssignableRolePolicy.EnsureAssignable(actorIsCentral: false, role.Name, roleIsActive: true);
+
+        var scopeCenterId = AssignableRolePolicy.ResolveRevokeScope(
+            actorIsCentral,
+            role.Name ?? string.Empty,
+            dto.CenterId,
+            _currentCenter.CenterId,
+            _currentCenter.IsCentralContext);
+
+        if (!AssignableRolePolicy.MayRevoke(actorIsCentral, role.Name, scopeCenterId))
+            throw new ForbiddenPermissionException("لا يمكنك إلغاء هذا الدور ضمن حدود تفويضك.");
+
         await UserManagementScopeGuard.EnsureCanAssignRoleScopeAsync(
-            _access, actorId, dto.CenterId, cancellationToken);
+            _access, actorId, scopeCenterId, cancellationToken);
 
         using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
         try
@@ -358,7 +384,7 @@ public class UserAssignmentService : IUserAssignmentService
                 .FirstOrDefaultAsync(
                     ura => ura.UserId == user.Id
                         && ura.RoleId == dto.RoleId
-                        && ura.CenterId == dto.CenterId
+                        && ura.CenterId == scopeCenterId
                         && ura.IsActive,
                     cancellationToken)
                 ?? throw new InvalidUserDataException("لا يوجد إسناد دور فعّال مطابق.");
@@ -381,6 +407,31 @@ public class UserAssignmentService : IUserAssignmentService
             await tx.RollbackAsync(cancellationToken);
             throw;
         }
+    }
+
+    public async Task<List<DropdownRoleDto>> GetAssignableRolesAsync(CancellationToken cancellationToken = default)
+    {
+        _permissionGate.EnsureAll(SystemPermissions.UserManagement.AssignRoles);
+
+        var actorId = _currentUserService.UserId ?? string.Empty;
+        var actorIsCentral = await UserManagementScopeGuard.ActorHasUnrestrictedScopeAsync(
+            _access, actorId, cancellationToken);
+
+        var query = _roleRepository.QueryRoles().Where(r => r.IsActive);
+        if (!actorIsCentral)
+        {
+            var allowed = AssignableRolePolicy.LocalOperationalRoleNames.ToArray();
+            query = query.Where(r => r.Name != null && allowed.Contains(r.Name));
+        }
+
+        return await query
+            .OrderBy(r => r.Name)
+            .Select(r => new DropdownRoleDto
+            {
+                roleId = r.Id,
+                name = r.Name ?? string.Empty
+            })
+            .ToListAsync(cancellationToken);
     }
 
     private async Task<User> RequireUserAsync(string userId)

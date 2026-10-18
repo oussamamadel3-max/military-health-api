@@ -15,6 +15,11 @@ public class AssignRolesDto
     public List<string> RoleIds { get; set; } = new List<string>();
 
     public List<string>? RoleNames { get; set; } = new List<string>();
+
+    /// <summary>
+    /// نطاق المزامنة. لمدير المركز يجب أن يطابق المركز النشط أو يُترك فارغاً.
+    /// </summary>
+    public Guid? CenterId { get; set; }
 }
 
 public class RemoveRoleDto

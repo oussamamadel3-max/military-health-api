@@ -63,6 +63,11 @@ public class UpdateUserPatchRequest
     public string? phone { get; set; }
     public bool? isActive { get; set; }
     public List<RoleLiteDto>? roles { get; set; }
+
+    /// <summary>
+    /// نطاق مزامنة الأدوار. لمدير المركز يجب أن يطابق المركز النشط أو يُترك فارغاً.
+    /// </summary>
+    public Guid? centerId { get; set; }
 }
 public class UpdateUserStatusRequest
 {
@@ -104,6 +109,11 @@ public class CreateUserDto
     /// <summary>افتراضي true: إلزام تغيير كلمة المرور عند أول دخول.</summary>
     public bool forcePasswordChange { get; set; } = true;
 
+    /// <summary>
+    /// مركز الإسناد. لمدير المركز يُؤخذ المركز النشط إن تُرك فارغاً، ويُرفض إن اختلف عنه.
+    /// </summary>
+    public Guid? centerId { get; set; }
+
     [Required(ErrorMessage = "يجب اختيار دور واحد على الأقل.")]
     [MinLength(1, ErrorMessage = "يجب اختيار دور واحد على الأقل.")]
     public List<string> roles { get; set; } = new();
@@ -118,6 +128,7 @@ public class CreatedUserResponseDto
     public string? phone { get; set; }
     public bool isActive { get; set; }
     public bool mustChangePassword { get; set; }
+    public Guid? centerId { get; set; }
     public List<string> roles { get; set; } = new();
 }
 
@@ -151,7 +162,12 @@ public class UpdateUserWithRolesDto
     [StringLength(254)]
     public required string Email { get; set; }
 
-    public List<string> RoleIds { get; set; } = new List<string>();
+    public List<string>? RoleIds { get; set; }
+
+    /// <summary>
+    /// نطاق مزامنة الأدوار. فارغ مع أدوار مركزية يعني الإسناد المركزي المقصود.
+    /// </summary>
+    public Guid? CenterId { get; set; }
 }
 
 

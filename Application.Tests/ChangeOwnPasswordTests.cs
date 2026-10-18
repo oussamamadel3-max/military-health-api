@@ -238,7 +238,9 @@ public class ChangeOwnPasswordTests
             null!,
             currentUser,
             null!,
-            null!);
+            null!,
+            null!,
+            new TestCenter(null, true));
 
         return new Harness(service, manager, tokens, uow, user, refreshToken);
     }

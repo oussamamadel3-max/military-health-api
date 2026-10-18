@@ -12,6 +12,7 @@ using Domain.Entities.Auth;
 using PasswordPolicyRules = Application.Common.PasswordPolicy;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using MapsterMapper;
 
 namespace Application.Services.AuthServices;
@@ -32,6 +33,8 @@ public class UserService : IUserService
     private readonly ICurrentUserService _currentUserService;
     private readonly ITextInputSanitizer _textSanitizer;
     private readonly IMapper _mapper;
+    private readonly IMedicalCenterRepository _centers;
+    private readonly ICurrentCenterService _currentCenter;
 
     public UserService(
         UserManager<User> userManager,
@@ -47,7 +50,9 @@ public class UserService : IUserService
         JwtSettings jwtSettings,
         ICurrentUserService currentUserService,
         ITextInputSanitizer textSanitizer,
-        IMapper mapper)
+        IMapper mapper,
+        IMedicalCenterRepository centers,
+        ICurrentCenterService currentCenter)
     {
         _userManager = userManager;
         _roleManager = roleManager;
@@ -63,6 +68,8 @@ public class UserService : IUserService
         _currentUserService = currentUserService;
         _textSanitizer = textSanitizer;
         _mapper = mapper;
+        _centers = centers;
+        _currentCenter = currentCenter;
     }
 
     #region الانشاء 
@@ -86,32 +93,29 @@ public class UserService : IUserService
         if (await _userManager.FindByEmailAsync(createdUser.email) is not null)
             throw new EmailAlreadyExistsException(createdUser.email);
 
-        // جلب الأدوار الفعالة — الدور إجباري عند الإنشاء
         var rawRoles = (createdUser.roles ?? Enumerable.Empty<string>())
                           .Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim())
                           .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (rawRoles.Count == 0)
             throw new InvalidUserDataException("يجب اختيار دور واحد على الأقل.");
 
-        var rolesFromDb = await _roleRepository.ResolveActiveRolesAsync(rawRoles);
-
-        var foundUpper = rolesFromDb
-            .SelectMany(r => new[] { (r.Id ?? "").ToUpperInvariant(), (r.Name ?? "").ToUpperInvariant() })
-            .ToHashSet();
-        var missing = rawRoles.Where(x => !foundUpper.Contains(x.ToUpperInvariant())).ToList();
-        if (missing.Any())
-            throw new InvalidUserDataException($"أدوار غير موجودة أو غير نشطة: {string.Join(", ", missing)}");
-
         _permissionGate.EnsureAll(
             SystemPermissions.UserManagement.Create,
-            SystemPermissions.UserManagement.AssignRoles);
+            SystemPermissions.UserManagement.AssignRoles,
+            MilitaryHealthPermissions.UserCenters.Manage);
 
-        var roleIds = rolesFromDb.Select(r => r.Id).ToList();
-        var rolePermissionNames = (await _roleRepository.GetRolePermissionsForRolesAsync(roleIds))
-            .Select(rp => rp.Permission?.Name)
-            .Where(n => !string.IsNullOrWhiteSpace(n))
-            .Select(n => n!);
-        IamAdminGuard.EnsureAssignableWithinActorPermissions(rolePermissionNames, _permissionGate.GetPermissions());
+        var actorId = AssignmentStamp.RequireActor(_currentUserService.UserId);
+        var actorIsCentral = await UserManagementScopeGuard.ActorHasUnrestrictedScopeAsync(_access, actorId);
+        var rolesFromDb = await LoadRequestedRolesAsync(rawRoles);
+        foreach (var role in rolesFromDb)
+            AssignableRolePolicy.EnsureAssignable(actorIsCentral, role.Name, role.IsActive);
+
+        var roleNames = rolesFromDb.Select(r => r.Name!).ToList();
+        if (roleNames.Any(AssignableRolePolicy.IsCentralScopeRole) &&
+            roleNames.Any(name => !AssignableRolePolicy.IsCentralScopeRole(name)))
+            throw new InvalidUserDataException("لا يمكن الجمع بين دور مركزي ودور مقيد بمركز في الطلب نفسه.");
+
+        var membershipCenterId = await ResolveMembershipCenterAsync(actorIsCentral, createdUser.centerId, actorId);
 
         using var tx = await _unitOfWork.BeginTransactionAsync();
         try
@@ -136,19 +140,27 @@ public class UserService : IUserService
                 throw new InvalidUserDataException(string.Join(", ", createErrors));
             }
 
-            var associations = rolesFromDb.Select(r => NewRoleLink(user.Id, r.Id)).ToList();
+            var assignedAt = DateTimeOffset.UtcNow;
+            _userRepository.AddUserCenters(new[]
+            {
+                new UserCenter
+                {
+                    UserId = user.Id,
+                    CenterId = membershipCenterId,
+                    IsActive = true,
+                    AssignedByUserId = actorId,
+                    AssignedAt = assignedAt
+                }
+            });
+
+            var associations = rolesFromDb.Select(role =>
+            {
+                var roleCenterId = AssignableRolePolicy.IsCentralScopeRole(role.Name)
+                    ? (Guid?)null
+                    : membershipCenterId;
+                return NewRoleLink(user.Id, role.Id, roleCenterId);
+            }).ToList();
             _userRepository.AddRoleAssociations(associations);
-
-            var rolePermissions = await _roleRepository.GetActivePermissionIdsForRolesAsync(roleIds);
-
-            var existingUserPermissions = await _userRepository.GetDirectPermissionIdsAsync(user.Id);
-
-            var newPermissions = rolePermissions
-                .Where(p => !existingUserPermissions.Contains(p))
-                .Select(p => NewPermissionLink(user.Id, p))
-                .ToList();
-
-            if (newPermissions.Any()) _userRepository.AddUserPermissions(newPermissions);
 
             await _unitOfWork.SaveChangesAsync();
             await tx.CommitAsync();
@@ -161,6 +173,7 @@ public class UserService : IUserService
                 phone = createdUser.phone,
                 isActive = createdUser.isActive,
                 mustChangePassword = user.MustChangePassword,
+                centerId = membershipCenterId,
                 roles = createdUser.roles?.ToList() ?? new List<string>()
             };
         }
@@ -444,47 +457,12 @@ public class UserService : IUserService
                 _userRepository, _roleRepository, user.Id);
         }
 
-        List<string>? finalRoleIdsForEscalation = null;
+        IDbContextTransaction? roleTx = null;
         if (rolesProvided)
+            roleTx = await _unitOfWork.BeginTransactionAsync();
+
+        try
         {
-            var requested = (dto.roles ?? new()).Where(r => r is not null).ToList();
-            var incomingIds = requested
-                .Where(r => !string.IsNullOrWhiteSpace(r.RoleId))
-                .Select(r => r.RoleId!)
-                .ToList();
-            var incomingNames = requested
-                .Where(r => string.IsNullOrWhiteSpace(r.RoleId) && !string.IsNullOrWhiteSpace(r.RoleName))
-                .Select(r => r.RoleName!.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            var rolesByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            if (incomingNames.Any())
-            {
-                var foundByName = await _roleRepository.QueryRoles()
-                    .Where(r => r.Name != null && incomingNames.Contains(r.Name))
-                    .Select(r => new { r.Id, r.Name })
-                    .ToListAsync();
-                rolesByName = foundByName
-                    .Where(x => !string.IsNullOrWhiteSpace(x.Name))
-                    .ToDictionary(x => x.Name!, x => x.Id, StringComparer.OrdinalIgnoreCase);
-                var missingByName = incomingNames.Where(n => !rolesByName.ContainsKey(n)).ToList();
-                if (missingByName.Any())
-                    throw new InvalidUserDataException($"بعض الأدوار غير موجودة: {string.Join(", ", missingByName)}");
-            }
-
-            finalRoleIdsForEscalation = new HashSet<string>(incomingIds, StringComparer.OrdinalIgnoreCase)
-                .Concat(rolesByName.Values)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            var rolePermNames = (await _roleRepository.GetRolePermissionsForRolesAsync(finalRoleIdsForEscalation))
-                .Select(rp => rp.Permission?.Name)
-                .Where(n => !string.IsNullOrWhiteSpace(n))
-                .Select(n => n!);
-            IamAdminGuard.EnsureAssignableWithinActorPermissions(rolePermNames, _permissionGate.GetPermissions());
-        }
-
         if (!string.IsNullOrWhiteSpace(dto.username) &&
             !string.Equals(dto.username, user.UserName, StringComparison.OrdinalIgnoreCase))
         {
@@ -531,30 +509,16 @@ public class UserService : IUserService
                 _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id);
         }
 
-        if (rolesProvided && finalRoleIdsForEscalation != null)
+        if (rolesProvided)
         {
-            var current = (await _userRepository.GetRoleAssociationsAsync(user.Id))
-                .Where(c => c.IsActive)
+            var requestedTokens = (dto.roles ?? new())
+                .Where(r => r is not null)
+                .Select(r => !string.IsNullOrWhiteSpace(r.RoleId) ? r.RoleId! : r.RoleName)
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Select(s => s!)
                 .ToList();
-            var currentIds = new HashSet<string>(current.Select(c => c.RoleId), StringComparer.OrdinalIgnoreCase);
-            var finalIncomingIds = finalRoleIdsForEscalation.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            var toAdd = finalIncomingIds.Except(currentIds, StringComparer.OrdinalIgnoreCase).ToList();
-            var toRemove = currentIds.Except(finalIncomingIds, StringComparer.OrdinalIgnoreCase).ToList();
-
-            if (toRemove.Any())
-            {
-                var removeRows = current.Where(c => toRemove.Contains(c.RoleId, StringComparer.OrdinalIgnoreCase)).ToList();
-                RevokeRoleAssignments(removeRows);
-            }
-
-            if (toAdd.Any())
-            {
-                var addRows = toAdd.Select(rid => NewRoleLink(user.Id, rid));
-                _userRepository.AddRoleAssociations(addRows);
-            }
-
-            await _unitOfWork.SaveChangesAsync();
+            await ApplyScopedRoleSyncAsync(user.Id, requestedTokens, dto.centerId);
 
             var afterPerms = await IamAdminGuard.GetEffectivePermissionNamesAsync(
                 _userRepository, _roleRepository, user.Id);
@@ -594,7 +558,23 @@ public class UserService : IUserService
         updated.rolesCount = rolesLite.Count;
         updated.permissionsCount = permissionsLite2.Count;
         updated.Permissions = permissionsLite2;
+
+        if (roleTx is not null)
+            await roleTx.CommitAsync();
+
         return updated;
+        }
+        catch
+        {
+            if (roleTx is not null)
+                await roleTx.RollbackAsync();
+            throw;
+        }
+        finally
+        {
+            if (roleTx is not null)
+                await roleTx.DisposeAsync();
+        }
     }
 
     #endregion
@@ -750,75 +730,16 @@ public class UserService : IUserService
 
         await EnsureCanManageTargetAsync(user.Id);
 
-        var incomingIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
+        var requested = new List<string>();
         if (dto.RoleIds is { Count: > 0 })
-            foreach (var rid in dto.RoleIds.Where(x => !string.IsNullOrWhiteSpace(x)))
-                incomingIds.Add(rid);
-
+            requested.AddRange(dto.RoleIds.Where(x => !string.IsNullOrWhiteSpace(x)));
         if (dto.RoleNames is { Count: > 0 })
-        {
-            var names = dto.RoleNames!
-                .Where(n => !string.IsNullOrWhiteSpace(n))
-                .Select(n => n.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (names.Count > 0)
-            {
-                var found = await _roleRepository.QueryRoles()
-                    .Where(r => r.Name != null && names.Contains(r.Name))
-                    .Select(r => new { r.Id, r.Name, r.IsActive })
-                    .ToListAsync();
-
-                var missing = names.Where(n => !found.Any(f => string.Equals(f.Name, n, StringComparison.OrdinalIgnoreCase))).ToList();
-                if (missing.Any())
-                    throw new InvalidUserDataException($"أدوار غير موجودة: {string.Join(", ", missing)}");
-
-                foreach (var f in found) incomingIds.Add(f.Id);
-            }
-        }
-
-        var activeIncomingIds = await _roleRepository.GetActiveRoleIdsAsync(incomingIds);
-
-        var rolePermNames = (await _roleRepository.GetRolePermissionsForRolesAsync(activeIncomingIds))
-            .Select(rp => rp.Permission?.Name)
-            .Where(n => !string.IsNullOrWhiteSpace(n))
-            .Select(n => n!);
-        IamAdminGuard.EnsureAssignableWithinActorPermissions(rolePermNames, _permissionGate.GetPermissions());
-
-        var currentRoleIds = await _userRepository.GetActiveRoleIdsAsync(user.Id);
-
-        var currentSet = new HashSet<string>(currentRoleIds, StringComparer.OrdinalIgnoreCase);
-        var finalSet = new HashSet<string>(activeIncomingIds, StringComparer.OrdinalIgnoreCase);
-
-        var toAdd = finalSet.Except(currentSet, StringComparer.OrdinalIgnoreCase).ToList();
-        var toRemove = currentSet.Except(finalSet, StringComparer.OrdinalIgnoreCase).ToList();
-
-        if (toAdd.Count == 0 && toRemove.Count == 0)
-            return;
+            requested.AddRange(dto.RoleNames.Where(n => !string.IsNullOrWhiteSpace(n))!);
 
         using var tx = await _unitOfWork.BeginTransactionAsync();
         try
         {
-            if (toRemove.Any())
-            {
-                var removeRows = await _userRepository.QueryRoleAssociations(asNoTracking: false)
-                    .Where(ura => ura.UserId == user.Id && ura.IsActive && toRemove.Contains(ura.RoleId))
-                    .ToListAsync();
-
-                RevokeRoleAssignments(removeRows);
-                await _unitOfWork.SaveChangesAsync();
-            }
-
-            if (toAdd.Any())
-            {
-                var addRows = toAdd.Select(rid => NewRoleLink(user.Id, rid));
-                _userRepository.AddRoleAssociations(addRows);
-                await _unitOfWork.SaveChangesAsync();
-            }
-
-            await SyncRoleDerivedPermissionsAsync(user.Id);
+            await ApplyScopedRoleSyncAsync(user.Id, requested, dto.CenterId);
 
             var afterPerms = await IamAdminGuard.GetEffectivePermissionNamesAsync(
                 _userRepository, _roleRepository, user.Id);
@@ -959,16 +880,6 @@ public class UserService : IUserService
 
         await EnsureCanManageTargetAsync(user.Id);
 
-        var roleIds = (updatedUser.RoleIds ?? new List<string>())
-            .Where(x => !string.IsNullOrWhiteSpace(x))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        var rolePermNames = (await _roleRepository.GetRolePermissionsForRolesAsync(roleIds))
-            .Select(rp => rp.Permission?.Name)
-            .Where(n => !string.IsNullOrWhiteSpace(n))
-            .Select(n => n!);
-        IamAdminGuard.EnsureAssignableWithinActorPermissions(rolePermNames, _permissionGate.GetPermissions());
-
         using var transaction = await _unitOfWork.BeginTransactionAsync();
         try
         {
@@ -983,38 +894,10 @@ public class UserService : IUserService
             if (!updateRes.Succeeded)
                 throw new InvalidUserDataException(string.Join(", ", updateRes.Errors.Select(e => e.Description)));
 
-            if (updatedUser.RoleIds?.Any() == true)
-            {
-                var foundRoleIds = await _roleRepository.GetActiveRoleIdsAsync(updatedUser.RoleIds);
-                var notFound = updatedUser.RoleIds.Except(foundRoleIds).ToList();
-
-                if (notFound.Any())
-                    throw new InvalidUserDataException($"الأدوار التالية غير موجودة: {string.Join(", ", notFound)}");
-
-                var currentRoleIds = await _userRepository.GetActiveRoleIdsAsync(userId);
-
-                var rolesToAdd = foundRoleIds.Except(currentRoleIds).ToList();
-                var rolesToRemove = currentRoleIds.Except(foundRoleIds).ToList();
-
-                if (rolesToAdd.Any())
-                {
-                    var newAssociations = rolesToAdd.Select(rid => NewRoleLink(userId, rid)).ToList();
-
-                    _userRepository.AddRoleAssociations(newAssociations);
-                }
-
-                if (rolesToRemove.Any())
-                {
-                    var toRemove = await _userRepository.QueryRoleAssociations(asNoTracking: false)
-                        .Where(ura => ura.UserId == userId && ura.IsActive && rolesToRemove.Contains(ura.RoleId))
-                        .ToListAsync();
-
-                    RevokeRoleAssignments(toRemove);
-                }
-            }
+            if (updatedUser.RoleIds is not null)
+                await ApplyScopedRoleSyncAsync(userId, updatedUser.RoleIds, updatedUser.CenterId);
 
             await _unitOfWork.SaveChangesAsync();
-            await SyncRoleDerivedPermissionsAsync(userId);
 
             var afterPerms = await IamAdminGuard.GetEffectivePermissionNamesAsync(
                 _userRepository, _roleRepository, userId);
@@ -1078,11 +961,12 @@ public class UserService : IUserService
                 IamRetention.Revoke(row, actor, IamRetention.DirectPermissionWithdrawn);
         }
 
-        private UserRoleAssociation NewRoleLink(string userId, string roleId) => new()
+        private UserRoleAssociation NewRoleLink(string userId, string roleId, Guid? centerId) => new()
         {
             Id = Guid.NewGuid(),
             UserId = userId,
             RoleId = roleId,
+            CenterId = centerId,
             AssignedByUserId = AssignmentStamp.RequireActor(_currentUserService.UserId),
             AssignedAt = DateTimeOffset.UtcNow,
             IsActive = true
@@ -1098,59 +982,125 @@ public class UserService : IUserService
             IsActive = true
         };
 
-        private async Task SyncRoleDerivedPermissionsAsync(string userId)
-    {
-        // الأدوار المقيدة بمركز تُحسب عبر CenterPermissionEvaluator ولا تُنسخ كصلاحيات مباشرة مركزية.
-        var finalRoleIds = await _userRepository.QueryRoleAssociations()
-            .Where(ura => ura.UserId == userId
-                && ura.IsActive
-                && ura.CenterId == null
-                && ura.Role != null
-                && ura.Role.IsActive)
-            .Select(ura => ura.RoleId)
-            .Distinct()
-            .ToListAsync();
+        private async Task<Guid> ResolveMembershipCenterAsync(
+            bool actorIsCentral,
+            Guid? requestedCenterId,
+            string actorId)
+        {
+            Guid centerId;
+            if (!actorIsCentral)
+            {
+                if (_currentCenter.IsCentralContext || _currentCenter.CenterId is not Guid active || active == Guid.Empty)
+                    throw new ForbiddenPermissionException("لا يوجد مركز نشط لإنشاء المستخدم.");
 
-        var finalRolePermissionIds = await _roleRepository.GetActivePermissionIdsForRolesAsync(finalRoleIds);
+                if (requestedCenterId is Guid requested && requested != active)
+                    throw new ForbiddenPermissionException("لا يمكنك إنشاء مستخدم في مركز خارج مركزك النشط.");
 
-        var existingUserPermissionIds = await _userRepository.GetDirectPermissionIdsAsync(userId);
+                centerId = active;
+            }
+            else
+            {
+                if (requestedCenterId is not Guid requested || requested == Guid.Empty)
+                    throw new InvalidUserDataException("يجب تحديد مركز فعّال للمستخدم.");
 
-        var toAddPerms = finalRolePermissionIds
-            .Except(existingUserPermissionIds)
-            .Select(pid => NewPermissionLink(userId, pid))
-            .ToList();
-        if (toAddPerms.Any())
-            _userRepository.AddUserPermissions(toAddPerms);
+                centerId = requested;
+            }
 
-        var stillNeededPerms = new HashSet<Guid>(finalRolePermissionIds);
-        var userPermsToRemove = await _userRepository.GetUserPermissionsAsync(userId);
-        userPermsToRemove = userPermsToRemove
-            .Where(up => up.IsActive && !stillNeededPerms.Contains(up.PermissionId))
-            .ToList();
-        if (userPermsToRemove.Any())
-            RevokeDirectPermissions(userPermsToRemove);
+            var center = await _centers.GetByIdAsync(centerId, asNoTracking: true);
+            MedicalCenterActivityGuard.EnsureAcceptsNewRelations(center);
 
-        await _unitOfWork.SaveChangesAsync();
+            if (!actorIsCentral && !await _access.IsActivelyAssignedAsync(actorId, centerId))
+                throw new ForbiddenPermissionException("لا يمكنك إنشاء مستخدم خارج نطاق تفويضك.");
 
-        var finalFieldPermIds = await _roleRepository.GetFieldPermissionIdsForRolesAsync(finalRoleIds);
+            return centerId;
+        }
 
-        var existingUserFieldPermIds = await _userRepository.GetDirectFieldPermissionIdsAsync(userId);
+        private async Task<List<Role>> LoadRequestedRolesAsync(IEnumerable<string> idsOrNames)
+        {
+            var raw = idsOrNames
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Select(s => s.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
-        var toAddFieldPerms = finalFieldPermIds
-            .Except(existingUserFieldPermIds)
-            .Select(fid => new UserFieldPermission { UserId = userId, FieldPermissionId = fid })
-            .ToList();
-        if (toAddFieldPerms.Any())
-            _userRepository.AddUserFieldPermissions(toAddFieldPerms);
+            if (raw.Count == 0)
+                return new List<Role>();
 
-        var stillNeededFieldPerms = new HashSet<Guid>(finalFieldPermIds);
-        var userFieldPermsToRemove = await _userRepository.GetUserFieldPermissionsAsync(userId);
-        userFieldPermsToRemove = userFieldPermsToRemove
-            .Where(ufp => !stillNeededFieldPerms.Contains(ufp.FieldPermissionId))
-            .ToList();
-        if (userFieldPermsToRemove.Any())
-            _userRepository.RemoveUserFieldPermissions(userFieldPermsToRemove);
+            var upper = raw.Select(s => s.ToUpperInvariant()).ToList();
+            var found = await _roleRepository.QueryRoles()
+                .Where(r =>
+                    (r.Id != null && upper.Contains(r.Id.ToUpper())) ||
+                    (r.Name != null && upper.Contains(r.Name.ToUpper())))
+                .ToListAsync();
 
-        await _unitOfWork.SaveChangesAsync();
-    }
+            var foundKeys = found
+                .SelectMany(r => new[] { r.Id, r.Name })
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => x!.ToUpperInvariant())
+                .ToHashSet();
+            var missing = raw.Where(x => !foundKeys.Contains(x.ToUpperInvariant())).ToList();
+            if (missing.Count > 0)
+                throw new InvalidUserDataException($"أدوار غير موجودة أو غير نشطة: {string.Join(", ", missing)}");
+
+            var inactive = found.Where(r => !r.IsActive).Select(r => r.Name ?? r.Id).ToList();
+            if (inactive.Count > 0)
+                throw new InvalidUserDataException($"لا يمكن إسناد دور معطّل: {string.Join(", ", inactive)}");
+
+            return found;
+        }
+
+        private async Task ApplyScopedRoleSyncAsync(
+            string userId,
+            IEnumerable<string> roleIdsOrNames,
+            Guid? requestedCenterId)
+        {
+            var actorId = AssignmentStamp.RequireActor(_currentUserService.UserId);
+            var actorIsCentral = await UserManagementScopeGuard.ActorHasUnrestrictedScopeAsync(_access, actorId);
+            var roles = await LoadRequestedRolesAsync(roleIdsOrNames);
+            foreach (var role in roles)
+                AssignableRolePolicy.EnsureAssignable(actorIsCentral, role.Name, role.IsActive);
+
+            var scopeCenterId = AssignableRolePolicy.ResolveSyncScope(
+                actorIsCentral,
+                roles.Select(r => r.Name!).ToList(),
+                requestedCenterId,
+                _currentCenter.CenterId,
+                _currentCenter.IsCentralContext);
+
+            if (roles.Count > 0 && scopeCenterId is Guid scopeId)
+            {
+                var center = await _centers.GetByIdAsync(scopeId, asNoTracking: true);
+                MedicalCenterActivityGuard.EnsureAcceptsNewRelations(center);
+            }
+
+            await UserManagementScopeGuard.EnsureCanAssignRoleScopeAsync(_access, actorId, scopeCenterId);
+
+            var desiredIds = roles.Select(r => r.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var scopeRows = await _userRepository.QueryRoleAssociations(asNoTracking: false)
+                .Include(ura => ura.Role)
+                .Where(ura => ura.UserId == userId && ura.IsActive && ura.CenterId == scopeCenterId)
+                .ToListAsync();
+
+            var toAdd = roles.Where(r => scopeRows.All(row => !string.Equals(row.RoleId, r.Id, StringComparison.OrdinalIgnoreCase))).ToList();
+            if (toAdd.Count > 0 && scopeCenterId is Guid centerId &&
+                !await _access.IsActivelyAssignedAsync(userId, centerId))
+            {
+                throw new InvalidUserDataException(
+                    "لا يمكن إسناد دور مقيد بمركز دون وجود إسناد فعّال للمستخدم إلى ذلك المركز.");
+            }
+
+            var toRemove = scopeRows
+                .Where(row => !desiredIds.Contains(row.RoleId))
+                .Where(row => AssignableRolePolicy.MayRevoke(actorIsCentral, row.Role?.Name, scopeCenterId))
+                .ToList();
+
+            if (toRemove.Count > 0)
+                RevokeRoleAssignments(toRemove);
+
+            if (toAdd.Count > 0)
+                _userRepository.AddRoleAssociations(toAdd.Select(r => NewRoleLink(userId, r.Id, scopeCenterId)));
+
+            if (toAdd.Count > 0 || toRemove.Count > 0)
+                await _unitOfWork.SaveChangesAsync();
+        }
 }

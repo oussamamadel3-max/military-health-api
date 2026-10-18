@@ -24,7 +24,10 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpPost("[action]")]
-        [AuthorizePermission(SystemPermissions.UserManagement.Create)]
+        [AuthorizePermission(
+            SystemPermissions.UserManagement.Create,
+            SystemPermissions.UserManagement.AssignRoles,
+            MilitaryHealthPermissions.UserCenters.Manage)]
         public async Task<IResult> Create([FromBody] CreateUserDto userDto)
         {
             var createdUser = await _userService.Create(userDto);
@@ -140,6 +143,14 @@ namespace API.Controllers.AuthControllers
         {
             await _userService.UpdateUserWithRolesAsync(id, dto);
             return ApiResponse.Success("تم تحديث المستخدم والأدوار بنجاح.");
+        }
+
+        [HttpGet("[action]")]
+        [AuthorizePermission(SystemPermissions.UserManagement.AssignRoles)]
+        public async Task<IResult> AssignableRoles(CancellationToken cancellationToken)
+        {
+            var roles = await _userAssignments.GetAssignableRolesAsync(cancellationToken);
+            return ApiResponse.Success("تم جلب الأدوار القابلة للإسناد.", roles);
         }
 
         [HttpGet("[action]")]

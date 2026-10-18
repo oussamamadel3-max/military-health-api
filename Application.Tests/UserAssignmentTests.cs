@@ -147,7 +147,7 @@ public class UserAssignmentTests
     }
 
     [Fact]
-    public async Task Local_manager_cannot_assign_central_role()
+    public async Task Local_manager_null_center_binds_to_active_center()
     {
         await using var db = CreateDb();
         await SeedCenterAsync(db, CenterA, "CA", "مركز أ");
@@ -156,8 +156,38 @@ public class UserAssignmentTests
         await SeedUserCenterAsync(db, "actor-1", CenterA);
         await SeedUserCenterAsync(db, "target-1", CenterA);
         await SeedLocalManagerRoleAsync(db, "actor-1", CenterA);
+        await SeedCentralActorAsync(db, "iam-keeper");
         var roleId = await SeedRoleAsync(db, "ReceptionClerk");
 
+        var service = CreateService(db, unrestrictedActor: false, actorId: "actor-1");
+
+        var assigned = await service.AssignRoleAsync(new AssignUserRoleDto
+        {
+            UserId = "target-1",
+            RoleId = roleId,
+            CenterId = null
+        });
+
+        Assert.Equal(CenterA, assigned.CenterId);
+        Assert.False(assigned.IsCentralScope);
+        Assert.Equal(0, await db.UserPermissions.CountAsync(p => p.UserId == "target-1"));
+    }
+
+    [Theory]
+    [InlineData("SuperAdmin")]
+    [InlineData("CenterManager")]
+    [InlineData("CenterOfficer")]
+    [InlineData("CustomLocal")]
+    public async Task Local_manager_cannot_assign_roles_outside_the_allow_list(string roleName)
+    {
+        await using var db = CreateDb();
+        await SeedCenterAsync(db, CenterA, "CA", "مركز أ");
+        await SeedUserAsync(db, "actor-1", "manager");
+        await SeedUserAsync(db, "target-1", "nurse");
+        await SeedUserCenterAsync(db, "actor-1", CenterA);
+        await SeedUserCenterAsync(db, "target-1", CenterA);
+        await SeedLocalManagerRoleAsync(db, "actor-1", CenterA);
+        var roleId = await SeedRoleAsync(db, roleName);
         var service = CreateService(db, unrestrictedActor: false, actorId: "actor-1");
 
         await Assert.ThrowsAsync<ForbiddenPermissionException>(() =>
@@ -165,8 +195,31 @@ public class UserAssignmentTests
             {
                 UserId = "target-1",
                 RoleId = roleId,
-                CenterId = null
+                CenterId = CenterA
             }));
+    }
+
+    [Fact]
+    public async Task Assignable_roles_follow_the_actor_scope()
+    {
+        await using var db = CreateDb();
+        await SeedRoleAsync(db, "ReceptionClerk");
+        await SeedRoleAsync(db, "ClinicDoctor");
+        await SeedRoleAsync(db, "CenterManager");
+        await SeedRoleAsync(db, "SuperAdmin");
+        await SeedUserAsync(db, "actor-1", "manager");
+
+        var local = CreateService(db, unrestrictedActor: false, actorId: "actor-1");
+        var localNames = (await local.GetAssignableRolesAsync()).Select(r => r.name).ToList();
+        Assert.Contains("ReceptionClerk", localNames);
+        Assert.Contains("ClinicDoctor", localNames);
+        Assert.DoesNotContain("CenterManager", localNames);
+        Assert.DoesNotContain("SuperAdmin", localNames);
+
+        var central = CreateService(db, unrestrictedActor: true, actorId: "central-actor");
+        var centralNames = (await central.GetAssignableRolesAsync()).Select(r => r.name).ToList();
+        Assert.Contains("CenterManager", centralNames);
+        Assert.Contains("SuperAdmin", centralNames);
     }
 
     [Fact]
@@ -309,7 +362,8 @@ public class UserAssignmentTests
             tokens,
             uow,
             gate.Object,
-            current);
+            current,
+            new TestCenter(unrestrictedActor ? null : CenterA, unrestrictedActor));
     }
 
     private static async Task SeedCentralActorAsync(AppDbContext db, string actorId)
