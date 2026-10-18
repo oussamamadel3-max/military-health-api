@@ -16,11 +16,16 @@ namespace API.Controllers.AuthControllers
     {
         private readonly IUserService _userService;
         private readonly IUserAssignmentService _userAssignments;
+        private readonly IUserClinicAssignmentService _userClinicAssignments;
 
-        public UserController(IUserService userService, IUserAssignmentService userAssignments)
+        public UserController(
+            IUserService userService,
+            IUserAssignmentService userAssignments,
+            IUserClinicAssignmentService userClinicAssignments)
         {
             _userService = userService;
             _userAssignments = userAssignments;
+            _userClinicAssignments = userClinicAssignments;
         }
 
         [HttpPost("[action]")]
@@ -199,6 +204,38 @@ namespace API.Controllers.AuthControllers
         {
             await _userAssignments.RevokeRoleAsync(dto, cancellationToken);
             return ApiResponse.Success("تم إلغاء إسناد الدور بنجاح.");
+        }
+
+        [HttpGet("[action]/{userId}")]
+        [AuthorizePermission(MilitaryHealthPermissions.UserClinics.Manage)]
+        public async Task<IResult> GetUserClinicAssignments(
+            string userId,
+            [FromQuery] bool activeOnly = false,
+            CancellationToken cancellationToken = default)
+        {
+            var assignments = await _userClinicAssignments.GetUserClinicAssignmentsAsync(
+                userId, activeOnly, cancellationToken);
+            return ApiResponse.Success("تم جلب إسنادات عيادات المستخدم بنجاح.", assignments);
+        }
+
+        [HttpPost("[action]")]
+        [AuthorizePermission(MilitaryHealthPermissions.UserClinics.Manage)]
+        public async Task<IResult> AssignUserClinic(
+            [FromBody] AssignUserClinicDto dto,
+            CancellationToken cancellationToken = default)
+        {
+            var result = await _userClinicAssignments.AssignAsync(dto, cancellationToken);
+            return ApiResponse.Success("تم إسناد الطبيب إلى العيادة بنجاح.", result);
+        }
+
+        [HttpPost("[action]")]
+        [AuthorizePermission(MilitaryHealthPermissions.UserClinics.Manage)]
+        public async Task<IResult> RevokeUserClinic(
+            [FromBody] RevokeUserClinicDto dto,
+            CancellationToken cancellationToken = default)
+        {
+            await _userClinicAssignments.RevokeAsync(dto, cancellationToken);
+            return ApiResponse.Success("تم إلغاء إسناد الطبيب عن العيادة بنجاح.");
         }
     }
 }

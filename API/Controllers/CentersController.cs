@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using API.Infrastructure;
 using Application.Common.Permissions;
+using Application.Dtos.AuthDtos;
 using Application.Dtos.Centers;
 using Application.Exceptions;
 using Application.Interfaces.Services;
@@ -19,11 +20,16 @@ public class CentersController : ControllerBase
 {
     private readonly IMedicalCenterService _centers;
     private readonly ICenterClinicService _centerClinics;
+    private readonly IUserClinicAssignmentService _clinicAssignments;
 
-    public CentersController(IMedicalCenterService centers, ICenterClinicService centerClinics)
+    public CentersController(
+        IMedicalCenterService centers,
+        ICenterClinicService centerClinics,
+        IUserClinicAssignmentService clinicAssignments)
     {
         _centers = centers;
         _centerClinics = centerClinics;
+        _clinicAssignments = clinicAssignments;
     }
 
     [HttpGet]
@@ -146,5 +152,48 @@ public class CentersController : ControllerBase
         _ = centerId;
         _ = centerClinicId;
         throw new CenterClinicPhysicalDeleteNotAllowedException();
+    }
+
+    /// <summary>عيادات المركز لإدارة إسناد الأطباء (FR-020) — متاحة لمدير المركز دون Centers.Manage.</summary>
+    [HttpGet("{centerId:guid}/clinic-assignments/clinics")]
+    [AuthorizePermission(MilitaryHealthPermissions.UserClinics.Manage)]
+    public async Task<IResult> GetClinicsForDoctorAssignment(
+        Guid centerId,
+        [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
+        [FromQuery][Range(1, 500)] int pageSize = 10,
+        [FromQuery] bool? isActive = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _clinicAssignments.GetCenterClinicsAsync(
+            centerId, pageNumber, pageSize, isActive, cancellationToken);
+        return ApiResponse.Success("تم جلب عيادات المركز لإسناد الأطباء بنجاح.", result);
+    }
+
+    [HttpGet("{centerId:guid}/clinic-assignments/doctors")]
+    [AuthorizePermission(MilitaryHealthPermissions.UserClinics.Manage)]
+    public async Task<IResult> GetCenterDoctorsForAssignment(
+        Guid centerId,
+        [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
+        [FromQuery][Range(1, 500)] int pageSize = 10,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _clinicAssignments.GetCenterDoctorsAsync(
+            centerId, pageNumber, pageSize, cancellationToken);
+        return ApiResponse.Success("تم جلب أطباء المركز بنجاح.", result);
+    }
+
+    [HttpGet("{centerId:guid}/clinics/{clinicId:guid}/doctors")]
+    [AuthorizePermission(MilitaryHealthPermissions.UserClinics.Manage)]
+    public async Task<IResult> GetClinicAssignedDoctors(
+        Guid centerId,
+        Guid clinicId,
+        [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
+        [FromQuery][Range(1, 500)] int pageSize = 10,
+        [FromQuery] bool activeOnly = true,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _clinicAssignments.GetClinicDoctorsAsync(
+            centerId, clinicId, pageNumber, pageSize, activeOnly, cancellationToken);
+        return ApiResponse.Success("تم جلب الأطباء المسندين للعيادة بنجاح.", result);
     }
 }

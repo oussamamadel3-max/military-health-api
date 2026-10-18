@@ -97,6 +97,12 @@ public class UserRepository : IUserRepository
         }
     }
 
+    public IQueryable<UserClinicAssignment> QueryUserClinicAssignments(bool asNoTracking = true)
+        => asNoTracking ? _context.UserClinicAssignments.AsNoTracking() : _context.UserClinicAssignments;
+
+    public void AddUserClinicAssignment(UserClinicAssignment assignment)
+        => _context.UserClinicAssignments.Add(assignment);
+
     public async Task<Dictionary<string, string>> GetDisplayNamesByIdsAsync(IEnumerable<string> userIds, CancellationToken cancellationToken = default)
     {
         var ids = userIds.Distinct().ToList();

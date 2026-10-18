@@ -51,6 +51,7 @@ public static class InfrastructureServiceRegistration
         #region Authorization services
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IUserAssignmentService, UserAssignmentService>();
+        services.AddScoped<IUserClinicAssignmentService, UserClinicAssignmentService>();
         services.AddScoped<IRoleService, RoleService>();
         services.AddScoped<IPermissionService, PermissionService>();
         services.AddScoped<IFieldPermissionService, FieldPermissionService>();

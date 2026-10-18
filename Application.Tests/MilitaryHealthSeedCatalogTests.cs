@@ -69,6 +69,7 @@ public class MilitaryHealthSeedCatalogTests
 
         Assert.Contains(SystemPermissions.UserManagement.Read, manager);
         Assert.Contains(MilitaryHealthPermissions.UserCenters.Manage, manager);
+        Assert.Contains(MilitaryHealthPermissions.UserClinics.Manage, manager);
         Assert.DoesNotContain(SystemPermissions.RoleManagement.Create, manager);
         Assert.DoesNotContain(MilitaryHealthPermissions.Centers.Manage, manager);
         Assert.DoesNotContain(MilitaryHealthPermissions.Reports.Central, manager);

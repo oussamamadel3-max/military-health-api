@@ -30,6 +30,7 @@ public static class MilitaryHealthSeedCatalog
     [
         new(MilitaryHealthPermissions.Centers.Manage, "إدارة المراكز الصحية", "Centers.Manage"),
         new(MilitaryHealthPermissions.UserCenters.Manage, "إسناد المستخدمين إلى المراكز", "UserCenters.Manage"),
+        new(MilitaryHealthPermissions.UserClinics.Manage, "إسناد الأطباء إلى عيادات المراكز", "UserClinics.Manage"),
         new(MilitaryHealthPermissions.Members.CreateUpdate, "إنشاء ملف المنتسب وتعديله", "Members.CreateUpdate"),
         new(MilitaryHealthPermissions.Members.View, "البحث وعرض ملف المنتسب", "Members.View"),
         new(MilitaryHealthPermissions.Members.PrintReceipt, "طباعة الإيصال والباركود", "Members.PrintReceipt"),
@@ -120,15 +121,17 @@ public static class MilitaryHealthSeedCatalog
             SystemPermissions.PermissionManagement.Read,
             SystemPermissions.PermissionManagement.ChangeStatus),
 
-        // إسناد الأدوار والمراكز للمستخدمين
+        // إسناد الأدوار والمراكز للمستخدمين، وإسناد الأطباء إلى العيادات (FR-020)
         Grant("SuperAdmin",
             SystemPermissions.UserManagement.AssignRoles,
             SystemPermissions.UserManagement.AssignPermissions,
-            MilitaryHealthPermissions.UserCenters.Manage),
+            MilitaryHealthPermissions.UserCenters.Manage,
+            MilitaryHealthPermissions.UserClinics.Manage),
         Grant("CenterManager",
             SystemPermissions.UserManagement.AssignRoles,
             SystemPermissions.UserManagement.AssignPermissions,
-            MilitaryHealthPermissions.UserCenters.Manage),
+            MilitaryHealthPermissions.UserCenters.Manage,
+            MilitaryHealthPermissions.UserClinics.Manage),
 
         // إعادة تعيين كلمة مرور مستخدم
         Grant("SuperAdmin", SystemPermissions.UserManagement.ResetPassword),
