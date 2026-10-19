@@ -17,15 +17,18 @@ namespace API.Controllers.AuthControllers
         private readonly IUserService _userService;
         private readonly IUserAssignmentService _userAssignments;
         private readonly IUserClinicAssignmentService _userClinicAssignments;
+        private readonly IUserEffectiveAccessService _effectiveAccess;
 
         public UserController(
             IUserService userService,
             IUserAssignmentService userAssignments,
-            IUserClinicAssignmentService userClinicAssignments)
+            IUserClinicAssignmentService userClinicAssignments,
+            IUserEffectiveAccessService effectiveAccess)
         {
             _userService = userService;
             _userAssignments = userAssignments;
             _userClinicAssignments = userClinicAssignments;
+            _effectiveAccess = effectiveAccess;
         }
 
         [HttpPost("[action]")]
@@ -172,6 +175,19 @@ namespace API.Controllers.AuthControllers
         {
             var assignments = await _userAssignments.GetAssignmentsAsync(userId, cancellationToken);
             return ApiResponse.Success("تم جلب إسنادات المستخدم بنجاح.", assignments);
+        }
+
+        /// <summary>
+        /// عرض الصلاحيات الفعلية (FR-021). يسمح لصاحب الحساب أو لمن لديه UserManagement.Read ضمن تفويضه.
+        /// </summary>
+        [HttpGet("[action]/{userId}")]
+        public async Task<IResult> GetEffectivePermissions(
+            string userId,
+            [FromQuery] Guid? centerId = null,
+            CancellationToken cancellationToken = default)
+        {
+            var result = await _effectiveAccess.GetEffectiveAccessAsync(userId, centerId, cancellationToken);
+            return ApiResponse.Success("تم جلب الصلاحيات الفعلية بنجاح.", result);
         }
 
         [HttpPost("[action]")]
