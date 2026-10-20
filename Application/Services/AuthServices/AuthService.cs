@@ -132,6 +132,11 @@ namespace Application.Services.AuthServices
 
             await _loginLockout.ResetAfterSuccessfulLoginAsync(user);
 
+            user.LastLoginAt = DateTimeOffset.UtcNow;
+            var loginStamp = await _userManager.UpdateAsync(user);
+            if (!loginStamp.Succeeded)
+                throw new InvalidOperationException("تعذر حفظ تاريخ آخر دخول.");
+
             var centers = await _access.GetActiveCentersAsync(user.Id);
             var sessionCenterId = LoginCenterContext.CenterIdForNewSession(centers);
             var tokens = await _tokenService.GenerateTokensAsync(user.Id, sessionCenterId);

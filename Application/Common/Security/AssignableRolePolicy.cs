@@ -1,11 +1,13 @@
 using Application.Exceptions;
+using Domain.Enums;
 
 namespace Application.Common.Security;
 
 /// <summary>
 /// سياسة إسناد الأدوار المشتركة بين القائمة والحفظ.
-/// مدير المركز يسند أدواراً تشغيلية محلية معتمدة فقط. مدير المركز والمسؤول مؤجلان حتى حسم رسمي.
-/// الدور المركزي (بلا مركز) مقتصر على أدوار الكتالوج المركزي، ولجهة مركزية فقط.
+/// مدير المركز يسند أدواراً تشغيلية محلية معتمدة فقط.
+/// النطاق التشغيلي المخزَّن على الدور يحدد إن كان الإسناد مركزياً أو مقيداً بمركز.
+/// أدوار الكتالوج النظامية تُثبَّت بنطاقها عند البذر؛ الأدوار المخصصة تعتمد على Scope المخزَّن.
 /// </summary>
 public static class AssignableRolePolicy
 {
@@ -17,6 +19,7 @@ public static class AssignableRolePolicy
         "ArchiveClerk",
     ];
 
+    /// <summary>أسماء أدوار الكتالوج المركزية — تثبيت أولي عند البذر والاختبارات.</summary>
     public static readonly string[] CentralScopeRoleNames =
     [
         "SuperAdmin",
@@ -26,16 +29,25 @@ public static class AssignableRolePolicy
     private static readonly HashSet<string> LocalOperational =
         new(LocalOperationalRoleNames, StringComparer.Ordinal);
 
-    private static readonly HashSet<string> CentralScope =
+    private static readonly HashSet<string> CentralCatalogNames =
         new(CentralScopeRoleNames, StringComparer.Ordinal);
 
     public static bool IsLocalOperational(string? roleName) =>
         !string.IsNullOrWhiteSpace(roleName) && LocalOperational.Contains(roleName);
 
-    public static bool IsCentralScopeRole(string? roleName) =>
-        !string.IsNullOrWhiteSpace(roleName) && CentralScope.Contains(roleName);
+    public static bool IsCentralScope(RoleScope scope) => scope == RoleScope.Central;
 
-    public static void EnsureAssignable(bool actorIsCentral, string? roleName, bool roleIsActive)
+    /// <summary>استدلال نطاق الكتالوج من الاسم عند غياب القيمة المخزَّنة (بذر/اختبارات).</summary>
+    public static RoleScope CatalogScopeForName(string? roleName) =>
+        !string.IsNullOrWhiteSpace(roleName) && CentralCatalogNames.Contains(roleName)
+            ? RoleScope.Central
+            : RoleScope.Center;
+
+    public static void EnsureAssignable(
+        bool actorIsCentral,
+        string? roleName,
+        bool roleIsActive,
+        RoleScope scope)
     {
         if (!roleIsActive)
             throw new InvalidUserDataException("لا يمكن إسناد دور معطّل.");
@@ -46,13 +58,16 @@ public static class AssignableRolePolicy
         if (actorIsCentral)
             return;
 
+        if (IsCentralScope(scope))
+            throw new ForbiddenPermissionException("لا يمكنك إسناد دور مركزي ضمن حدود تفويضك.");
+
         if (!IsLocalOperational(roleName))
             throw new ForbiddenPermissionException("لا يمكنك إسناد هذا الدور ضمن حدود تفويضك.");
     }
 
     public static Guid? ResolveSyncScope(
         bool actorIsCentral,
-        IReadOnlyCollection<string> roleNames,
+        IReadOnlyCollection<RoleScope> roleScopes,
         Guid? requestedCenterId,
         Guid? activeCenterId,
         bool actorInCentralContext)
@@ -60,9 +75,9 @@ public static class AssignableRolePolicy
         if (requestedCenterId == Guid.Empty)
             throw new InvalidUserDataException("معرف المركز غير صالح.");
 
-        var names = roleNames.Where(n => !string.IsNullOrWhiteSpace(n)).ToList();
-        var hasCentralRole = names.Any(IsCentralScopeRole);
-        var hasScopedRole = names.Any(n => !IsCentralScopeRole(n));
+        var scopes = roleScopes.ToList();
+        var hasCentralRole = scopes.Any(IsCentralScope);
+        var hasScopedRole = scopes.Any(s => !IsCentralScope(s));
         if (hasCentralRole && hasScopedRole)
             throw new InvalidUserDataException("لا يمكن الجمع بين دور مركزي ودور مقيد بمركز في الطلب نفسه.");
 
@@ -77,7 +92,7 @@ public static class AssignableRolePolicy
             return activeCenterId.Value;
         }
 
-        if (hasCentralRole || (names.Count == 0 && requestedCenterId is null))
+        if (hasCentralRole || (scopes.Count == 0 && requestedCenterId is null))
         {
             if (requestedCenterId is not null)
                 throw new InvalidUserDataException("إسناد الدور المركزي لا يُقيَّد بمركز.");
@@ -97,7 +112,7 @@ public static class AssignableRolePolicy
     /// </summary>
     public static Guid? ResolveRevokeScope(
         bool actorIsCentral,
-        string roleName,
+        RoleScope roleScope,
         Guid? requestedCenterId,
         Guid? activeCenterId,
         bool actorInCentralContext)
@@ -112,19 +127,23 @@ public static class AssignableRolePolicy
 
         return ResolveSyncScope(
             actorIsCentral: false,
-            roleNames: [roleName],
+            roleScopes: [roleScope],
             requestedCenterId,
             activeCenterId,
             actorInCentralContext);
     }
 
-    public static bool MayRevoke(bool actorIsCentral, string? roleName, Guid? scopeCenterId)
+    public static bool MayRevoke(
+        bool actorIsCentral,
+        string? roleName,
+        Guid? scopeCenterId,
+        RoleScope roleScope)
     {
         if (!actorIsCentral)
             return IsLocalOperational(roleName);
 
         if (scopeCenterId is null)
-            return IsCentralScopeRole(roleName);
+            return IsCentralScope(roleScope);
 
         return true;
     }

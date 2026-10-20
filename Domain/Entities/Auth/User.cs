@@ -6,6 +6,8 @@ namespace Domain.Entities.Auth;
 public class User : IdentityUser, IAuditableEntity
 {
     public DateTime CreationDate { get; set; } = DateTime.Now;
+    public DateTimeOffset? LastLoginAt { get; set; }
+    public DateTimeOffset? UpdatedAt { get; set; }
     public bool IsActive { get; set; } = true;
     public string? FullName { get; set; }
 

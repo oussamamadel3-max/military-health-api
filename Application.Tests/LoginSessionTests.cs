@@ -95,10 +95,13 @@ public class LoginSessionTests
     [Fact]
     public async Task Successful_login_returns_user_roles_and_effective_permissions_for_the_only_center()
     {
-        var harness = new Harness(ActiveUser(), SignInResult.Success, new[] { Center("A", CenterA) });
+        var user = ActiveUser();
+        var harness = new Harness(user, SignInResult.Success, new[] { Center("A", CenterA) });
         harness.UseEffectiveAccess(CenterA);
 
         var result = await harness.Service.LoginAsync(Request("doctor"));
+        Assert.NotNull(user.LastLoginAt);
+        Assert.Null(user.UpdatedAt);
 
         harness.Tokens.Verify(t => t.GenerateTokensAsync("user-1", CenterA), Times.Once);
         Assert.Equal("user-1", result.Session.UserId);
@@ -342,6 +345,7 @@ public class LoginSessionTests
             users.Setup(m => m.FindByNameAsync(It.IsAny<string>())).ReturnsAsync(user);
             users.Setup(m => m.FindByIdAsync(It.IsAny<string>())).ReturnsAsync(user);
             users.Setup(m => m.IsLockedOutAsync(It.IsAny<User>())).ReturnsAsync(lockedNow);
+            users.Setup(m => m.UpdateAsync(It.IsAny<User>())).ReturnsAsync(IdentityResult.Success);
 
             SignIn = new Mock<SignInManager<User>>(
                 users.Object,

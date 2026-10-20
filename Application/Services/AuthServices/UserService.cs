@@ -8,7 +8,9 @@ using Application.Common.Results;
 using Application.Common.Permissions;
 using Application.Exceptions;
 using Application.Dtos.AuthDtos;
+using Application.Interfaces.Services;
 using Domain.Entities.Auth;
+using Domain.Enums;
 using PasswordPolicyRules = Application.Common.PasswordPolicy;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -81,17 +83,23 @@ public class UserService : IUserService
         if (string.IsNullOrWhiteSpace(createdUser.username)) errors.Add("اسم المستخدم مطلوب.");
         if (string.IsNullOrWhiteSpace(createdUser.email)) errors.Add("البريد الإلكتروني مطلوب.");
         if (string.IsNullOrWhiteSpace(createdUser.password)) errors.Add("كلمة المرور مطلوبة.");
+        if (string.IsNullOrWhiteSpace(createdUser.employeeNumber)) errors.Add("الرقم الوظيفي مطلوب.");
+        if (string.IsNullOrWhiteSpace(createdUser.rankOrTitle)) errors.Add("الرتبة أو المسمى الوظيفي مطلوب.");
         if (!string.Equals(createdUser.password, createdUser.confirmPassword, StringComparison.Ordinal))
             errors.Add(PasswordPolicyRules.ConfirmationMismatchMessage);
         if (!PasswordPolicyRules.IsCompliant(createdUser.password))
             errors.Add(PasswordPolicyRules.ComplexityErrorMessage);
         if (errors.Count > 0) throw new InvalidUserDataException("بيانات المستخدم غير صالحة.", new { errors });
 
+        var (employeeNumber, rankOrTitle) = NormalizeJobFields(
+            createdUser.employeeNumber, createdUser.rankOrTitle);
+
         // منع التكرار (رمي استثناءات مخصصة)
         if (await _userManager.FindByNameAsync(createdUser.username) is not null)
             throw new UsernameAlreadyExistsException(createdUser.username);
         if (await _userManager.FindByEmailAsync(createdUser.email) is not null)
             throw new EmailAlreadyExistsException(createdUser.email);
+        await EnsureEmployeeNumberAvailableAsync(employeeNumber);
 
         var rawRoles = (createdUser.roles ?? Enumerable.Empty<string>())
                           .Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim())
@@ -108,11 +116,11 @@ public class UserService : IUserService
         var actorIsCentral = await UserManagementScopeGuard.ActorHasUnrestrictedScopeAsync(_access, actorId);
         var rolesFromDb = await LoadRequestedRolesAsync(rawRoles);
         foreach (var role in rolesFromDb)
-            AssignableRolePolicy.EnsureAssignable(actorIsCentral, role.Name, role.IsActive);
+            AssignableRolePolicy.EnsureAssignable(actorIsCentral, role.Name, role.IsActive, role.Scope);
 
-        var roleNames = rolesFromDb.Select(r => r.Name!).ToList();
-        if (roleNames.Any(AssignableRolePolicy.IsCentralScopeRole) &&
-            roleNames.Any(name => !AssignableRolePolicy.IsCentralScopeRole(name)))
+        var roleScopes = rolesFromDb.Select(r => r.Scope).ToList();
+        if (roleScopes.Any(AssignableRolePolicy.IsCentralScope) &&
+            roleScopes.Any(s => !AssignableRolePolicy.IsCentralScope(s)))
             throw new InvalidUserDataException("لا يمكن الجمع بين دور مركزي ودور مقيد بمركز في الطلب نفسه.");
 
         var membershipCenterId = await ResolveMembershipCenterAsync(actorIsCentral, createdUser.centerId, actorId);
@@ -155,12 +163,14 @@ public class UserService : IUserService
 
             var associations = rolesFromDb.Select(role =>
             {
-                var roleCenterId = AssignableRolePolicy.IsCentralScopeRole(role.Name)
+                var roleCenterId = AssignableRolePolicy.IsCentralScope(role.Scope)
                     ? (Guid?)null
                     : membershipCenterId;
                 return NewRoleLink(user.Id, role.Id, roleCenterId);
             }).ToList();
             _userRepository.AddRoleAssociations(associations);
+
+            await UpsertProfileAsync(user.Id, employeeNumber, rankOrTitle, actorId);
 
             await _unitOfWork.SaveChangesAsync();
             await tx.CommitAsync();
@@ -171,6 +181,8 @@ public class UserService : IUserService
                 username = createdUser.username,
                 email = createdUser.email,
                 phone = createdUser.phone,
+                employeeNumber = employeeNumber,
+                rankOrTitle = rankOrTitle,
                 isActive = createdUser.isActive,
                 mustChangePassword = user.MustChangePassword,
                 centerId = membershipCenterId,
@@ -233,6 +245,10 @@ public class UserService : IUserService
         if (!string.IsNullOrWhiteSpace(updatedUser.Phone))
             user.PhoneNumber = _textSanitizer.SanitizePlainText(updatedUser.Phone) ?? updatedUser.Phone;
 
+        var (employeeNumber, rankOrTitle) = NormalizeJobFields(
+            updatedUser.EmployeeNumber, updatedUser.RankOrTitle);
+        await EnsureEmployeeNumberAvailableAsync(employeeNumber, user.Id);
+
         bool invalidateTokens = false;
         if (statusChanging)
         {
@@ -240,8 +256,13 @@ public class UserService : IUserService
             if (!user.IsActive) invalidateTokens = true;
         }
 
+        MarkUserModified(user);
         var updateRes = await _userManager.UpdateAsync(user);
         if (!updateRes.Succeeded) throw new InvalidUserDataException(string.Join(", ", updateRes.Errors.Select(e => e.Description)));
+
+        var actorId = AssignmentStamp.RequireActor(_currentUserService.UserId);
+        await UpsertProfileAsync(user.Id, employeeNumber, rankOrTitle, actorId);
+        await _unitOfWork.SaveChangesAsync();
 
         if (invalidateTokens)
             await SecurityStampHelper.InvalidateUserTokensAsync(
@@ -266,6 +287,7 @@ public class UserService : IUserService
             return;
 
         IamRetention.DeactivateUser(user);
+        MarkUserModified(user);
         var result = await _userManager.UpdateAsync(user);
         if (!result.Succeeded)
             throw new InvalidUserDataException(string.Join(", ", result.Errors.Select(e => e.Description)));
@@ -300,7 +322,8 @@ public class UserService : IUserService
             var s = SqlLikePatternEscape.EscapeForSqlServerLike(q.Trim());
             baseQuery = baseQuery.Where(u =>
                 EF.Functions.Like((u.FullName ?? u.UserName)!, $"%{s}%") ||
-                (u.Email != null && EF.Functions.Like(u.Email, $"%{s}%"))
+                (u.Email != null && EF.Functions.Like(u.Email, $"%{s}%")) ||
+                (u.Profile != null && EF.Functions.Like(u.Profile.EmployeeNumber, $"%{s}%"))
             );
         }
 
@@ -327,6 +350,12 @@ public class UserService : IUserService
             return new PaginatedList<UserListItemDto>(new List<UserListItemDto>(), totalCount, pageNumber, pageSize);
 
         var userIds = usersPage.Select(u => u.Id).ToList();
+
+        var profilesByUserId = await _userRepository.QueryProfiles()
+            .Where(p => userIds.Contains(p.UserId))
+            .ToDictionaryAsync(p => p.UserId, p => p);
+
+        var centersByUserId = await LoadActiveCentersByUserIdsAsync(userIds);
 
         var roleAssociations = await _userRepository.QueryRoleAssociations()
             .Where(ura => userIds.Contains(ura.UserId))
@@ -377,6 +406,8 @@ public class UserService : IUserService
                     foreach (var p in rperms) permMap[p.PermissionId] = p;
 
             var item = _mapper.Map<UserListItemDto>(u);
+            ApplyProfileFields(item, profilesByUserId.GetValueOrDefault(u.Id));
+            item.centers = centersByUserId.GetValueOrDefault(u.Id) ?? new List<AssignedCenterDto>();
             item.rolesCount = userRoles.Count;
             item.permissionsCount = permMap.Count;
             item.roles = userRoles;
@@ -426,7 +457,14 @@ public class UserService : IUserService
             .OrderBy(p => p.PermissionName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        var profile = await _userRepository.QueryProfiles()
+            .FirstOrDefaultAsync(p => p.UserId == user.Id);
+
+        var centersByUserId = await LoadActiveCentersByUserIdsAsync(new[] { user.Id });
+
         var result = _mapper.Map<UserListItemDto>(user);
+        ApplyProfileFields(result, profile);
+        result.centers = centersByUserId.GetValueOrDefault(user.Id) ?? new List<AssignedCenterDto>();
         result.roles = roles;
         result.rolesCount = roles.Count;
         result.permissionsCount = permissionsLite.Count;
@@ -484,6 +522,9 @@ public class UserService : IUserService
         if (dto.email is not null) dto.email = _textSanitizer.SanitizePlainText(dto.email) ?? dto.email;
         if (dto.phone is not null) dto.phone = _textSanitizer.SanitizePlainText(dto.phone) ?? dto.phone;
 
+        var (employeeNumber, rankOrTitle) = NormalizeJobFields(dto.employeeNumber, dto.rankOrTitle);
+        await EnsureEmployeeNumberAvailableAsync(employeeNumber, user.Id);
+
         var previousIsActive = user.IsActive;
         _mapper.Map(dto, user);
         if (!dto.isActive.HasValue)
@@ -499,9 +540,14 @@ public class UserService : IUserService
         if (user.PhoneNumber is not null)
             user.PhoneNumber = _textSanitizer.SanitizePlainText(user.PhoneNumber) ?? user.PhoneNumber;
 
+        MarkUserModified(user);
         var updRes = await _userManager.UpdateAsync(user);
         if (!updRes.Succeeded)
             throw new InvalidUserDataException(string.Join(", ", updRes.Errors.Select(e => e.Description)));
+
+        var actorId = AssignmentStamp.RequireActor(_currentUserService.UserId);
+        await UpsertProfileAsync(user.Id, employeeNumber, rankOrTitle, actorId);
+        await _unitOfWork.SaveChangesAsync();
 
         if (statusChanging && !user.IsActive)
         {
@@ -553,7 +599,11 @@ public class UserService : IUserService
             .OrderBy(p => p.PermissionName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        var centersByUserId = await LoadActiveCentersByUserIdsAsync(new[] { user.Id });
         var updated = _mapper.Map<UserListItemDto>(user);
+        updated.employeeNumber = employeeNumber;
+        updated.rankOrTitle = rankOrTitle;
+        updated.centers = centersByUserId.GetValueOrDefault(user.Id) ?? new List<AssignedCenterDto>();
         updated.roles = rolesLite.OrderBy(r => r.RoleName, StringComparer.OrdinalIgnoreCase).ToList();
         updated.rolesCount = rolesLite.Count;
         updated.permissionsCount = permissionsLite2.Count;
@@ -597,6 +647,7 @@ public class UserService : IUserService
 
         var wasActive = user.IsActive;
         user.IsActive = request.isActive;
+        MarkUserModified(user);
 
         var updRes = await _userManager.UpdateAsync(user);
         if (!updRes.Succeeded)
@@ -631,12 +682,11 @@ public class UserService : IUserService
             throw new InvalidUserDataException(string.Join(", ", result.Errors.Select(e => e.Description)));
 
         if (user.MustChangePassword)
-        {
             user.MustChangePassword = false;
-            var clearFlag = await _userManager.UpdateAsync(user);
-            if (!clearFlag.Succeeded)
-                throw new InvalidUserDataException(string.Join(", ", clearFlag.Errors.Select(e => e.Description)));
-        }
+        MarkUserModified(user);
+        var clearFlag = await _userManager.UpdateAsync(user);
+        if (!clearFlag.Succeeded)
+            throw new InvalidUserDataException(string.Join(", ", clearFlag.Errors.Select(e => e.Description)));
 
         await SecurityStampHelper.InvalidateUserTokensAsync(
             _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id);
@@ -668,6 +718,7 @@ public class UserService : IUserService
         user.Email = email;
         user.NormalizedEmail = _userManager.NormalizeEmail(email);
         user.PhoneNumber = phone;
+        MarkUserModified(user);
 
         var result = await _userManager.UpdateAsync(user);
         if (!result.Succeeded)
@@ -711,6 +762,7 @@ public class UserService : IUserService
             throw new InvalidUserDataException(string.Join(", ", resetResult.Errors.Select(e => e.Description)));
 
         user.MustChangePassword = true;
+        MarkUserModified(user);
         var flagResult = await _userManager.UpdateAsync(user);
         if (!flagResult.Succeeded)
             throw new InvalidUserDataException(string.Join(", ", flagResult.Errors.Select(e => e.Description)));
@@ -768,6 +820,8 @@ public class UserService : IUserService
             ?? throw new UserNotFoundException(dto.UserId);
 
         await EnsureCanManageTargetAsync(user.Id);
+        var actorId = AssignmentStamp.RequireActor(_currentUserService.UserId);
+        var scopeCenterId = await ResolveDirectPermissionScopeAsync(actorId, user.Id, dto.CenterId);
 
         var incomingIds = new HashSet<Guid>();
         if (dto.PermissionId is { Count: > 0 })
@@ -775,7 +829,7 @@ public class UserService : IUserService
                 incomingIds.Add(pid);
 
         var activeIncomingIds = await _permissionRepository.GetActiveIdsAsync(incomingIds);
-        var currentPermIds = await _userRepository.GetDirectPermissionIdsAsync(user.Id);
+        var currentPermIds = await _userRepository.GetActiveDirectPermissionIdsAsync(user.Id, scopeCenterId);
 
         var currentSet = new HashSet<Guid>(currentPermIds);
 
@@ -805,7 +859,7 @@ public class UserService : IUserService
             if (toRemove.Any())
             {
                 var removeRows = await _userRepository.QueryUserPermissions(asNoTracking: false)
-                    .Where(up => up.UserId == user.Id && up.IsActive && toRemove.Contains(up.PermissionId))
+                    .Where(up => up.UserId == user.Id && up.IsActive && up.CenterId == scopeCenterId && toRemove.Contains(up.PermissionId))
                     .ToListAsync();
 
                 RevokeDirectPermissions(removeRows);
@@ -814,7 +868,7 @@ public class UserService : IUserService
 
             if (toAdd.Any())
             {
-                var addRows = toAdd.Select(pid => NewPermissionLink(user.Id, pid));
+                var addRows = toAdd.Select(pid => NewPermissionLink(user.Id, pid, scopeCenterId));
                 _userRepository.AddUserPermissions(addRows);
                 await _unitOfWork.SaveChangesAsync();
             }
@@ -889,6 +943,7 @@ public class UserService : IUserService
             user.NormalizedUserName = safeUserName.ToUpperInvariant();
             user.Email = safeEmail;
             user.NormalizedEmail = safeEmail.ToUpperInvariant();
+            MarkUserModified(user);
 
             var updateRes = await _userManager.UpdateAsync(user);
             if (!updateRes.Succeeded)
@@ -972,15 +1027,139 @@ public class UserService : IUserService
             IsActive = true
         };
 
-        private UserPermission NewPermissionLink(string userId, Guid permissionId) => new()
+        private UserPermission NewPermissionLink(string userId, Guid permissionId, Guid? centerId) => new()
         {
             Id = Guid.NewGuid(),
             UserId = userId,
             PermissionId = permissionId,
+            CenterId = centerId,
             GrantedByUserId = AssignmentStamp.RequireActor(_currentUserService.UserId),
             GrantedAt = DateTimeOffset.UtcNow,
             IsActive = true
         };
+
+        private static void MarkUserModified(User user) => user.UpdatedAt = DateTimeOffset.UtcNow;
+
+        private (string EmployeeNumber, string RankOrTitle) NormalizeJobFields(
+            string? employeeNumber,
+            string? rankOrTitle)
+        {
+            var emp = _textSanitizer.SanitizePlainText(employeeNumber)?.Trim() ?? string.Empty;
+            var rank = _textSanitizer.SanitizePlainText(rankOrTitle)?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(emp))
+                throw new InvalidUserDataException("الرقم الوظيفي مطلوب.");
+            if (string.IsNullOrWhiteSpace(rank))
+                throw new InvalidUserDataException("الرتبة أو المسمى الوظيفي مطلوب.");
+            return (emp, rank);
+        }
+
+        private async Task EnsureEmployeeNumberAvailableAsync(string employeeNumber, string? excludeUserId = null)
+        {
+            if (await _userRepository.EmployeeNumberExistsAsync(employeeNumber, excludeUserId))
+                throw new InvalidUserDataException("الرقم الوظيفي مستخدم مسبقاً.");
+        }
+
+        private async Task UpsertProfileAsync(
+            string userId,
+            string employeeNumber,
+            string rankOrTitle,
+            string actorId)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var profile = await _userRepository.FindTrackedProfileAsync(userId);
+            if (profile is null)
+            {
+                _userRepository.AddProfile(new UserProfile
+                {
+                    UserId = userId,
+                    EmployeeNumber = employeeNumber,
+                    RankOrTitle = rankOrTitle,
+                    UpdatedByUserId = actorId,
+                    CreatedAt = now,
+                    UpdatedAt = now
+                });
+                return;
+            }
+
+            profile.EmployeeNumber = employeeNumber;
+            profile.RankOrTitle = rankOrTitle;
+            profile.UpdatedByUserId = actorId;
+            profile.UpdatedAt = now;
+        }
+
+        private static bool IsPlaceholderJobData(UserProfile profile)
+            => string.Equals(profile.RankOrTitle, "غير محدد", StringComparison.Ordinal)
+               || string.Equals(profile.EmployeeNumber, profile.UserId, StringComparison.OrdinalIgnoreCase);
+
+        private static void ApplyProfileFields(UserListItemDto item, UserProfile? profile)
+        {
+            if (profile is null || IsPlaceholderJobData(profile))
+                return;
+            item.employeeNumber = profile.EmployeeNumber;
+            item.rankOrTitle = profile.RankOrTitle;
+        }
+
+        private async Task<Dictionary<string, List<AssignedCenterDto>>> LoadActiveCentersByUserIdsAsync(
+            IReadOnlyCollection<string> userIds)
+        {
+            if (userIds.Count == 0)
+                return new Dictionary<string, List<AssignedCenterDto>>();
+
+            var rows = await _userRepository.QueryUserCenters()
+                .Where(uc => userIds.Contains(uc.UserId) && uc.IsActive && uc.Center.IsActive)
+                .OrderBy(uc => uc.Center.NameAr)
+                .Select(uc => new
+                {
+                    uc.UserId,
+                    Center = new AssignedCenterDto
+                    {
+                        CenterId = uc.CenterId,
+                        Code = uc.Center.Code,
+                        NameAr = uc.Center.NameAr
+                    }
+                })
+                .ToListAsync();
+
+            return rows
+                .GroupBy(r => r.UserId)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.Select(x => x.Center).ToList());
+        }
+
+        private async Task<Guid?> ResolveDirectPermissionScopeAsync(
+            string actorId,
+            string targetUserId,
+            Guid? requestedCenterId)
+        {
+            if (requestedCenterId == Guid.Empty)
+                throw new InvalidUserDataException("معرف المركز غير صالح.");
+
+            var actorIsCentral = await UserManagementScopeGuard.ActorHasUnrestrictedScopeAsync(_access, actorId);
+            if (!actorIsCentral)
+            {
+                if (_currentCenter.IsCentralContext || _currentCenter.CenterId is not Guid active || active == Guid.Empty)
+                    throw new ForbiddenPermissionException("لا يوجد مركز نشط لإسناد الصلاحية.");
+
+                if (requestedCenterId is Guid requested && requested != active)
+                    throw new ForbiddenPermissionException("لا يمكنك إسناد صلاحية خارج مركزك النشط.");
+
+                if (!await _access.IsActivelyAssignedAsync(targetUserId, active))
+                    throw new ForbiddenPermissionException("لا يمكن منح صلاحية خارج مركز مسند للمستخدم.");
+
+                return active;
+            }
+
+            if (requestedCenterId is null)
+                return null;
+
+            var center = await _centers.GetByIdAsync(requestedCenterId.Value, asNoTracking: true);
+            MedicalCenterActivityGuard.EnsureAcceptsNewRelations(center);
+            if (!await _access.IsActivelyAssignedAsync(targetUserId, requestedCenterId.Value))
+                throw new ForbiddenPermissionException("لا يمكن منح صلاحية خارج مركز مسند للمستخدم.");
+
+            return requestedCenterId;
+        }
 
         private async Task<Guid> ResolveMembershipCenterAsync(
             bool actorIsCentral,
@@ -1058,11 +1237,11 @@ public class UserService : IUserService
             var actorIsCentral = await UserManagementScopeGuard.ActorHasUnrestrictedScopeAsync(_access, actorId);
             var roles = await LoadRequestedRolesAsync(roleIdsOrNames);
             foreach (var role in roles)
-                AssignableRolePolicy.EnsureAssignable(actorIsCentral, role.Name, role.IsActive);
+                AssignableRolePolicy.EnsureAssignable(actorIsCentral, role.Name, role.IsActive, role.Scope);
 
             var scopeCenterId = AssignableRolePolicy.ResolveSyncScope(
                 actorIsCentral,
-                roles.Select(r => r.Name!).ToList(),
+                roles.Select(r => r.Scope).ToList(),
                 requestedCenterId,
                 _currentCenter.CenterId,
                 _currentCenter.IsCentralContext);
@@ -1091,7 +1270,11 @@ public class UserService : IUserService
 
             var toRemove = scopeRows
                 .Where(row => !desiredIds.Contains(row.RoleId))
-                .Where(row => AssignableRolePolicy.MayRevoke(actorIsCentral, row.Role?.Name, scopeCenterId))
+                .Where(row => AssignableRolePolicy.MayRevoke(
+                    actorIsCentral,
+                    row.Role?.Name,
+                    scopeCenterId,
+                    row.Role?.Scope ?? RoleScope.Center))
                 .ToList();
 
             if (toRemove.Count > 0)

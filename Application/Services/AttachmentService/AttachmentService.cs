@@ -211,21 +211,9 @@ namespace Application.Services.AttachmentService
                 if (!string.Equals(entityId, actorId, StringComparison.Ordinal))
                     throw new InvalidUserDataException("لا يمكن ربط صورة مستخدم آخر.");
 
-                var profile = await _files.FindTrackedProfileAsync(entityId);
-                if (profile == null)
-                {
-                    var now = DateTimeOffset.UtcNow;
-                    profile = new UserProfile
-                    {
-                        UserId = entityId,
-                        EmployeeNumber = entityId,
-                        RankOrTitle = "غير محدد",
-                        UpdatedByUserId = actorId,
-                        CreatedAt = now,
-                        UpdatedAt = now
-                    };
-                    _files.AddProfile(profile);
-                }
+                var profile = await _files.FindTrackedProfileAsync(entityId)
+                    ?? throw new InvalidUserDataException(
+                        "لا يمكن رفع صورة الملف الشخصي قبل حفظ البيانات الوظيفية (الرقم الوظيفي والرتبة أو المسمى).");
 
                 profile.ProfileFileAssetId = asset.FileAssetId;
                 profile.UpdatedAt = DateTimeOffset.UtcNow;

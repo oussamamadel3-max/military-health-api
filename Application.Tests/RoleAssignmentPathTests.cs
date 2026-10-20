@@ -46,6 +46,18 @@ public class RoleAssignmentPathTests
         Assert.Equal(CenterA, link.CenterId);
         Assert.True(await db.UserCenters.AnyAsync(x => x.UserId == "created-1" && x.CenterId == CenterA && x.IsActive));
         Assert.Equal(0, await db.UserPermissions.CountAsync(x => x.UserId == "created-1"));
+        Assert.Equal("EMP-clinic.user", created.employeeNumber);
+        Assert.Equal("موظف", created.rankOrTitle);
+
+        var profile = await db.UserProfiles.SingleAsync(p => p.UserId == "created-1");
+        Assert.Equal("EMP-clinic.user", profile.EmployeeNumber);
+        Assert.Equal("موظف", profile.RankOrTitle);
+        Assert.Equal("actor-1", profile.UpdatedByUserId);
+
+        var listed = await harness.Service.GetUserAsync("created-1");
+        Assert.Single(listed.centers);
+        Assert.Equal(CenterA, listed.centers[0].CenterId);
+        Assert.Null(listed.lastLoginAt);
 
         var access = new AccessContextRepository(db);
         var snapshot = await access.LoadAsync("created-1");
@@ -53,6 +65,80 @@ public class RoleAssignmentPathTests
         var inB = CenterPermissionEvaluator.Resolve(snapshot.Roles, snapshot.Directs, snapshot.Links, CenterB);
         Assert.Contains("Clinical.ExamWrite", inA);
         Assert.DoesNotContain("Clinical.ExamWrite", inB);
+    }
+
+    [Fact]
+    public async Task Create_rejects_duplicate_employee_number()
+    {
+        await using var db = CreateDb();
+        await SeedCenterAsync(db, CenterA, true);
+        await SeedUserAsync(db, "actor-1", "manager");
+        await SeedUserAsync(db, "existing", "existing");
+        await SeedUserCenterAsync(db, "actor-1", CenterA);
+        await SeedRoleLinkAsync(db, "actor-1", "CenterManager", CenterA);
+        await SeedIamKeeperAsync(db);
+        await SeedRoleAsync(db, "ClinicDoctor");
+        db.UserProfiles.Add(new UserProfile
+        {
+            UserId = "existing",
+            EmployeeNumber = "EMP-dup",
+            RankOrTitle = "نقيب",
+            UpdatedByUserId = "actor-1",
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var harness = CreateUserService(db, central: false);
+        var dto = NewUser("new.user", "ClinicDoctor");
+        dto.employeeNumber = "EMP-dup";
+
+        var error = await Assert.ThrowsAsync<InvalidUserDataException>(() => harness.Service.Create(dto));
+        Assert.Contains("الرقم الوظيفي", error.Message);
+        Assert.Equal(0, await db.Users.CountAsync(u => u.UserName == "new.user"));
+    }
+
+    [Fact]
+    public async Task Get_and_update_return_and_persist_job_fields()
+    {
+        await using var db = CreateDb();
+        await SeedCenterAsync(db, CenterA, true);
+        await SeedUserAsync(db, "actor-1", "manager");
+        await SeedUserAsync(db, "target-1", "nurse");
+        await SeedUserCenterAsync(db, "actor-1", CenterA);
+        await SeedUserCenterAsync(db, "target-1", CenterA);
+        await SeedRoleLinkAsync(db, "actor-1", "CenterManager", CenterA);
+        await SeedIamKeeperAsync(db);
+        db.UserProfiles.Add(new UserProfile
+        {
+            UserId = "target-1",
+            EmployeeNumber = "EMP-old",
+            RankOrTitle = "ممرض",
+            UpdatedByUserId = "actor-1",
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var harness = CreateUserService(db, central: false);
+        var before = await harness.Service.GetUserAsync("target-1");
+        Assert.Equal("EMP-old", before.employeeNumber);
+        Assert.Equal("ممرض", before.rankOrTitle);
+
+        var updated = await harness.Service.UpdateUserAsync("target-1", new UpdateUserPatchRequest
+        {
+            fullName = "ممرض محدث",
+            username = "nurse",
+            email = "nurse@example.com",
+            employeeNumber = "EMP-new",
+            rankOrTitle = "طبيب عظمية"
+        });
+
+        Assert.Equal("EMP-new", updated.employeeNumber);
+        Assert.Equal("طبيب عظمية", updated.rankOrTitle);
+        var profile = await db.UserProfiles.SingleAsync(p => p.UserId == "target-1");
+        Assert.Equal("EMP-new", profile.EmployeeNumber);
+        Assert.Equal("طبيب عظمية", profile.RankOrTitle);
     }
 
     [Fact]
@@ -160,6 +246,8 @@ public class RoleAssignmentPathTests
             fullName = "مستخدم",
             username = "nurse",
             email = "nurse@example.com",
+            employeeNumber = "EMP-nurse",
+            rankOrTitle = "موظف استقبال",
             roles = [new RoleLiteDto(clerk, "ReceptionClerk")]
         });
 
@@ -172,6 +260,8 @@ public class RoleAssignmentPathTests
         });
 
         var links = await db.UserRoleAssociations.Where(x => x.UserId == "target-1" && x.IsActive).ToListAsync();
+        var nurse = await db.Users.SingleAsync(u => u.Id == "target-1");
+        Assert.NotNull(nurse.UpdatedAt);
         Assert.Contains(links, x => x.RoleId == supervisor && x.CenterId == CenterA);
         Assert.Contains(links, x => x.RoleId == supervisor && x.CenterId == CenterB);
         Assert.DoesNotContain(links, x => x.CenterId == null);
@@ -209,6 +299,8 @@ public class RoleAssignmentPathTests
             {
                 username = "nurse",
                 email = "nurse@example.com",
+                employeeNumber = "EMP-nurse",
+                rankOrTitle = "موظف",
                 roles = [new RoleLiteDto(officer, "CenterOfficer")]
             }));
         await Assert.ThrowsAsync<ForbiddenPermissionException>(() =>
@@ -231,6 +323,8 @@ public class RoleAssignmentPathTests
         users.Setup(r => r.SharesActiveCenterAsync("actor-1", target.Id, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         users.Setup(r => r.GetDirectPermissionIdsAsync(target.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<Guid>());
+        users.Setup(r => r.GetActiveDirectPermissionIdsAsync(target.Id, CenterA, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Guid>());
 
         var permissions = new Mock<IPermissionRepository>();
         permissions.Setup(r => r.GetActiveIdsAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
@@ -249,6 +343,8 @@ public class RoleAssignmentPathTests
             });
         access.Setup(a => a.LoadAsync(target.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AccessSnapshot());
+        access.Setup(a => a.IsActivelyAssignedAsync(target.Id, CenterA, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
 
         var manager = CreateUserManager();
         manager.Setup(m => m.FindByIdAsync(target.Id)).ReturnsAsync(target);
@@ -273,18 +369,90 @@ public class RoleAssignmentPathTests
         users.Verify(r => r.AddUserPermissions(It.IsAny<IEnumerable<UserPermission>>()), Times.Never);
     }
 
+    [Fact]
+    public async Task Direct_permission_toggle_is_limited_to_the_requested_center()
+    {
+        await using var db = CreateDb();
+        await SeedCenterAsync(db, CenterA, true);
+        await SeedCenterAsync(db, CenterB, true);
+        await SeedUserAsync(db, "actor-1", "manager");
+        await SeedUserAsync(db, "target-1", "nurse");
+        await SeedUserCenterAsync(db, "actor-1", CenterA);
+        await SeedUserCenterAsync(db, "target-1", CenterA);
+        await SeedUserCenterAsync(db, "target-1", CenterB);
+        await SeedRoleLinkAsync(db, "actor-1", "CenterManager", CenterA);
+        await SeedIamKeeperAsync(db);
+        var permissionId = await SeedPermissionAsync(db, "Members.View");
+
+        var gate = new Mock<IPermissionGate>();
+        gate.Setup(g => g.GetPermissions()).Returns(new[] { "Members.View", SystemPermissions.UserManagement.AssignPermissions });
+        var local = CreateUserService(db, central: false, gate: gate.Object);
+
+        await local.Service.TogglePermissionsForUserAsync(new AssignPermissionToUserDto
+        {
+            UserId = "target-1",
+            PermissionId = [permissionId]
+        });
+
+        var granted = await db.UserPermissions.SingleAsync(p => p.UserId == "target-1" && p.IsActive);
+        Assert.Equal(permissionId, granted.PermissionId);
+        Assert.Equal(CenterA, granted.CenterId);
+        Assert.Null(granted.RevokeReason);
+
+        await Assert.ThrowsAsync<ForbiddenPermissionException>(() =>
+            local.Service.TogglePermissionsForUserAsync(new AssignPermissionToUserDto
+            {
+                UserId = "target-1",
+                PermissionId = [permissionId],
+                CenterId = CenterB
+            }));
+
+        await local.Service.TogglePermissionsForUserAsync(new AssignPermissionToUserDto
+        {
+            UserId = "target-1",
+            PermissionId = [permissionId],
+            CenterId = CenterA
+        });
+
+        var revoked = await db.UserPermissions.SingleAsync(p => p.UserId == "target-1" && p.PermissionId == permissionId);
+        Assert.False(revoked.IsActive);
+        Assert.Equal(IamRetention.DirectPermissionWithdrawn, revoked.RevokeReason);
+        Assert.Equal(CenterA, revoked.CenterId);
+
+        await SeedRoleLinkAsync(db, "actor-1", "SuperAdmin", null);
+        var centralGate = new Mock<IPermissionGate>();
+        centralGate.Setup(g => g.GetPermissions()).Returns(new[] { "Members.View" });
+        var central = CreateUserService(db, central: true, gate: centralGate.Object);
+        await central.Service.TogglePermissionsForUserAsync(new AssignPermissionToUserDto
+        {
+            UserId = "target-1",
+            PermissionId = [permissionId]
+        });
+
+        var centralGrant = await db.UserPermissions.SingleAsync(p =>
+            p.UserId == "target-1" && p.IsActive && p.CenterId == null);
+        Assert.Equal(permissionId, centralGrant.PermissionId);
+        Assert.Equal(CenterA, revoked.CenterId);
+    }
+
     private static CreateUserDto NewUser(string username, string role, Guid? centerId = null) => new()
     {
         fullName = "مستخدم جديد",
         username = username,
         email = $"{username}@example.com",
+        employeeNumber = $"EMP-{username}",
+        rankOrTitle = "موظف",
         password = Password,
         confirmPassword = Password,
         roles = [role],
         centerId = centerId
     };
 
-    private static UserHarness CreateUserService(AppDbContext db, bool central, IUnitOfWork? uow = null)
+    private static UserHarness CreateUserService(
+        AppDbContext db,
+        bool central,
+        IUnitOfWork? uow = null,
+        IPermissionGate? gate = null)
     {
         var manager = CreateUserManager();
         manager.Setup(m => m.FindByNameAsync(It.IsAny<string>()))
@@ -333,12 +501,12 @@ public class RoleAssignmentPathTests
             null!,
             new UserRepository(db),
             new RoleRepository(db),
-            Mock.Of<IPermissionRepository>(),
+            new PermissionRepository(db),
             null!,
             new RefreshTokenRepository(db),
             new AccessContextRepository(db),
             uow ?? new SavingUnitOfWork(db),
-            Mock.Of<IPermissionGate>(),
+            gate ?? Mock.Of<IPermissionGate>(),
             null!,
             actor,
             sanitizer.Object,
@@ -458,12 +626,25 @@ public class RoleAssignmentPathTests
             Id = Guid.NewGuid().ToString(),
             Name = name,
             NormalizedName = name.ToUpperInvariant(),
+            Scope = AssignableRolePolicy.CatalogScopeForName(name),
             IsActive = true,
             CreatedAt = DateTime.UtcNow
         };
         db.Roles.Add(role);
         await db.SaveChangesAsync();
         return role.Id;
+    }
+
+    private static async Task<Guid> SeedPermissionAsync(AppDbContext db, string permissionName)
+    {
+        var permission = await db.Permissions.FirstOrDefaultAsync(p => p.Name == permissionName);
+        if (permission is not null)
+            return permission.Id;
+
+        permission = new Permission { Id = Guid.NewGuid(), Name = permissionName, IsActive = true };
+        db.Permissions.Add(permission);
+        await db.SaveChangesAsync();
+        return permission.Id;
     }
 
     private static async Task SeedRolePermissionAsync(AppDbContext db, string roleId, string permissionName)

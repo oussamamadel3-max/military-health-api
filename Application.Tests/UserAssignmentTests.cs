@@ -484,6 +484,7 @@ public class UserAssignmentTests
             Id = Guid.NewGuid().ToString(),
             Name = name,
             NormalizedName = name.ToUpperInvariant(),
+            Scope = AssignableRolePolicy.CatalogScopeForName(name),
             IsActive = isActive,
             CreatedAt = DateTime.UtcNow
         };

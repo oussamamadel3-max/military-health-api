@@ -101,6 +101,7 @@ public class ChangeOwnPasswordTests
             m => m.ChangePasswordAsync(harness.User, "Current!1", StrongPassword),
             Times.Once);
         harness.UserManager.Verify(m => m.UpdateSecurityStampAsync(harness.User), Times.Once);
+        Assert.NotNull(harness.User.UpdatedAt);
         Assert.True(harness.RefreshToken.IsRevoked);
         Assert.NotNull(harness.RefreshToken.RevokedAt);
         harness.UnitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
@@ -201,6 +202,7 @@ public class ChangeOwnPasswordTests
 
         var manager = CreateUserManager();
         manager.Setup(m => m.FindByIdAsync(user.Id)).ReturnsAsync(user);
+        manager.Setup(m => m.UpdateAsync(It.IsAny<User>())).ReturnsAsync(IdentityResult.Success);
 
         var users = new Mock<IUserRepository>();
         users.Setup(r => r.FindByIdAsync(user.Id, It.IsAny<CancellationToken>())).ReturnsAsync(user);

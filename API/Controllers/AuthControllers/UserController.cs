@@ -178,7 +178,8 @@ namespace API.Controllers.AuthControllers
         }
 
         /// <summary>
-        /// عرض الصلاحيات الفعلية (FR-021). يسمح لصاحب الحساب أو لمن لديه UserManagement.Read ضمن تفويضه.
+        /// عرض الصلاحيات الفعلية (FR-021). يسمح لصاحب الحساب، أو لمن لديه UserManagement.Read،
+        /// أو لمن لديه UserManagement.ViewEffectiveAccess، ضمن تفويضه.
         /// </summary>
         [HttpGet("[action]/{userId}")]
         public async Task<IResult> GetEffectivePermissions(

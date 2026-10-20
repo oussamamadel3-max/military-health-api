@@ -7,6 +7,10 @@ public interface IUserRepository
     Task<User?> GetByIdAsync(string id, bool asNoTracking = false, CancellationToken cancellationToken = default);
     Task<User?> FindByIdAsync(string id, CancellationToken cancellationToken = default);
     IQueryable<User> QueryUsers(bool asNoTracking = true);
+    IQueryable<UserProfile> QueryProfiles(bool asNoTracking = true);
+    Task<UserProfile?> FindTrackedProfileAsync(string userId, CancellationToken cancellationToken = default);
+    Task<bool> EmployeeNumberExistsAsync(string employeeNumber, string? excludeUserId = null, CancellationToken cancellationToken = default);
+    void AddProfile(UserProfile profile);
     /// <summary>
     /// مستخدمو المراكز المشتركة مع الممثل، باستثناء من لديهم سلطة مركزية.
     /// </summary>
@@ -34,6 +38,7 @@ public interface IUserRepository
     Task<List<UserPermission>> GetUserPermissionsAsync(string userId, CancellationToken cancellationToken = default);
     Task<List<UserFieldPermission>> GetUserFieldPermissionsAsync(string userId, CancellationToken cancellationToken = default);
     Task<List<Guid>> GetDirectPermissionIdsAsync(string userId, CancellationToken cancellationToken = default);
+    Task<List<Guid>> GetActiveDirectPermissionIdsAsync(string userId, Guid? centerId, CancellationToken cancellationToken = default);
     Task<List<Guid>> GetDirectFieldPermissionIdsAsync(string userId, CancellationToken cancellationToken = default);
     Task<List<string>> GetUserIdsByRoleIdAsync(string roleId, CancellationToken cancellationToken = default);
     Task<List<string>> GetActiveUserIdsExceptAsync(string excludeUserId, CancellationToken cancellationToken = default);

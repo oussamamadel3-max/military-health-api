@@ -57,6 +57,7 @@ public static class MilitaryHealthSeedCatalog
     public static readonly SeedPermission[] TemplateIamPermissions =
     [
         new(SystemPermissions.UserManagement.Read, "قراءة بيانات المستخدمين", "UserManagement.Read"),
+        new(SystemPermissions.UserManagement.ViewEffectiveAccess, "عرض الصلاحيات الفعلية للمستخدم", "UserManagement.ViewEffectiveAccess"),
         new(SystemPermissions.UserManagement.Create, "إنشاء مستخدمين جدد", "UserManagement.Create"),
         new(SystemPermissions.UserManagement.Edit, "تعديل بيانات المستخدمين", "UserManagement.Edit"),
         new(SystemPermissions.UserManagement.Delete, "حذف المستخدمين", "UserManagement.Delete"),
@@ -239,6 +240,9 @@ public static class MilitaryHealthSeedCatalog
         // الاطلاع على سجل التدقيق واستخراجه
         Grant("SuperAdmin", SystemPermissions.AuditLog.Read, SystemPermissions.AuditLog.Export),
         Grant("Auditor", SystemPermissions.AuditLog.Read, SystemPermissions.AuditLog.Export),
+
+        // عرض الصلاحيات الفعلية (FR-021) دون إدارة المستخدمين
+        Grant("Auditor", SystemPermissions.UserManagement.ViewEffectiveAccess),
     ];
 
     /// <summary>

@@ -233,11 +233,11 @@ public class UserAssignmentService : IUserAssignmentService
 
         var actorIsCentral = await UserManagementScopeGuard.ActorHasUnrestrictedScopeAsync(
             _access, actorId, cancellationToken);
-        AssignableRolePolicy.EnsureAssignable(actorIsCentral, role.Name, role.IsActive);
+        AssignableRolePolicy.EnsureAssignable(actorIsCentral, role.Name, role.IsActive, role.Scope);
 
         var scopeCenterId = AssignableRolePolicy.ResolveSyncScope(
             actorIsCentral,
-            [role.Name!],
+            [role.Scope],
             dto.CenterId,
             _currentCenter.CenterId,
             _currentCenter.IsCentralContext);
@@ -362,16 +362,16 @@ public class UserAssignmentService : IUserAssignmentService
         var actorIsCentral = await UserManagementScopeGuard.ActorHasUnrestrictedScopeAsync(
             _access, actorId, cancellationToken);
         if (!actorIsCentral)
-            AssignableRolePolicy.EnsureAssignable(actorIsCentral: false, role.Name, roleIsActive: true);
+            AssignableRolePolicy.EnsureAssignable(actorIsCentral: false, role.Name, roleIsActive: true, role.Scope);
 
         var scopeCenterId = AssignableRolePolicy.ResolveRevokeScope(
             actorIsCentral,
-            role.Name ?? string.Empty,
+            role.Scope,
             dto.CenterId,
             _currentCenter.CenterId,
             _currentCenter.IsCentralContext);
 
-        if (!AssignableRolePolicy.MayRevoke(actorIsCentral, role.Name, scopeCenterId))
+        if (!AssignableRolePolicy.MayRevoke(actorIsCentral, role.Name, scopeCenterId, role.Scope))
             throw new ForbiddenPermissionException("لا يمكنك إلغاء هذا الدور ضمن حدود تفويضك.");
 
         await UserManagementScopeGuard.EnsureCanAssignRoleScopeAsync(

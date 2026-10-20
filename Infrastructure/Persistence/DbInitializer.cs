@@ -1,5 +1,7 @@
 using Application.Common.Permissions;
 using Application.Common.Security;
+using Application.Interfaces;
+using Application.Interfaces.Repositories;
 using Domain.Entities.Auth;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -15,6 +17,9 @@ namespace Infrastructure.Persistence
             var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var userManager = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
             var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<Role>>();
+            var userRepository = scope.ServiceProvider.GetRequiredService<IUserRepository>();
+            var refreshTokens = scope.ServiceProvider.GetRequiredService<IRefreshTokenRepository>();
+            var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
 
             // 1) تأكد من وجود القاعدة ومحدّثة
             await context.Database.MigrateAsync();
@@ -23,7 +28,11 @@ namespace Infrastructure.Persistence
             // Helpers
             // ============================
 
-            async Task<Role> EnsureRoleAsync(string name, string normalized, string? descriptionAr = null)
+            async Task<Role> EnsureRoleAsync(
+                string name,
+                string normalized,
+                string? descriptionAr = null,
+                Domain.Enums.RoleScope scope = Domain.Enums.RoleScope.Center)
             {
                 var role = await roleManager.Roles.FirstOrDefaultAsync(r => r.Name == name);
                 if (role == null)
@@ -34,6 +43,7 @@ namespace Infrastructure.Persistence
                         Name = name,
                         NormalizedName = normalized,
                         Description = descriptionAr,
+                        Scope = scope,
                         IsActive = true,
                         CreatedAt = DateTime.Now
                     };
@@ -53,6 +63,11 @@ namespace Infrastructure.Persistence
                         !string.Equals(role.Description, descriptionAr, StringComparison.Ordinal))
                     {
                         role.Description = descriptionAr;
+                        dirty = true;
+                    }
+                    if (role.Scope != scope)
+                    {
+                        role.Scope = scope;
                         dirty = true;
                     }
                     if (dirty)
@@ -302,6 +317,8 @@ namespace Infrastructure.Persistence
                     .ToList();
                 if (names.Count == 0) return;
 
+                var changed = false;
+
                 var perms = await context.Permissions
                     .Where(p => p.Name != null && names.Contains(p.Name))
                     .ToListAsync();
@@ -332,8 +349,15 @@ namespace Infrastructure.Persistence
                             IsActive = true
                         });
                     }
+
+                    changed = true;
                 }
                 await context.SaveChangesAsync();
+                if (changed)
+                {
+                    await SecurityStampHelper.InvalidateUsersWithRoleAsync(
+                        userRepository, refreshTokens, unitOfWork, userManager, roleId);
+                }
             }
 
 
@@ -346,7 +370,10 @@ namespace Infrastructure.Persistence
                 seededRoles[roleDef.Name] = await EnsureRoleAsync(
                     roleDef.Name,
                     roleDef.NormalizedName,
-                    roleDef.DescriptionAr);
+                    roleDef.DescriptionAr,
+                    roleDef.IsCentralCapable
+                        ? Domain.Enums.RoleScope.Central
+                        : Domain.Enums.RoleScope.Center);
             }
 
             var roleSuperAdmin = seededRoles["SuperAdmin"];

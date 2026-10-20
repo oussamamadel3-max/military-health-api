@@ -25,6 +25,27 @@ public class UserRepository : IUserRepository
     public IQueryable<User> QueryUsers(bool asNoTracking = true)
         => asNoTracking ? _context.Users.AsNoTracking() : _context.Users;
 
+    public IQueryable<UserProfile> QueryProfiles(bool asNoTracking = true)
+        => asNoTracking ? _context.UserProfiles.AsNoTracking() : _context.UserProfiles;
+
+    public Task<UserProfile?> FindTrackedProfileAsync(string userId, CancellationToken cancellationToken = default)
+        => _context.UserProfiles.FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
+
+    public Task<bool> EmployeeNumberExistsAsync(
+        string employeeNumber,
+        string? excludeUserId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var query = _context.UserProfiles.AsNoTracking()
+            .Where(p => p.EmployeeNumber == employeeNumber);
+        if (!string.IsNullOrWhiteSpace(excludeUserId))
+            query = query.Where(p => p.UserId != excludeUserId);
+        return query.AnyAsync(cancellationToken);
+    }
+
+    public void AddProfile(UserProfile profile)
+        => _context.UserProfiles.Add(profile);
+
     public IQueryable<User> QueryUsersManageableByLocalActor(string actorUserId, bool asNoTracking = true)
     {
         var users = asNoTracking ? _context.Users.AsNoTracking() : _context.Users;
@@ -231,6 +252,15 @@ public class UserRepository : IUserRepository
     public async Task<List<Guid>> GetDirectPermissionIdsAsync(string userId, CancellationToken cancellationToken = default)
         => await _context.UserPermissions
             .Where(up => up.UserId == userId && up.IsActive)
+            .Select(up => up.PermissionId)
+            .ToListAsync(cancellationToken);
+
+    public Task<List<Guid>> GetActiveDirectPermissionIdsAsync(
+        string userId,
+        Guid? centerId,
+        CancellationToken cancellationToken = default)
+        => _context.UserPermissions.AsNoTracking()
+            .Where(up => up.UserId == userId && up.IsActive && up.CenterId == centerId)
             .Select(up => up.PermissionId)
             .ToListAsync(cancellationToken);
 

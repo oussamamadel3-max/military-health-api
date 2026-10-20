@@ -1,5 +1,6 @@
 using Application.Attributes;
 using Application.Common;
+using Application.Interfaces.Services;
 using System.ComponentModel.DataAnnotations;
 
 namespace Application.Dtos.AuthDtos;
@@ -40,6 +41,14 @@ public class UpdateUserDto
     [RegularExpression(@"^[0-9+ -]*$", ErrorMessage = "رقم الهاتف غير صالح")]
     public string? Phone { get; set; }
 
+    [Required(ErrorMessage = "الرقم الوظيفي مطلوب.")]
+    [StringLength(50, MinimumLength = 1, ErrorMessage = "الرقم الوظيفي يجب أن يكون بين 1 و 50 حرفاً.")]
+    public string? EmployeeNumber { get; set; }
+
+    [Required(ErrorMessage = "الرتبة أو المسمى الوظيفي مطلوب.")]
+    [StringLength(100, MinimumLength = 1, ErrorMessage = "الرتبة أو المسمى الوظيفي يجب أن يكون بين 1 و 100 حرف.")]
+    public string? RankOrTitle { get; set; }
+
     public bool? IsActive { get; set; }
 }
 public class UpdateUserPatchRequest
@@ -61,6 +70,15 @@ public class UpdateUserPatchRequest
     [StringLength(20)]
     [RegularExpression(@"^[0-9+ -]*$", ErrorMessage = "رقم الهاتف غير صالح")]
     public string? phone { get; set; }
+
+    [Required(ErrorMessage = "الرقم الوظيفي مطلوب.")]
+    [StringLength(50, MinimumLength = 1, ErrorMessage = "الرقم الوظيفي يجب أن يكون بين 1 و 50 حرفاً.")]
+    public string? employeeNumber { get; set; }
+
+    [Required(ErrorMessage = "الرتبة أو المسمى الوظيفي مطلوب.")]
+    [StringLength(100, MinimumLength = 1, ErrorMessage = "الرتبة أو المسمى الوظيفي يجب أن يكون بين 1 و 100 حرف.")]
+    public string? rankOrTitle { get; set; }
+
     public bool? isActive { get; set; }
     public List<RoleLiteDto>? roles { get; set; }
 
@@ -95,6 +113,14 @@ public class CreateUserDto
     [RegularExpression(@"^[0-9+ -]*$", ErrorMessage = "رقم الهاتف غير صالح")]
     public string? phone { get; set; }
 
+    [Required(ErrorMessage = "الرقم الوظيفي مطلوب.")]
+    [StringLength(50, MinimumLength = 1, ErrorMessage = "الرقم الوظيفي يجب أن يكون بين 1 و 50 حرفاً.")]
+    public string employeeNumber { get; set; } = "";
+
+    [Required(ErrorMessage = "الرتبة أو المسمى الوظيفي مطلوب.")]
+    [StringLength(100, MinimumLength = 1, ErrorMessage = "الرتبة أو المسمى الوظيفي يجب أن يكون بين 1 و 100 حرف.")]
+    public string rankOrTitle { get; set; } = "";
+
     [Required]
     [StringLength(PasswordPolicy.MaxLength, MinimumLength = PasswordPolicy.MinLength)]
     [RegularExpression(PasswordPolicy.ComplexityPattern, ErrorMessage = PasswordPolicy.ComplexityErrorMessage)]
@@ -126,6 +152,8 @@ public class CreatedUserResponseDto
     public string username { get; set; } = "";
     public string email { get; set; } = "";
     public string? phone { get; set; }
+    public string employeeNumber { get; set; } = "";
+    public string rankOrTitle { get; set; } = "";
     public bool isActive { get; set; }
     public bool mustChangePassword { get; set; }
     public Guid? centerId { get; set; }
@@ -142,13 +170,19 @@ public class UserListItemDto
     public string username { get; set; } = string.Empty;
     public string email { get; set; } = string.Empty;
     public string? phone { get; set; }
+    public string? employeeNumber { get; set; }
+    public string? rankOrTitle { get; set; }
     public bool isActive { get; set; }
     public bool mustChangePassword { get; set; }
     public DateTime createdAt { get; set; }
+    public DateTimeOffset? lastLoginAt { get; set; }
+    public DateTimeOffset? updatedAt { get; set; }
     public int rolesCount { get; set; }
     public int permissionsCount { get; set; }
     public List<RoleLiteDto> roles { get; set; } = new();
     public List<PermissionLiteDto> Permissions { get; set; } = new();
+    /// <summary>المراكز الفعالة المسندة للمستخدم.</summary>
+    public List<AssignedCenterDto> centers { get; set; } = new();
 }
 public class UpdateUserWithRolesDto
 {

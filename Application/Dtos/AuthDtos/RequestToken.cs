@@ -67,6 +67,8 @@ namespace Application.Dtos.AuthDtos
     {
         public string UserId { get; set; } = string.Empty;
         public DateTime CreationDate { get; set; }
+        public DateTimeOffset? LastLoginAt { get; set; }
+        public DateTimeOffset? UpdatedAt { get; set; }
         public string UserName { get; set; } = string.Empty;
         public string Email { get; set; } = string.Empty;
         public string FullName { get; set; } = string.Empty;

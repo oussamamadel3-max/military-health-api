@@ -8,6 +8,7 @@ using Application.Common.Results;
 using Application.Dtos.AuthDtos;
 using Application.Exceptions;
 using Domain.Entities.Auth;
+using Domain.Enums;
 using Application.Common.Permissions;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -65,7 +66,11 @@ namespace Application.Services.AuthServices
             if (roleExists)
                 throw new RoleAlreadyExistsException(roleName);
 
+            if (!Enum.IsDefined(typeof(RoleScope), newRole.Scope))
+                throw new InvalidRoleDataException("نطاق الدور غير صالح. القيم: Center أو Central.");
+
             var role = _mapper.Map<Role>(newRole);
+            role.Scope = newRole.Scope;
 
             role.CreatedAt = DateTime.Now;
             role.CreatedBy = _currentUserService.UserId;
@@ -97,11 +102,17 @@ namespace Application.Services.AuthServices
 
             ReservedRoleGuard.EnsureCanRename(role.Name, newRoleName);
 
+            if (!Enum.IsDefined(typeof(RoleScope), updatedRole.Scope))
+                throw new InvalidRoleDataException("نطاق الدور غير صالح. القيم: Center أو Central.");
+
+            ReservedRoleGuard.EnsureCanChangeScope(role.Name, updatedRole.Scope);
+
             var existingRoleWithSameName = await _roleManager.FindByNameAsync(newRoleName);
             if (existingRoleWithSameName != null && existingRoleWithSameName.Id != role.Id)
                 throw new RoleAlreadyExistsException(newRoleName);
 
             _mapper.Map(updatedRole, role);
+            role.Scope = updatedRole.Scope;
 
             role.UpdatedAt = DateTime.Now;
             role.UpdatedBy = _currentUserService.UserId;
@@ -169,7 +180,12 @@ namespace Application.Services.AuthServices
 
 
         #region          جلب الصلاحيات مع تفاصيلها 
-        public async Task<PaginatedList<RoleDetailsDto>> GetRolesWithDetailsAsync(int pageNumber, int pageSize, string? name = null, bool? isActive = null)
+        public async Task<PaginatedList<RoleDetailsDto>> GetRolesWithDetailsAsync(
+            int pageNumber,
+            int pageSize,
+            string? name = null,
+            bool? isActive = null,
+            RoleScope? scope = null)
         {
             _permissionGate.EnsureAll(SystemPermissions.RoleManagement.Read);
 
@@ -185,6 +201,9 @@ namespace Application.Services.AuthServices
 
             if (isActive.HasValue)
                 rolesQuery = rolesQuery.Where(r => r.IsActive == isActive.Value);
+
+            if (scope.HasValue)
+                rolesQuery = rolesQuery.Where(r => r.Scope == scope.Value);
 
             rolesQuery = rolesQuery.OrderBy(r => r.Name);
 
@@ -431,8 +450,12 @@ namespace Application.Services.AuthServices
 
             var invalidSkipped = requestedDistinct.Count - validIds.Count;
 
+            if (!Enum.IsDefined(typeof(RoleScope), dto.Scope))
+                throw new InvalidRoleDataException("نطاق الدور غير صالح. القيم: Center أو Central.");
+
             var role = _mapper.Map<Role>(dto);
             role.Name = roleName;
+            role.Scope = dto.Scope;
             role.CreatedAt = DateTime.Now;
             role.CreatedBy = _currentUserService.UserId;
             role.IsActive = true;

@@ -200,28 +200,44 @@ public class AttachmentBehaviorTests
     }
 
     [Fact]
-    public async Task Central_user_without_a_center_can_upload_a_profile_photo()
+    public async Task Central_user_with_profile_can_upload_photo_without_active_center()
     {
-        UserProfile? created = null;
+        var profile = new UserProfile
+        {
+            UserId = "user-1",
+            EmployeeNumber = "E-100",
+            RankOrTitle = "نقيب",
+            UpdatedByUserId = "user-1"
+        };
         var files = new Mock<IAttachmentRepository>();
-        files.Setup(f => f.FindTrackedProfileAsync("user-1", It.IsAny<CancellationToken>())).ReturnsAsync((UserProfile?)null);
+        files.Setup(f => f.FindTrackedProfileAsync("user-1", It.IsAny<CancellationToken>())).ReturnsAsync(profile);
         files.Setup(f => f.FindActiveAssignmentCenterIdAsync("user-1", It.IsAny<CancellationToken>())).ReturnsAsync((Guid?)null);
         files.Setup(f => f.FindFirstActiveCenterIdAsync(It.IsAny<CancellationToken>())).ReturnsAsync((Guid?)null);
-        files.Setup(f => f.AddProfile(It.IsAny<UserProfile>())).Callback<UserProfile>(profile => created = profile);
-        files.Setup(f => f.Add(It.IsAny<FileAsset>())).Callback<FileAsset>(file =>
-        {
-            if (created != null)
-                created.ProfileFileAssetId = file.FileAssetId;
-        });
 
         var service = CreateService(files, null, assigned: false, central: true);
         var result = await service.UploadAsync("user-1", "UserProfile", PdfFile(), null);
 
-        Assert.NotNull(created);
-        Assert.Equal("user-1", created!.EmployeeNumber);
-        Assert.Equal("غير محدد", created.RankOrTitle);
-        Assert.Equal(result.FileAssetId, created.ProfileFileAssetId);
+        Assert.Equal(result.FileAssetId, profile.ProfileFileAssetId);
+        Assert.Equal("E-100", profile.EmployeeNumber);
+        Assert.Equal("نقيب", profile.RankOrTitle);
+        files.Verify(f => f.AddProfile(It.IsAny<UserProfile>()), Times.Never);
         files.Verify(f => f.AddMedicalAttachment(It.IsAny<MedicalAttachment>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Profile_photo_upload_rejects_when_job_profile_is_missing()
+    {
+        var files = new Mock<IAttachmentRepository>();
+        files.Setup(f => f.FindTrackedProfileAsync("user-1", It.IsAny<CancellationToken>())).ReturnsAsync((UserProfile?)null);
+        files.Setup(f => f.FindActiveAssignmentCenterIdAsync("user-1", It.IsAny<CancellationToken>())).ReturnsAsync((Guid?)null);
+        files.Setup(f => f.FindFirstActiveCenterIdAsync(It.IsAny<CancellationToken>())).ReturnsAsync((Guid?)null);
+
+        var service = CreateService(files, null, assigned: false, central: true);
+        var error = await Assert.ThrowsAsync<InvalidUserDataException>(() =>
+            service.UploadAsync("user-1", "UserProfile", PdfFile(), null));
+
+        Assert.Contains("البيانات الوظيفية", error.Message);
+        files.Verify(f => f.AddProfile(It.IsAny<UserProfile>()), Times.Never);
     }
 
     [Fact]

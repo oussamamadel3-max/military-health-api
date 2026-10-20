@@ -54,7 +54,10 @@ public sealed class UserEffectiveAccessService : IUserEffectiveAccessService
 
         if (!isSelf)
         {
-            _permissionGate.EnsureAll(SystemPermissions.UserManagement.Read);
+            if (!_permissionGate.Has(SystemPermissions.UserManagement.Read) &&
+                !_permissionGate.Has(SystemPermissions.UserManagement.ViewEffectiveAccess))
+                throw new ForbiddenPermissionException();
+
             await UserManagementScopeGuard.EnsureCanManageTargetAsync(
                 _access, _users, actorId, userId, cancellationToken);
         }

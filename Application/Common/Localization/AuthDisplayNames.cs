@@ -27,6 +27,7 @@ namespace Application.Common.Localization
             new(StringComparer.OrdinalIgnoreCase)
             {
                 ["UserManagement.Read"] = "قراءة بيانات المستخدمين",
+                ["UserManagement.ViewEffectiveAccess"] = "عرض الصلاحيات الفعلية للمستخدم",
                 ["UserManagement.Create"] = "إنشاء مستخدمين جدد",
                 ["UserManagement.Edit"] = "تعديل بيانات المستخدمين",
                 ["UserManagement.Delete"] = "حذف المستخدمين",
@@ -108,6 +109,7 @@ namespace Application.Common.Localization
             new(StringComparer.OrdinalIgnoreCase)
             {
                 ["Read"] = "قراءة",
+                ["ViewEffectiveAccess"] = "عرض الصلاحيات الفعلية",
                 ["Create"] = "إنشاء",
                 ["Edit"] = "تعديل",
                 ["Delete"] = "حذف",

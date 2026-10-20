@@ -2,6 +2,7 @@ using API.Infrastructure;
 using Application.Common.Permissions;
 using Application.Dtos.AuthDtos;
 using Application.Interfaces.Services;
+using Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -59,9 +60,10 @@ namespace API.Controllers.AuthControllers
             [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
             [FromQuery][Range(1, 500)] int pageSize = 10,
             [FromQuery] string? name = null,
-            [FromQuery] bool? isActive = null)
+            [FromQuery] bool? isActive = null,
+            [FromQuery] RoleScope? scope = null)
         {
-            var rolesResult = await _roleService.GetRolesWithDetailsAsync(pageNumber, pageSize, name, isActive);
+            var rolesResult = await _roleService.GetRolesWithDetailsAsync(pageNumber, pageSize, name, isActive, scope);
             return ApiResponse.Success("تم جلب قائمة الأدوار بنجاح.", rolesResult);
         }
 

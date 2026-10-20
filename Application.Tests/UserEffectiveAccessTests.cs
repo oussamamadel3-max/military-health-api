@@ -215,16 +215,68 @@ public class UserEffectiveAccessTests
         await SeedUserAsync(db, "actor-1", "clerk");
         await SeedUserAsync(db, "target-1", "nurse");
 
-        var gate = new Mock<IPermissionGate>();
-        gate.Setup(g => g.EnsureAll(It.IsAny<string[]>()))
-            .Throws(new ForbiddenPermissionException());
+        var service = CreateService(
+            db,
+            actorId: "actor-1",
+            centerId: null,
+            central: true,
+            configureGate: g => g.Setup(x => x.Has(It.IsAny<string>())).Returns(false));
+
+        await Assert.ThrowsAsync<ForbiddenPermissionException>(() =>
+            service.GetEffectiveAccessAsync("target-1"));
+    }
+
+    [Fact]
+    public async Task Auditor_permission_views_another_user_without_user_management_read()
+    {
+        await using var db = CreateDb();
+        await SeedCenterAsync(db, CenterA, "CA", "مركز أ");
+        await SeedUserAsync(db, "actor-1", "auditor");
+        await SeedUserAsync(db, "target-1", "nurse");
+        await SeedUserCenterAsync(db, "target-1", CenterA);
+        var auditorRole = await SeedRoleAsync(db, "Auditor");
+        await SeedUserRoleAsync(db, "actor-1", auditorRole, null);
 
         var service = CreateService(
             db,
             actorId: "actor-1",
             centerId: null,
             central: true,
-            gate: gate);
+            configureGate: g =>
+            {
+                g.Setup(x => x.Has(SystemPermissions.UserManagement.Read)).Returns(false);
+                g.Setup(x => x.Has(SystemPermissions.UserManagement.ViewEffectiveAccess)).Returns(true);
+            });
+
+        var dto = await service.GetEffectiveAccessAsync("target-1");
+
+        Assert.False(dto.IsSelfView);
+        Assert.Equal("target-1", dto.UserId);
+        Assert.Contains(dto.ActiveCenters, c => c.CenterId == CenterA);
+    }
+
+    [Fact]
+    public async Task View_permission_does_not_bypass_center_scope()
+    {
+        await using var db = CreateDb();
+        await SeedCenterAsync(db, CenterA, "CA", "مركز أ");
+        await SeedCenterAsync(db, CenterB, "CB", "مركز ب");
+        await SeedUserAsync(db, "actor-1", "manager");
+        await SeedUserAsync(db, "target-1", "nurse");
+        await SeedUserCenterAsync(db, "actor-1", CenterA);
+        await SeedUserCenterAsync(db, "target-1", CenterB);
+        await SeedLocalManagerAsync(db, "actor-1", CenterA);
+
+        var service = CreateService(
+            db,
+            actorId: "actor-1",
+            centerId: CenterA,
+            central: false,
+            configureGate: g =>
+            {
+                g.Setup(x => x.Has(SystemPermissions.UserManagement.Read)).Returns(false);
+                g.Setup(x => x.Has(SystemPermissions.UserManagement.ViewEffectiveAccess)).Returns(true);
+            });
 
         await Assert.ThrowsAsync<ForbiddenPermissionException>(() =>
             service.GetEffectiveAccessAsync("target-1"));
@@ -263,15 +315,16 @@ public class UserEffectiveAccessTests
         string actorId,
         Guid? centerId,
         bool central,
-        Mock<IPermissionGate>? gate = null)
+        Action<Mock<IPermissionGate>>? configureGate = null)
     {
         var users = new UserRepository(db);
         var access = new AccessContextRepository(db);
         var audit = new AuditLogRepository(db);
         var uow = new TestUnitOfWork(db);
 
-        gate ??= new Mock<IPermissionGate>();
-        gate.Setup(g => g.EnsureAll(It.IsAny<string[]>()));
+        var gate = new Mock<IPermissionGate>();
+        gate.Setup(g => g.Has(SystemPermissions.UserManagement.Read)).Returns(true);
+        configureGate?.Invoke(gate);
 
         var current = new TestCurrentUser();
         current.SetUser(actorId, "actor", "127.0.0.1");
@@ -425,6 +478,7 @@ public class UserEffectiveAccessTests
             Id = Guid.NewGuid().ToString(),
             Name = name,
             NormalizedName = name.ToUpperInvariant(),
+            Scope = AssignableRolePolicy.CatalogScopeForName(name),
             IsActive = isActive,
             CreatedAt = DateTime.UtcNow
         };

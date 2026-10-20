@@ -1,10 +1,12 @@
+using Application.Common.Security;
 using Application.Exceptions;
+using Domain.Enums;
 
 namespace Application.Common.Permissions;
 
 /// <summary>
 /// يحمي أدوار SRS §6.2 المزروعة (الثمانية) من التعديل الخطير:
-/// إعادة التسمية، وتعطيل/إلغاء دور مدير النظام المركزي المحجوز.
+/// إعادة التسمية، وتغيير النطاق التشغيلي، وتعطيل/إلغاء دور مدير النظام المركزي المحجوز.
 /// </summary>
 public static class ReservedRoleGuard
 {
@@ -27,6 +29,16 @@ public static class ReservedRoleGuard
 
         if (!string.Equals(currentName?.Trim(), newName?.Trim(), StringComparison.OrdinalIgnoreCase))
             throw new ForbiddenPermissionException("لا يمكن إعادة تسمية الأدوار الأساسية للنظام.");
+    }
+
+    public static void EnsureCanChangeScope(string? roleName, RoleScope requestedScope)
+    {
+        if (!IsReserved(roleName))
+            return;
+
+        var catalogScope = AssignableRolePolicy.CatalogScopeForName(roleName);
+        if (requestedScope != catalogScope)
+            throw new ForbiddenPermissionException("لا يمكن تغيير نطاق الأدوار الأساسية للنظام.");
     }
 
     public static void EnsureCanDeactivate(string? roleName)
