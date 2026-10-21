@@ -218,6 +218,8 @@ public class UserManagementAlignmentTests
             .ReturnsAsync(new List<string>());
         users.Setup(r => r.SharesActiveCenterAsync("actor-1", target.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(sharesCenter);
+        users.Setup(r => r.QueryUserCenters(It.IsAny<bool>()))
+            .Returns(Enumerable.Empty<UserCenter>().AsQueryable());
 
         var roles = new Mock<IRoleRepository>();
         roles.Setup(r => r.GetRolePermissionsForRolesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))

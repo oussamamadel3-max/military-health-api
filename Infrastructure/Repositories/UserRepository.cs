@@ -56,9 +56,9 @@ public class UserRepository : IUserRepository
         return users.Where(u =>
             _context.UserCenters.Any(uc =>
                 uc.UserId == u.Id
-                && uc.IsActive
                 && uc.Center.IsActive
-                && actorCenterIds.Contains(uc.CenterId))
+                && actorCenterIds.Contains(uc.CenterId)
+                && (uc.IsActive || uc.RevokeReason == IamRetention.AccountCreatedInactive))
             && !_context.UserRoleAssociations.Any(a =>
                 a.UserId == u.Id && a.IsActive && a.CenterId == null && a.Role.IsActive)
             && !_context.UserPermissions.Any(p =>
@@ -82,12 +82,13 @@ public class UserRepository : IUserRepository
         if (actorCenterIds.Count == 0)
             return false;
 
+        // يشمل إسناد المركز المعلّق عند إنشاء حساب غير نشط حتى يتمكن المدير من التفعيل.
         return await _context.UserCenters.AsNoTracking()
             .AnyAsync(
                 uc => uc.UserId == targetUserId
-                    && uc.IsActive
                     && uc.Center.IsActive
-                    && actorCenterIds.Contains(uc.CenterId),
+                    && actorCenterIds.Contains(uc.CenterId)
+                    && (uc.IsActive || uc.RevokeReason == IamRetention.AccountCreatedInactive),
                 cancellationToken);
     }
 

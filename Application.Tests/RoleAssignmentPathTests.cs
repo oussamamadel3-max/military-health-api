@@ -99,6 +99,72 @@ public class RoleAssignmentPathTests
     }
 
     [Fact]
+    public async Task Create_inactive_user_defers_center_membership_without_active_link()
+    {
+        await using var db = CreateDb();
+        await SeedCenterAsync(db, CenterA, true);
+        await SeedUserAsync(db, "actor-1", "manager");
+        await SeedUserCenterAsync(db, "actor-1", CenterA);
+        await SeedRoleLinkAsync(db, "actor-1", "CenterManager", CenterA);
+        await SeedIamKeeperAsync(db);
+        await SeedRoleAsync(db, "ReceptionClerk");
+
+        var harness = CreateUserService(db, central: false);
+        var dto = NewUser("inactive.clerk", "ReceptionClerk");
+        dto.isActive = false;
+
+        var created = await harness.Service.Create(dto);
+
+        Assert.False(created.isActive);
+        Assert.Equal(CenterA, created.centerId);
+        var user = await db.Users.SingleAsync(u => u.Id == "created-1");
+        Assert.False(user.IsActive);
+
+        var membership = await db.UserCenters.SingleAsync(uc => uc.UserId == "created-1" && uc.CenterId == CenterA);
+        Assert.False(membership.IsActive);
+        Assert.Equal(IamRetention.AccountCreatedInactive, membership.RevokeReason);
+        Assert.NotNull(membership.RevokedAt);
+        Assert.Equal("actor-1", membership.RevokedByUserId);
+        Assert.False(await db.UserCenters.AnyAsync(uc =>
+            uc.UserId == "created-1" && uc.IsActive));
+    }
+
+    [Fact]
+    public async Task Activate_inactive_created_user_reactivates_deferred_center_membership()
+    {
+        await using var db = CreateDb();
+        await SeedCenterAsync(db, CenterA, true);
+        await SeedUserAsync(db, "actor-1", "manager");
+        await SeedUserCenterAsync(db, "actor-1", CenterA);
+        await SeedRoleLinkAsync(db, "actor-1", "CenterManager", CenterA);
+        await SeedIamKeeperAsync(db);
+        await SeedRoleAsync(db, "ReceptionClerk");
+
+        var harness = CreateUserService(db, central: false);
+        var dto = NewUser("pending.clerk", "ReceptionClerk");
+        dto.isActive = false;
+        await harness.Service.Create(dto);
+
+        harness.UserManager
+            .Setup(m => m.UpdateAsync(It.IsAny<User>()))
+            .ReturnsAsync(IdentityResult.Success);
+
+        var status = await harness.Service.UpdateUserStatusAsync(
+            "created-1",
+            new UpdateUserStatusRequest { isActive = true });
+
+        Assert.True(status.isActive);
+        var user = await db.Users.SingleAsync(u => u.Id == "created-1");
+        Assert.True(user.IsActive);
+
+        var membership = await db.UserCenters.SingleAsync(uc => uc.UserId == "created-1" && uc.CenterId == CenterA);
+        Assert.True(membership.IsActive);
+        Assert.Null(membership.RevokedAt);
+        Assert.Null(membership.RevokedByUserId);
+        Assert.True(string.IsNullOrEmpty(membership.RevokeReason));
+    }
+
+    [Fact]
     public async Task Get_and_update_return_and_persist_job_fields()
     {
         await using var db = CreateDb();

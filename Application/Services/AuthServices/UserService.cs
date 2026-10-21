@@ -149,17 +149,24 @@ public class UserService : IUserService
             }
 
             var assignedAt = DateTimeOffset.UtcNow;
-            _userRepository.AddUserCenters(new[]
+            // قيد iam.validateUserCenterAssignment يمنع إسناد مركز نشط لمستخدم غير نشط.
+            // عند الإنشاء غير النشط يُحفظ الإسناد معلّقاً (غير نشط مع سبب ثابت) ويُفعَّل مع الحساب.
+            var membership = new UserCenter
             {
-                new UserCenter
-                {
-                    UserId = user.Id,
-                    CenterId = membershipCenterId,
-                    IsActive = true,
-                    AssignedByUserId = actorId,
-                    AssignedAt = assignedAt
-                }
-            });
+                UserId = user.Id,
+                CenterId = membershipCenterId,
+                AssignedByUserId = actorId,
+                AssignedAt = assignedAt,
+                IsActive = createdUser.isActive
+            };
+            if (!createdUser.isActive)
+            {
+                membership.RevokedAt = assignedAt;
+                membership.RevokedByUserId = actorId;
+                membership.RevokeReason = IamRetention.AccountCreatedInactive;
+            }
+
+            _userRepository.AddUserCenters(new[] { membership });
 
             var associations = rolesFromDb.Select(role =>
             {
@@ -658,6 +665,10 @@ public class UserService : IUserService
             await SecurityStampHelper.InvalidateUserTokensAsync(
                 _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, id);
         }
+        else if (!wasActive && user.IsActive)
+        {
+            await ReactivateDeferredCenterMembershipsAsync(id);
+        }
 
         return new UpdateUserStatusRequest
         {
@@ -1014,6 +1025,37 @@ public class UserService : IUserService
             var actor = AssignmentStamp.RequireActor(_currentUserService.UserId);
             foreach (var row in rows)
                 IamRetention.Revoke(row, actor, IamRetention.DirectPermissionWithdrawn);
+        }
+
+        /// <summary>
+        /// يعيد تفعيل إسنادات المراكز المعلّقة عند إنشاء حساب غير نشط بعد تفعيل المستخدم.
+        /// </summary>
+        private async Task ReactivateDeferredCenterMembershipsAsync(string userId)
+        {
+            var actorId = AssignmentStamp.RequireActor(_currentUserService.UserId);
+            // ToList متزامن ليعمل مع EF ومع مستودعات الاختبار التي لا توفّر IAsyncEnumerable.
+            var deferred = _userRepository.QueryUserCenters(asNoTracking: false)
+                .Where(uc =>
+                    uc.UserId == userId
+                    && !uc.IsActive
+                    && uc.RevokeReason == IamRetention.AccountCreatedInactive)
+                .ToList();
+
+            if (deferred.Count == 0)
+                return;
+
+            if (_centers is null)
+                throw new InvalidOperationException("مستودع المراكز غير متاح لإعادة تفعيل الإسناد.");
+
+            var assignedAt = DateTimeOffset.UtcNow;
+            foreach (var row in deferred)
+            {
+                var center = await _centers.GetByIdAsync(row.CenterId, asNoTracking: true);
+                MedicalCenterActivityGuard.EnsureAcceptsNewRelations(center);
+                IamRetention.Reactivate(row, actorId, assignedAt);
+            }
+
+            await _unitOfWork.SaveChangesAsync();
         }
 
         private UserRoleAssociation NewRoleLink(string userId, string roleId, Guid? centerId) => new()
