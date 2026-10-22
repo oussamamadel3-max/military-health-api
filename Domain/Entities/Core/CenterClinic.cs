@@ -1,6 +1,8 @@
+using Domain.Interfaces;
+
 namespace Domain.Entities.Core;
 
-public class CenterClinic
+public class CenterClinic : IAuditableEntity
 {
     public Guid CenterClinicId { get; set; }
     public Guid CenterId { get; set; }

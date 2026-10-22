@@ -1,6 +1,8 @@
+using Domain.Interfaces;
+
 namespace Domain.Entities.Core;
 
-public class BmiCategory
+public class BmiCategory : IAuditableEntity
 {
     public short CategoryId { get; set; }
     public string Code { get; set; } = null!;

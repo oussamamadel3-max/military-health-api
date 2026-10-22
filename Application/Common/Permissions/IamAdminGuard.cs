@@ -109,4 +109,84 @@ public static class IamAdminGuard
             throw new ForbiddenPermissionException(
                 $"لا يمكن منح صلاحيات تتجاوز حدود تفويضك: {string.Join(", ", excess)}");
     }
+
+    /// <summary>
+    /// يمنع سحب صلاحيات إدارية من دور إذا كان ذلك يُفقد النظام آخر حساب إداري فعّال لـ IAM.
+    /// </summary>
+    public static async Task EnsureAtLeastOneIamAdminRemainsAfterRolePermissionChangeAsync(
+        IUserRepository userRepository,
+        IRoleRepository roleRepository,
+        string changedRoleId,
+        IReadOnlyCollection<string> changedRolePermissionNamesAfter,
+        IReadOnlyCollection<string>? previousRolePermissionNames = null,
+        CancellationToken cancellationToken = default)
+    {
+        var afterRolePerms = Normalize(changedRolePermissionNamesAfter);
+
+        if (previousRolePermissionNames is not null)
+        {
+            var before = Normalize(previousRolePermissionNames);
+            if (before.IsSubsetOf(afterRolePerms))
+                return;
+        }
+
+        if (IsIamAdministrator(afterRolePerms))
+            return;
+
+        var activeUserIds = await userRepository.GetActiveUserIdsExceptAsync(string.Empty, cancellationToken);
+        var hadAdmin = false;
+        var remainsAdmin = false;
+
+        foreach (var userId in activeUserIds)
+        {
+            var before = await GetEffectivePermissionNamesAsync(
+                userRepository, roleRepository, userId, cancellationToken);
+            if (IsIamAdministrator(before))
+                hadAdmin = true;
+
+            var after = await GetEffectivePermissionNamesWithRoleOverrideAsync(
+                userRepository, roleRepository, userId, changedRoleId, afterRolePerms, cancellationToken);
+            if (IsIamAdministrator(after))
+                remainsAdmin = true;
+        }
+
+        if (hadAdmin && !remainsAdmin)
+            throw new ForbiddenPermissionException(
+                "لا يمكن إزالة أو تعطيل قدرات آخر حساب نشط قادر على إدارة المستخدمين والأدوار والصلاحيات.");
+    }
+
+    public static async Task<HashSet<string>> GetEffectivePermissionNamesWithRoleOverrideAsync(
+        IUserRepository userRepository,
+        IRoleRepository roleRepository,
+        string userId,
+        string overriddenRoleId,
+        IReadOnlyCollection<string> overriddenRolePermissionNames,
+        CancellationToken cancellationToken = default)
+    {
+        var direct = await userRepository.GetDirectPermissionNamesAsync(userId, activeOnly: true, cancellationToken);
+        var roleIds = await userRepository.GetActiveRoleIdsAsync(userId, cancellationToken);
+        var otherRoleIds = roleIds
+            .Where(id => !string.Equals(id, overriddenRoleId, StringComparison.Ordinal))
+            .ToList();
+
+        var otherPerms = otherRoleIds.Count == 0
+            ? Enumerable.Empty<string>()
+            : (await roleRepository.GetRolePermissionsForRolesAsync(otherRoleIds, cancellationToken))
+                .Select(rp => rp.Permission?.Name)
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .Select(n => n!);
+
+        var hasOverriddenRole = roleIds.Any(id => string.Equals(id, overriddenRoleId, StringComparison.Ordinal));
+        var fromOverridden = hasOverriddenRole
+            ? overriddenRolePermissionNames
+            : Enumerable.Empty<string>();
+
+        return Normalize(direct.Concat(otherPerms).Concat(fromOverridden));
+    }
+
+    private static HashSet<string> Normalize(IEnumerable<string?> names) =>
+        names
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Select(p => p!.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 }

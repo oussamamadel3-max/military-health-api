@@ -1,13 +1,24 @@
 namespace Application.Common.Security;
 
 /// <summary>
-/// الحساب الوحيد للصلاحيات حسب المركز. TokenService وUserPermissionService يستدعيانه.
+/// الحساب الوحيد للصلاحيات حسب المركز. TokenService وUserPermissionService وPermissionGate يستدعونه.
 /// </summary>
 public static class CenterPermissionEvaluator
 {
+    public const string SourceRole = "Role";
+    public const string SourceDirect = "Direct";
+
     public sealed record RoleAssignment(string RoleId, string? RoleName, Guid? CenterId, bool IsActive, bool RoleIsActive);
     public sealed record DirectAssignment(string? PermissionName, Guid? CenterId, bool IsActive, bool PermissionIsActive);
     public sealed record RolePermissionLink(string RoleId, string? PermissionName, bool IsActive, bool PermissionIsActive);
+
+    public sealed record PermissionSource(string SourceType, string? RoleId, string? RoleName);
+
+    public sealed record EffectivePermission(
+        string Name,
+        bool FromRole,
+        bool FromDirect,
+        IReadOnlyList<PermissionSource> Sources);
 
     public static bool AppliesToContext(Guid? assignmentCenterId, Guid? activeCenterId)
     {
@@ -22,31 +33,68 @@ public static class CenterPermissionEvaluator
         IEnumerable<DirectAssignment> directs,
         IEnumerable<RolePermissionLink> links,
         Guid? activeCenterId)
+        => ResolveDetailed(roles, directs, links, activeCenterId)
+            .Select(p => p.Name)
+            .ToList();
+
+    /// <summary>
+    /// نفس قواعد Resolve مع مصادر كل صلاحية (دور / مباشرة) لضمان تطابق العرض مع PermissionGate.
+    /// </summary>
+    public static IReadOnlyList<EffectivePermission> ResolveDetailed(
+        IEnumerable<RoleAssignment> roles,
+        IEnumerable<DirectAssignment> directs,
+        IEnumerable<RolePermissionLink> links,
+        Guid? activeCenterId)
     {
-        var applicableRoleIds = roles
+        var roleList = roles as IList<RoleAssignment> ?? roles.ToList();
+        var applicableRoles = roleList
             .Where(r => r.IsActive && r.RoleIsActive && AppliesToContext(r.CenterId, activeCenterId))
+            .ToList();
+        var applicableRoleIds = applicableRoles
             .Select(r => r.RoleId)
             .ToHashSet(StringComparer.Ordinal);
+        var roleNameById = applicableRoles
+            .GroupBy(r => r.RoleId, StringComparer.Ordinal)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Select(x => x.RoleName).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n)),
+                StringComparer.Ordinal);
 
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var bucket = new Dictionary<string, Entry>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var link in links)
         {
             if (!link.IsActive || !link.PermissionIsActive || string.IsNullOrWhiteSpace(link.PermissionName))
                 continue;
-            if (applicableRoleIds.Contains(link.RoleId))
-                names.Add(link.PermissionName);
+            if (!applicableRoleIds.Contains(link.RoleId))
+                continue;
+
+            roleNameById.TryGetValue(link.RoleId, out var roleName);
+            var entry = GetOrAdd(bucket, link.PermissionName);
+            entry.FromRole = true;
+            entry.Sources.Add(new PermissionSource(SourceRole, link.RoleId, roleName));
         }
 
         foreach (var direct in directs)
         {
             if (!direct.IsActive || !direct.PermissionIsActive || string.IsNullOrWhiteSpace(direct.PermissionName))
                 continue;
-            if (AppliesToContext(direct.CenterId, activeCenterId))
-                names.Add(direct.PermissionName);
+            if (!AppliesToContext(direct.CenterId, activeCenterId))
+                continue;
+
+            var entry = GetOrAdd(bucket, direct.PermissionName);
+            entry.FromDirect = true;
+            entry.Sources.Add(new PermissionSource(SourceDirect, null, null));
         }
 
-        return names.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+        return bucket
+            .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(kv => new EffectivePermission(
+                kv.Key,
+                kv.Value.FromRole,
+                kv.Value.FromDirect,
+                DeduplicateSources(kv.Value.Sources)))
+            .ToList();
     }
 
     public static IReadOnlyList<string> ApplicableRoleNames(
@@ -68,5 +116,33 @@ public static class CenterPermissionEvaluator
         var centralRole = roles.Any(r => r.IsActive && r.RoleIsActive && r.CenterId is null);
         var centralDirect = directs.Any(d => d.IsActive && d.PermissionIsActive && d.CenterId is null && !string.IsNullOrWhiteSpace(d.PermissionName));
         return centralRole || centralDirect;
+    }
+
+    private static Entry GetOrAdd(Dictionary<string, Entry> bucket, string name)
+    {
+        if (!bucket.TryGetValue(name, out var entry))
+        {
+            entry = new Entry();
+            bucket[name] = entry;
+        }
+
+        return entry;
+    }
+
+    private static IReadOnlyList<PermissionSource> DeduplicateSources(List<PermissionSource> sources)
+    {
+        return sources
+            .GroupBy(
+                s => $"{s.SourceType}|{s.RoleId ?? string.Empty}",
+                StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .ToList();
+    }
+
+    private sealed class Entry
+    {
+        public bool FromRole { get; set; }
+        public bool FromDirect { get; set; }
+        public List<PermissionSource> Sources { get; } = new();
     }
 }

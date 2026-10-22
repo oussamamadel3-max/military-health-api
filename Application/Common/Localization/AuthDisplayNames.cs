@@ -27,6 +27,7 @@ namespace Application.Common.Localization
             new(StringComparer.OrdinalIgnoreCase)
             {
                 ["UserManagement.Read"] = "قراءة بيانات المستخدمين",
+                ["UserManagement.ViewEffectiveAccess"] = "عرض الصلاحيات الفعلية للمستخدم",
                 ["UserManagement.Create"] = "إنشاء مستخدمين جدد",
                 ["UserManagement.Edit"] = "تعديل بيانات المستخدمين",
                 ["UserManagement.Delete"] = "حذف المستخدمين",
@@ -61,6 +62,7 @@ namespace Application.Common.Localization
 
                 ["Centers.Manage"] = "إدارة المراكز الصحية",
                 ["UserCenters.Manage"] = "إسناد المستخدمين إلى المراكز",
+                ["UserClinics.Manage"] = "إسناد الأطباء إلى عيادات المراكز",
                 ["Members.CreateUpdate"] = "إنشاء ملف المنتسب وتعديله",
                 ["Members.View"] = "البحث وعرض ملف المنتسب",
                 ["Members.PrintReceipt"] = "طباعة الإيصال والباركود",
@@ -93,6 +95,7 @@ namespace Application.Common.Localization
                 ["Dashboard"] = "لوحة الإحصائيات",
                 ["Centers"] = "المراكز الصحية",
                 ["UserCenters"] = "إسناد المراكز",
+                ["UserClinics"] = "إسناد العيادات",
                 ["Members"] = "ملفات المنتسبين",
                 ["Clinical"] = "الفحوص السريرية",
                 ["Medical"] = "الاستشارات والاستقصاءات",
@@ -106,6 +109,7 @@ namespace Application.Common.Localization
             new(StringComparer.OrdinalIgnoreCase)
             {
                 ["Read"] = "قراءة",
+                ["ViewEffectiveAccess"] = "عرض الصلاحيات الفعلية",
                 ["Create"] = "إنشاء",
                 ["Edit"] = "تعديل",
                 ["Delete"] = "حذف",

@@ -63,6 +63,15 @@ public class AccessTokenSessionGateTests
     }
 
     [Fact]
+    public void Ended_session_family_rejects_the_access_token()
+    {
+        var family = Guid.NewGuid().ToString();
+        Assert.True(SessionFamilyGate.AllowsAccess(family, familyHasActiveRefreshToken: true));
+        Assert.False(SessionFamilyGate.AllowsAccess(family, familyHasActiveRefreshToken: false));
+        Assert.False(SessionFamilyGate.AllowsAccess(null, familyHasActiveRefreshToken: true));
+    }
+
+    [Fact]
     public void Inactive_user_is_rejected()
     {
         var accepted = AccessTokenSessionGate.IsAccessTokenAccepted(
@@ -99,6 +108,9 @@ public class TokenServiceRefreshTests
         refreshRepo
             .Setup(r => r.TryConsumeValidByTokenHashAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((UserRefreshToken?)null);
+        refreshRepo
+            .Setup(r => r.GetByTokenAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((UserRefreshToken?)null);
 
         var uow = CreateUnitOfWorkMock();
         var sut = CreateTokenService(refreshRepo.Object, uow.Object);
@@ -120,11 +132,14 @@ public class TokenServiceRefreshTests
             SecurityStamp = "stamp-1"
         };
 
+        var familyId = Guid.NewGuid();
         var consumed = new UserRefreshToken
         {
             Id = Guid.NewGuid(),
             UserId = userId,
             Token = "hash",
+            TokenFamilyId = familyId,
+            SecurityStamp = "stamp-1",
             ExpiryDate = DateTime.UtcNow.AddDays(1),
             IsRevoked = false
         };
@@ -153,6 +168,9 @@ public class TokenServiceRefreshTests
         UserRefreshToken? stored = null;
         refreshRepo.Setup(r => r.Add(It.IsAny<UserRefreshToken>()))
             .Callback<UserRefreshToken>(t => stored = t);
+        refreshRepo
+            .Setup(r => r.MarkRotatedAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         var uow = CreateUnitOfWorkMock();
         var sut = new TokenService(
@@ -178,6 +196,9 @@ public class TokenServiceRefreshTests
         Assert.NotNull(stored);
         Assert.Equal(RefreshTokenProtector.HashToken(result.RefreshToken), stored!.Token);
         Assert.NotEqual(result.RefreshToken, stored.Token);
+        Assert.Equal(familyId, stored.TokenFamilyId);
+        Assert.Equal(consumed.Id, stored.ParentRefreshTokenId);
+        refreshRepo.Verify(r => r.MarkRotatedAsync(consumed.Id, stored.Id, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private static IAccessContextRepository EmptyAccess()

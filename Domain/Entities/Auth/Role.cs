@@ -1,3 +1,4 @@
+using Domain.Enums;
 using Domain.Interfaces;
 using Microsoft.AspNetCore.Identity;
 
@@ -6,6 +7,9 @@ public class Role : IdentityRole, IAuditableEntity
 {
     public bool IsActive { get; set; } = true;
     public string? Description { get; set; }
+
+    /// <summary>النطاق التشغيلي للدور: مركزي أو مقيد بمركز.</summary>
+    public RoleScope Scope { get; set; } = RoleScope.Center;
 
     public DateTime CreatedAt { get; set; }
     public string? CreatedBy { get; set; }

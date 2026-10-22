@@ -17,6 +17,12 @@ public static class IamRetention
     public const string ObsoletePermission = "OBSOLETE_PERMISSION";
     public const string PermissionRenamed = "PERMISSION_RENAMED";
 
+    /// <summary>
+    /// إسناد مركز معلّق عند إنشاء حساب غير نشط؛ يُعاد تفعيله مع تفعيل المستخدم.
+    /// يبقي قيد validateUserCenterAssignment سليماً دون ارتباط مركز نشط لحساب معطّل.
+    /// </summary>
+    public const string AccountCreatedInactive = "ACCOUNT_CREATED_INACTIVE";
+
     public static void DeactivateUser(User user) => user.IsActive = false;
 
     public static void DeactivateRole(Role role, string? actorId)

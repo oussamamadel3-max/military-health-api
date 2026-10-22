@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Application.Common.Permissions;
 using Application.Dtos;
 using Application.Exceptions;
 using Application.Interfaces;
@@ -33,6 +34,8 @@ namespace Application.Services.AttachmentService
         private readonly ICurrentUserService _currentUser;
         private readonly ICurrentCenterService _center;
         private readonly IAccessContextRepository _access;
+        private readonly IActiveCenterService _activeCenters;
+        private readonly IPermissionGate _permissions;
 
         public AttachmentService(
             IAttachmentRepository files,
@@ -42,7 +45,9 @@ namespace Application.Services.AttachmentService
             IHttpContextAccessor httpContextAccessor,
             ICurrentUserService currentUser,
             ICurrentCenterService center,
-            IAccessContextRepository access)
+            IAccessContextRepository access,
+            IActiveCenterService activeCenters,
+            IPermissionGate permissions)
         {
             _files = files;
             _unitOfWork = unitOfWork;
@@ -52,6 +57,8 @@ namespace Application.Services.AttachmentService
             _currentUser = currentUser;
             _center = center;
             _access = access;
+            _activeCenters = activeCenters;
+            _permissions = permissions;
         }
 
         public async Task<AttachmentReadDto> UploadAsync(string entityId, string entityType, IFormFile file, string? description = null)
@@ -122,6 +129,8 @@ namespace Application.Services.AttachmentService
         public async Task<List<AttachmentReadDto>> GetAttachmentsForEntityAsync(string entityId, params string[] entityTypes)
         {
             var type = SingleType(entityTypes);
+            if (!IsOwnProfile(entityId, type))
+                await RequireMedicalReadAsync();
             var centerId = await RequireActiveCenterAsync();
             var files = await LoadFilesAsync(entityId, type, centerId);
             return files.Select(MapToDto).ToList();
@@ -161,6 +170,8 @@ namespace Application.Services.AttachmentService
         public async Task<(byte[] Bytes, string ZipName)> DownloadZipForEntityAsync(string entityId, params string[] entityTypes)
         {
             var type = SingleType(entityTypes);
+            if (!IsOwnProfile(entityId, type))
+                await RequireMedicalReadAsync();
             var centerId = await RequireActiveCenterAsync();
             var files = await LoadFilesAsync(entityId, type, centerId);
             if (files.Count == 0)
@@ -200,21 +211,9 @@ namespace Application.Services.AttachmentService
                 if (!string.Equals(entityId, actorId, StringComparison.Ordinal))
                     throw new InvalidUserDataException("لا يمكن ربط صورة مستخدم آخر.");
 
-                var profile = await _files.FindTrackedProfileAsync(entityId);
-                if (profile == null)
-                {
-                    var now = DateTimeOffset.UtcNow;
-                    profile = new UserProfile
-                    {
-                        UserId = entityId,
-                        EmployeeNumber = entityId,
-                        RankOrTitle = "غير محدد",
-                        UpdatedByUserId = actorId,
-                        CreatedAt = now,
-                        UpdatedAt = now
-                    };
-                    _files.AddProfile(profile);
-                }
+                var profile = await _files.FindTrackedProfileAsync(entityId)
+                    ?? throw new InvalidUserDataException(
+                        "لا يمكن رفع صورة الملف الشخصي قبل حفظ البيانات الوظيفية (الرقم الوظيفي والرتبة أو المسمى).");
 
                 profile.ProfileFileAssetId = asset.FileAssetId;
                 profile.UpdatedAt = DateTimeOffset.UtcNow;
@@ -287,8 +286,16 @@ namespace Application.Services.AttachmentService
             if (await _files.IsProfilePhotoAsync(userId, id))
                 return file;
             await EnsureSameCenterAsync(file.CenterId);
+            await RequireMedicalReadAsync();
             return file;
         }
+
+        private bool IsOwnProfile(string entityId, string entityType)
+            => entityType.Equals(UserProfile, StringComparison.OrdinalIgnoreCase)
+               && string.Equals(entityId, RequireUser(), StringComparison.Ordinal);
+
+        private Task RequireMedicalReadAsync()
+            => _permissions.EnsureLocalAsync(MilitaryHealthPermissions.Medical.AttachmentsRead);
 
         private async Task<Guid?> ResolveProfilePhotoCenterAsync(string entityId)
         {
@@ -304,15 +311,8 @@ namespace Application.Services.AttachmentService
                 ?? await _files.FindFirstActiveCenterIdAsync();
         }
 
-        private async Task<Guid> RequireActiveCenterAsync()
-        {
-            if (_center.IsCentralContext || _center.CenterId is not Guid centerId)
-                throw new InvalidUserDataException("العملية المحلية تتطلب مركزاً نشطاً.");
-            var userId = RequireUser();
-            if (!await _access.IsActivelyAssignedAsync(userId, centerId))
-                throw new ForbiddenPermissionException("المستخدم غير مسند إلى المركز النشط.");
-            return centerId;
-        }
+        private Task<Guid> RequireActiveCenterAsync()
+            => _activeCenters.RequireOperationalCenterAsync();
 
         private async Task EnsureSameCenterAsync(Guid? fileCenterId)
         {

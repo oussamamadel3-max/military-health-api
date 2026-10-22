@@ -41,12 +41,20 @@ public class CsrfTokenInvalidException : BusinessException
 
 public class InvalidSessionException : BusinessException
 {
-    public InvalidSessionException(string message = "فشل تجديد الجلسة.")
+    public string? ReasonCode { get; }
+    public string? SubjectUserId { get; }
+
+    public InvalidSessionException(
+        string message = "فشل تجديد الجلسة.",
+        string? reasonCode = null,
+        string? subjectUserId = null)
         : base(
             message: message,
             errorCode: "AUTH_SESSION_INVALID",
             status: 401)
     {
+        ReasonCode = reasonCode;
+        SubjectUserId = subjectUserId;
     }
 }
 

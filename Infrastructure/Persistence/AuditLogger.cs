@@ -16,7 +16,7 @@ namespace Infrastructure.Persistence
             "CreatedAt", "CreatedBy", "UpdatedAt", "UpdatedBy",
             "PasswordHash", "SecurityStamp", "ConcurrencyStamp",
             "NormalizedUserName", "NormalizedEmail", "LockoutEnd",
-            "AccessFailedCount", "LoginLockoutTier",
+            "AccessFailedCount", "LoginLockoutTier", "LastLoginAt",
             "Token", "TokenHash", "RefreshToken", "Password",
             "OldValues", "NewValues"
         };
@@ -81,14 +81,17 @@ namespace Infrastructure.Persistence
             }
             else if (effectiveState == EntityState.Modified)
             {
-                oldValue = JsonSerializer.Serialize(ExtractAuditData(entry, isNew: false), JsonSerializerOptions);
-                newValue = JsonSerializer.Serialize(ExtractAuditData(entry, isNew: true), JsonSerializerOptions);
                 var changedFields = entry.Properties
                     .Where(p => p.IsModified &&
                                 !IgnoredFields.Contains(p.Metadata.Name) &&
                                 !Equals(p.OriginalValue, p.CurrentValue))
                     .Select(p => p.Metadata.Name)
                     .ToList();
+                if (changedFields.Count == 0)
+                    return;
+
+                oldValue = JsonSerializer.Serialize(ExtractAuditData(entry, isNew: false), JsonSerializerOptions);
+                newValue = JsonSerializer.Serialize(ExtractAuditData(entry, isNew: true), JsonSerializerOptions);
                 reason = "الخصائص التي جرى تعديل عليها: " + string.Join(", ", changedFields);
             }
             else if (effectiveState == EntityState.Deleted)

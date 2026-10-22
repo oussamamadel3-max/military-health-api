@@ -8,6 +8,7 @@ using Application.Common.Results;
 using Application.Dtos.AuthDtos;
 using Application.Exceptions;
 using Domain.Entities.Auth;
+using Domain.Enums;
 using Application.Common.Permissions;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -65,7 +66,11 @@ namespace Application.Services.AuthServices
             if (roleExists)
                 throw new RoleAlreadyExistsException(roleName);
 
+            if (!Enum.IsDefined(typeof(RoleScope), newRole.Scope))
+                throw new InvalidRoleDataException("نطاق الدور غير صالح. القيم: Center أو Central.");
+
             var role = _mapper.Map<Role>(newRole);
+            role.Scope = newRole.Scope;
 
             role.CreatedAt = DateTime.Now;
             role.CreatedBy = _currentUserService.UserId;
@@ -95,11 +100,19 @@ namespace Application.Services.AuthServices
             if (string.IsNullOrWhiteSpace(newRoleName))
                 throw new InvalidRoleDataException("اسم الدور مطلوب.");
 
+            ReservedRoleGuard.EnsureCanRename(role.Name, newRoleName);
+
+            if (!Enum.IsDefined(typeof(RoleScope), updatedRole.Scope))
+                throw new InvalidRoleDataException("نطاق الدور غير صالح. القيم: Center أو Central.");
+
+            ReservedRoleGuard.EnsureCanChangeScope(role.Name, updatedRole.Scope);
+
             var existingRoleWithSameName = await _roleManager.FindByNameAsync(newRoleName);
             if (existingRoleWithSameName != null && existingRoleWithSameName.Id != role.Id)
                 throw new RoleAlreadyExistsException(newRoleName);
 
             _mapper.Map(updatedRole, role);
+            role.Scope = updatedRole.Scope;
 
             role.UpdatedAt = DateTime.Now;
             role.UpdatedBy = _currentUserService.UserId;
@@ -128,6 +141,15 @@ namespace Application.Services.AuthServices
             if (!role.IsActive)
                 return;
 
+            ReservedRoleGuard.EnsureCanDeactivate(role.Name);
+
+            await IamAdminGuard.EnsureAtLeastOneIamAdminRemainsAfterRolePermissionChangeAsync(
+                _userRepository,
+                _roleRepository,
+                role.Id,
+                Array.Empty<string>(),
+                previousRolePermissionNames: null);
+
             IamRetention.DeactivateRole(role, _currentUserService.UserId);
             var result = await _roleManager.UpdateAsync(role);
             if (!result.Succeeded)
@@ -145,22 +167,32 @@ namespace Application.Services.AuthServices
         #region      جلب حسب المعرف 
         public async Task<RoleDto> GetById(string id)
         {
+            _permissionGate.EnsureAll(SystemPermissions.RoleManagement.Read);
+
             var role = await _roleManager.Roles.FirstOrDefaultAsync(r => r.Id == id)
                 ?? throw new RoleNotFoundException("الدور غير موجود.");
 
-            return _mapper.Map<RoleDto>(role);
+            var dto = _mapper.Map<RoleDto>(role);
+            dto.IsSystemRole = ReservedRoleGuard.IsReserved(role.Name);
+            return dto;
         }
         #endregion
 
 
         #region          جلب الصلاحيات مع تفاصيلها 
-        public async Task<PaginatedList<RoleDetailsDto>> GetRolesWithDetailsAsync(int pageNumber, int pageSize, string? name = null, bool? isActive = null)
+        public async Task<PaginatedList<RoleDetailsDto>> GetRolesWithDetailsAsync(
+            int pageNumber,
+            int pageSize,
+            string? name = null,
+            bool? isActive = null,
+            RoleScope? scope = null)
         {
+            _permissionGate.EnsureAll(SystemPermissions.RoleManagement.Read);
+
             if (pageNumber < 1) pageNumber = 1;
             if (pageSize < 1) pageSize = 10;
 
             var rolesQuery = _roleManager.Roles.AsQueryable();
-
             if (!string.IsNullOrWhiteSpace(name))
             {
                 var s = SqlLikePatternEscape.EscapeForSqlServerLike(name.Trim());
@@ -169,6 +201,9 @@ namespace Application.Services.AuthServices
 
             if (isActive.HasValue)
                 rolesQuery = rolesQuery.Where(r => r.IsActive == isActive.Value);
+
+            if (scope.HasValue)
+                rolesQuery = rolesQuery.Where(r => r.Scope == scope.Value);
 
             rolesQuery = rolesQuery.OrderBy(r => r.Name);
 
@@ -210,6 +245,7 @@ namespace Application.Services.AuthServices
                 var dto = _mapper.Map<RoleDetailsDto>(role);
 
                 dto.Name = AuthDisplayNames.RoleAr(role.Name);
+                dto.IsSystemRole = ReservedRoleGuard.IsReserved(role.Name);
 
                 permissionsDict.TryGetValue(role.Id, out var perms);
                 assignedUsersDict.TryGetValue(role.Id, out var assignedCount);
@@ -311,6 +347,19 @@ namespace Application.Services.AuthServices
                 .Where(rp => rp.IsActive)
                 .ToList();
 
+            var previousPermissionNames = (await _roleRepository.GetRolePermissionsForRolesAsync(new[] { dto.RoleId }))
+                .Select(rp => rp.Permission?.Name)
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .Select(n => n!)
+                .ToList();
+
+            await IamAdminGuard.EnsureAtLeastOneIamAdminRemainsAfterRolePermissionChangeAsync(
+                _userRepository,
+                _roleRepository,
+                dto.RoleId,
+                activePermissions.Select(p => p.Name!).ToList(),
+                previousPermissionNames);
+
             var existingIds = existingRolePerms
                 .Select(rp => rp.PermissionId)
                 .ToHashSet();
@@ -401,8 +450,12 @@ namespace Application.Services.AuthServices
 
             var invalidSkipped = requestedDistinct.Count - validIds.Count;
 
+            if (!Enum.IsDefined(typeof(RoleScope), dto.Scope))
+                throw new InvalidRoleDataException("نطاق الدور غير صالح. القيم: Center أو Central.");
+
             var role = _mapper.Map<Role>(dto);
             role.Name = roleName;
+            role.Scope = dto.Scope;
             role.CreatedAt = DateTime.Now;
             role.CreatedBy = _currentUserService.UserId;
             role.IsActive = true;
@@ -492,6 +545,25 @@ namespace Application.Services.AuthServices
 
             var role = await _roleRepository.GetByIdAsync(roleId.ToString())
                 ?? throw new RoleNotFoundException("الدور غير موجود.");
+
+            var willDeactivate = role.IsActive;
+            if (willDeactivate)
+            {
+                ReservedRoleGuard.EnsureCanDeactivate(role.Name);
+
+                var currentPermNames = (await _roleRepository.GetRolePermissionsForRolesAsync(new[] { role.Id }))
+                    .Select(rp => rp.Permission?.Name)
+                    .Where(n => !string.IsNullOrWhiteSpace(n))
+                    .Select(n => n!)
+                    .ToList();
+
+                await IamAdminGuard.EnsureAtLeastOneIamAdminRemainsAfterRolePermissionChangeAsync(
+                    _userRepository,
+                    _roleRepository,
+                    role.Id,
+                    Array.Empty<string>(),
+                    currentPermNames);
+            }
 
             role.IsActive = !role.IsActive;
             role.UpdatedAt = DateTime.Now;

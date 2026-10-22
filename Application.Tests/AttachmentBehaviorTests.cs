@@ -163,6 +163,18 @@ public class AttachmentBehaviorTests
     }
 
     [Fact]
+    public async Task Medical_file_read_requires_attachments_permission()
+    {
+        var file = SampleFile(CenterId);
+        var files = new Mock<IAttachmentRepository>();
+        files.Setup(f => f.FindByIdAsync(file.FileAssetId, It.IsAny<CancellationToken>())).ReturnsAsync(file);
+        files.Setup(f => f.IsProfilePhotoAsync("user-1", file.FileAssetId, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        var service = CreateService(files, CenterId, assigned: true, allowMedicalRead: false);
+
+        await Assert.ThrowsAsync<ForbiddenPermissionException>(() => service.GetByIdAsync(file.FileAssetId));
+    }
+
+    [Fact]
     public async Task Deleted_file_cannot_be_downloaded()
     {
         var files = new Mock<IAttachmentRepository>();
@@ -188,28 +200,44 @@ public class AttachmentBehaviorTests
     }
 
     [Fact]
-    public async Task Central_user_without_a_center_can_upload_a_profile_photo()
+    public async Task Central_user_with_profile_can_upload_photo_without_active_center()
     {
-        UserProfile? created = null;
+        var profile = new UserProfile
+        {
+            UserId = "user-1",
+            EmployeeNumber = "E-100",
+            RankOrTitle = "نقيب",
+            UpdatedByUserId = "user-1"
+        };
         var files = new Mock<IAttachmentRepository>();
-        files.Setup(f => f.FindTrackedProfileAsync("user-1", It.IsAny<CancellationToken>())).ReturnsAsync((UserProfile?)null);
+        files.Setup(f => f.FindTrackedProfileAsync("user-1", It.IsAny<CancellationToken>())).ReturnsAsync(profile);
         files.Setup(f => f.FindActiveAssignmentCenterIdAsync("user-1", It.IsAny<CancellationToken>())).ReturnsAsync((Guid?)null);
         files.Setup(f => f.FindFirstActiveCenterIdAsync(It.IsAny<CancellationToken>())).ReturnsAsync((Guid?)null);
-        files.Setup(f => f.AddProfile(It.IsAny<UserProfile>())).Callback<UserProfile>(profile => created = profile);
-        files.Setup(f => f.Add(It.IsAny<FileAsset>())).Callback<FileAsset>(file =>
-        {
-            if (created != null)
-                created.ProfileFileAssetId = file.FileAssetId;
-        });
 
         var service = CreateService(files, null, assigned: false, central: true);
         var result = await service.UploadAsync("user-1", "UserProfile", PdfFile(), null);
 
-        Assert.NotNull(created);
-        Assert.Equal("user-1", created!.EmployeeNumber);
-        Assert.Equal("غير محدد", created.RankOrTitle);
-        Assert.Equal(result.FileAssetId, created.ProfileFileAssetId);
+        Assert.Equal(result.FileAssetId, profile.ProfileFileAssetId);
+        Assert.Equal("E-100", profile.EmployeeNumber);
+        Assert.Equal("نقيب", profile.RankOrTitle);
+        files.Verify(f => f.AddProfile(It.IsAny<UserProfile>()), Times.Never);
         files.Verify(f => f.AddMedicalAttachment(It.IsAny<MedicalAttachment>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Profile_photo_upload_rejects_when_job_profile_is_missing()
+    {
+        var files = new Mock<IAttachmentRepository>();
+        files.Setup(f => f.FindTrackedProfileAsync("user-1", It.IsAny<CancellationToken>())).ReturnsAsync((UserProfile?)null);
+        files.Setup(f => f.FindActiveAssignmentCenterIdAsync("user-1", It.IsAny<CancellationToken>())).ReturnsAsync((Guid?)null);
+        files.Setup(f => f.FindFirstActiveCenterIdAsync(It.IsAny<CancellationToken>())).ReturnsAsync((Guid?)null);
+
+        var service = CreateService(files, null, assigned: false, central: true);
+        var error = await Assert.ThrowsAsync<InvalidUserDataException>(() =>
+            service.UploadAsync("user-1", "UserProfile", PdfFile(), null));
+
+        Assert.Contains("البيانات الوظيفية", error.Message);
+        files.Verify(f => f.AddProfile(It.IsAny<UserProfile>()), Times.Never);
     }
 
     [Fact]
@@ -237,7 +265,8 @@ public class AttachmentBehaviorTests
         Guid? centerId,
         bool assigned,
         bool central = false,
-        IFileStorageService? storage = null)
+        IFileStorageService? storage = null,
+        bool allowMedicalRead = true)
     {
         var unit = new Mock<IUnitOfWork>();
         unit.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
@@ -272,7 +301,43 @@ public class AttachmentBehaviorTests
         var access = new Mock<IAccessContextRepository>();
         access.Setup(a => a.IsActivelyAssignedAsync("user-1", It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(assigned);
 
-        return new AttachmentService(files.Object, unit.Object, mapper.Object, storage, http.Object, user.Object, center.Object, access.Object);
+        var activeCenters = new Mock<IActiveCenterService>();
+        activeCenters
+            .Setup(s => s.RequireOperationalCenterAsync(It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                if (central || centerId is null)
+                    throw new InvalidUserDataException("العملية المحلية تتطلب مركزاً نشطاً.");
+                if (!assigned)
+                    throw new ForbiddenPermissionException("المستخدم غير مسند إلى المركز النشط أو أن الإسناد لم يعد فعالاً.");
+                return Task.FromResult(centerId.Value);
+            });
+
+        var permissions = new Mock<IPermissionGate>();
+        if (allowMedicalRead)
+        {
+            permissions
+                .Setup(g => g.EnsureLocalAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(centerId ?? Guid.Empty);
+        }
+        else
+        {
+            permissions
+                .Setup(g => g.EnsureLocalAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new ForbiddenPermissionException());
+        }
+
+        return new AttachmentService(
+            files.Object,
+            unit.Object,
+            mapper.Object,
+            storage,
+            http.Object,
+            user.Object,
+            center.Object,
+            access.Object,
+            activeCenters.Object,
+            permissions.Object);
     }
 
     private static FileAsset SampleFile(Guid centerId, Guid? id = null) => new()
