@@ -8,6 +8,12 @@ namespace Infrastructure.Repositories;
 /// <summary>مستودع المنتسب باستخدام AppDbContext الحالي فقط.</summary>
 public class MemberRepository : IMemberRepository
 {
+    /// <summary>مفتاح فئة قفل رقم الملف العالمي (pg_advisory_xact_lock key1).</summary>
+    private const int FileNumberLockClass = 720_220;
+
+    /// <summary>مفتاح فئة قفل رقم الدور اليومي لكل مركز (pg_advisory_xact_lock key1).</summary>
+    private const int QueueNumberLockClass = 720_221;
+
     private readonly AppDbContext _context;
 
     public MemberRepository(AppDbContext context) => _context = context;
@@ -51,11 +57,17 @@ public class MemberRepository : IMemberRepository
         return query.AnyAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// يخصص رقم ملف عالمي ورقم دور يومي للمركز ضمن المعاملة الحالية.
+    /// على PostgreSQL يُؤخذ قفل معاملة (pg_advisory_xact_lock) قبل MAX+1 لمنع سباق التزامن؛ يُتخطى على InMemory.
+    /// </summary>
     public async Task<(long FileNumber, int QueueNumber)> AllocateFileAndQueueNumbersAsync(
         Guid centerId,
         DateOnly queueDate,
         CancellationToken cancellationToken = default)
     {
+        await AcquireAllocationLocksAsync(centerId, queueDate, cancellationToken);
+
         var maxFile = await _context.Members.AsNoTracking()
             .MaxAsync(m => (long?)m.FileNumber, cancellationToken) ?? 0L;
 
@@ -69,6 +81,32 @@ public class MemberRepository : IMemberRepository
     public void Add(Member member) => _context.Members.Add(member);
 
     public void AddIdentity(MemberCenterIdentity identity) => _context.MemberCenterIdentities.Add(identity);
+
+    private async Task AcquireAllocationLocksAsync(
+        Guid centerId,
+        DateOnly queueDate,
+        CancellationToken cancellationToken)
+    {
+        if (!IsNpgsqlProvider())
+            return;
+
+        // قفل عالمي لتسلسل رقم الملف؛ يُحرَّر تلقائياً عند Commit/Rollback.
+        await _context.Database.ExecuteSqlRawAsync(
+            "SELECT pg_advisory_xact_lock({0}, {1})",
+            parameters: new object[] { FileNumberLockClass, 1 },
+            cancellationToken: cancellationToken);
+
+        // قفل مستقل لكل (مركز، يوم) لتسلسل رقم الدور.
+        var queueKey2 = HashCode.Combine(centerId, queueDate.DayNumber);
+        await _context.Database.ExecuteSqlRawAsync(
+            "SELECT pg_advisory_xact_lock({0}, {1})",
+            parameters: new object[] { QueueNumberLockClass, queueKey2 },
+            cancellationToken: cancellationToken);
+    }
+
+    private bool IsNpgsqlProvider()
+        => _context.Database.ProviderName is { } name
+           && name.Contains("Npgsql", StringComparison.OrdinalIgnoreCase);
 
     private static IQueryable<Member> IncludeLookups(IQueryable<Member> query)
         => query
