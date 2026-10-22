@@ -3,6 +3,7 @@ using System.Text.Json;
 using Application.Common.Permissions;
 using Application.Common.Results;
 using Application.Common.Security;
+using Application.Dtos.ExportDtos;
 using Application.Dtos.Members;
 using Application.Exceptions;
 using Application.Interfaces;
@@ -17,7 +18,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Application.Services.Members;
 
 /// <summary>
-/// خدمات ملف المنتسب المحلية: تسجيل (MH-P3-020) وتعديل (MH-P3-050 / FR-024) وقائمة/تفاصيل مع عزل المركز النشط وتدقيق صريح.
+/// خدمات ملف المنتسب المحلية: تسجيل (MH-P3-020) وتعديل (MH-P3-050 / FR-024)
+/// وإيصال الطباعة (MH-P3-070 / FR-027) وقائمة/تفاصيل مع عزل المركز النشط وتدقيق صريح.
 /// </summary>
 public class MemberService : IMemberService
 {
@@ -360,6 +362,48 @@ public class MemberService : IMemberService
         var updated = await _members.GetByIdInCenterAsync(memberId, centerId, asNoTracking: true, cancellationToken)
             ?? throw new MemberNotFoundException();
         return await ToDetailsAsync(updated, cancellationToken);
+    }
+
+    /// <summary>
+    /// يولّد PDF إيصال المنتسب والباركود (FR-027) ضمن المركز النشط دون تعديل رقم الملف أو رقم الدور.
+    /// </summary>
+    public async Task<ExportFileDto> GetReceiptPdfAsync(
+        Guid memberId,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var centerId = await _permissionGate.EnsureLocalAsync(
+            MilitaryHealthPermissions.Members.PrintReceipt,
+            clientCenterId,
+            cancellationToken);
+
+        var userId = RequireUser();
+        var member = await _members.GetByIdInCenterAsync(memberId, centerId, asNoTracking: true, cancellationToken)
+            ?? throw new MemberNotFoundException();
+
+        var generatedAt = DateTimeOffset.UtcNow;
+        var pdf = MemberReceiptPdfBuilder.Build(member, generatedAt);
+
+        RecordAudit(
+            userId,
+            centerId,
+            "MemberReceiptPrint",
+            "SUCCESS",
+            member.MemberId.ToString(),
+            "تم توليد إيصال المنتسب",
+            oldValues: null,
+            newValues: JsonSerializer.Serialize(new
+            {
+                member.FileNumber,
+                member.QueueNumber,
+                member.FullName,
+                member.CurrentMedicalCenterId,
+                member.QueueDate,
+                GeneratedAt = generatedAt
+            }));
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return pdf;
     }
 
     #region Private helpers
