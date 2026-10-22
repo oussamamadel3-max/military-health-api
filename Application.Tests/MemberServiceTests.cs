@@ -271,6 +271,110 @@ public class MemberServiceTests
     }
 
     [Fact]
+    public async Task GetReceipt_returns_pdf_and_writes_audit_without_changing_numbers()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var service = CreateService(db, CenterA, allowCreate: true, allowView: true, allowPrintReceipt: true);
+        var created = await service.CreateAsync(ValidCreate());
+
+        var pdf = await service.GetReceiptPdfAsync(created.MemberId);
+
+        Assert.Equal("application/pdf", pdf.ContentType);
+        Assert.Equal($"member-receipt-{created.FileNumber}.pdf", pdf.FileName);
+        Assert.True(pdf.FileContents.Length > 100);
+        Assert.Equal(0x25, pdf.FileContents[0]); // '%'
+        Assert.Equal((byte)'P', pdf.FileContents[1]);
+        Assert.Equal((byte)'D', pdf.FileContents[2]);
+        Assert.Equal((byte)'F', pdf.FileContents[3]);
+
+        var row = await db.Members.SingleAsync(m => m.MemberId == created.MemberId);
+        Assert.Equal(created.FileNumber, row.FileNumber);
+        Assert.Equal(created.QueueNumber, row.QueueNumber);
+        Assert.Equal(1, row.DataRevision);
+
+        var audit = await db.AuditEvents.SingleAsync(e => e.EventType == "MemberReceiptPrint");
+        Assert.Equal("SUCCESS", audit.Result);
+        Assert.Equal(nameof(Member), audit.EntityType);
+        Assert.Equal(created.MemberId.ToString(), audit.EntityId);
+        Assert.Equal(CenterA, audit.CenterId);
+        using var values = System.Text.Json.JsonDocument.Parse(audit.NewValues!);
+        Assert.Equal(created.FileNumber, values.RootElement.GetProperty("FileNumber").GetInt64());
+        Assert.Equal(created.QueueNumber, values.RootElement.GetProperty("QueueNumber").GetInt32());
+    }
+
+    [Fact]
+    public async Task GetReceipt_reprint_keeps_same_file_and_queue_numbers()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var service = CreateService(db, CenterA, allowCreate: true, allowView: true, allowPrintReceipt: true);
+        var created = await service.CreateAsync(ValidCreate());
+
+        var first = await service.GetReceiptPdfAsync(created.MemberId);
+        var second = await service.GetReceiptPdfAsync(created.MemberId);
+
+        Assert.True(first.FileContents.Length > 0);
+        Assert.True(second.FileContents.Length > 0);
+        Assert.Equal(first.FileName, second.FileName);
+
+        var row = await db.Members.SingleAsync(m => m.MemberId == created.MemberId);
+        Assert.Equal(created.FileNumber, row.FileNumber);
+        Assert.Equal(created.QueueNumber, row.QueueNumber);
+        Assert.Equal(1, row.DataRevision);
+
+        var audits = await db.AuditEvents.Where(e => e.EventType == "MemberReceiptPrint").ToListAsync();
+        Assert.Equal(2, audits.Count);
+        foreach (var audit in audits)
+        {
+            using var values = System.Text.Json.JsonDocument.Parse(audit.NewValues!);
+            Assert.Equal(created.FileNumber, values.RootElement.GetProperty("FileNumber").GetInt64());
+            Assert.Equal(created.QueueNumber, values.RootElement.GetProperty("QueueNumber").GetInt32());
+        }
+    }
+
+    [Fact]
+    public async Task GetReceipt_from_other_center_is_not_found()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var createService = CreateService(db, CenterA, allowCreate: true, allowView: true, allowPrintReceipt: true);
+        var created = await createService.CreateAsync(ValidCreate());
+
+        var printB = CreateService(db, CenterB, allowCreate: false, allowView: false, allowPrintReceipt: true);
+        await Assert.ThrowsAsync<MemberNotFoundException>(() =>
+            printB.GetReceiptPdfAsync(created.MemberId));
+
+        Assert.Empty(await db.AuditEvents.Where(e => e.EventType == "MemberReceiptPrint").ToListAsync());
+    }
+
+    [Fact]
+    public async Task GetReceipt_missing_member_is_not_found()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var service = CreateService(db, CenterA, allowCreate: false, allowView: false, allowPrintReceipt: true);
+
+        await Assert.ThrowsAsync<MemberNotFoundException>(() =>
+            service.GetReceiptPdfAsync(Guid.NewGuid()));
+    }
+
+    [Fact]
+    public async Task GetReceipt_without_permission_is_forbidden()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var createService = CreateService(db, CenterA, allowCreate: true, allowView: true, allowPrintReceipt: true);
+        var created = await createService.CreateAsync(ValidCreate());
+
+        var denied = CreateService(db, CenterA, allowCreate: false, allowView: false, allowPrintReceipt: false);
+        await Assert.ThrowsAsync<ForbiddenPermissionException>(() =>
+            denied.GetReceiptPdfAsync(created.MemberId));
+
+        Assert.Empty(await db.AuditEvents.Where(e => e.EventType == "MemberReceiptPrint").ToListAsync());
+    }
+
+    [Fact]
     public async Task List_scopes_to_active_center()
     {
         await using var db = CreateDb();
@@ -523,7 +627,8 @@ public class MemberServiceTests
         AppDbContext db,
         Guid activeCenter,
         bool allowCreate,
-        bool allowView)
+        bool allowView,
+        bool allowPrintReceipt = false)
     {
         var gate = new Mock<IPermissionGate>();
         if (allowCreate)
@@ -555,6 +660,23 @@ public class MemberServiceTests
         {
             gate.Setup(g => g.EnsureLocalAsync(
                     MilitaryHealthPermissions.Members.View,
+                    It.IsAny<Guid?>(),
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new ForbiddenPermissionException());
+        }
+
+        if (allowPrintReceipt)
+        {
+            gate.Setup(g => g.EnsureLocalAsync(
+                    MilitaryHealthPermissions.Members.PrintReceipt,
+                    It.IsAny<Guid?>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(activeCenter);
+        }
+        else
+        {
+            gate.Setup(g => g.EnsureLocalAsync(
+                    MilitaryHealthPermissions.Members.PrintReceipt,
                     It.IsAny<Guid?>(),
                     It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new ForbiddenPermissionException());

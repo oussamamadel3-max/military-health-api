@@ -92,4 +92,16 @@ public class MembersController : ControllerBase
             cancellationToken);
         return ApiResponse.Success("تم تحديث ملف المنتسب بنجاح.", updated);
     }
+
+    /// <summary>معاينة/تحميل إيصال المنتسب والباركود (PDF) ضمن المركز النشط.</summary>
+    [HttpGet("{memberId:guid}/receipt")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Members.PrintReceipt, OperationScope.Local)]
+    public async Task<IActionResult> GetReceipt(Guid memberId, CancellationToken cancellationToken = default)
+    {
+        var pdf = await _members.GetReceiptPdfAsync(
+            memberId,
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+        return File(pdf.FileContents, pdf.ContentType, pdf.FileName);
+    }
 }

@@ -1,4 +1,5 @@
 using Application.Common.Results;
+using Application.Dtos.ExportDtos;
 using Application.Dtos.Members;
 
 namespace Application.Interfaces.Services;
@@ -24,6 +25,12 @@ public interface IMemberService
     Task<MemberDetailsDto> UpdateAsync(
         Guid memberId,
         UpdateMemberRequest request,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>يولّد PDF إيصال المنتسب والباركود ضمن المركز النشط دون تعديل أرقام الملف أو الدور.</summary>
+    Task<ExportFileDto> GetReceiptPdfAsync(
+        Guid memberId,
         Guid? clientCenterId = null,
         CancellationToken cancellationToken = default);
 }
