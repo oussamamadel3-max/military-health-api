@@ -17,7 +17,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Application.Services.Members;
 
 /// <summary>
-/// خدمات ملف المنتسب المحلية: إنشاء/تعديل/قائمة/تفاصيل مع عزل المركز النشط وتدقيق صريح.
+/// خدمات ملف المنتسب المحلية: تسجيل (MH-P3-020) وتعديل/قائمة/تفاصيل مع عزل المركز النشط وتدقيق صريح.
 /// </summary>
 public class MemberService : IMemberService
 {
@@ -121,6 +121,10 @@ public class MemberService : IMemberService
         return await ToDetailsAsync(member, cancellationToken);
     }
 
+    /// <summary>
+    /// يسجّل منتسباً في المركز النشط مع توليد FileNumber/QueueNumber داخل معاملة واحدة،
+    /// وحساب BMI في الاستجابة، وتحويل سباق تكرار رقم التجنيد إلى استثناء أعمال.
+    /// </summary>
     public async Task<MemberDetailsDto> CreateAsync(
         CreateMemberRequest request,
         Guid? clientCenterId = null,
@@ -220,6 +224,14 @@ public class MemberService : IMemberService
             var created = await _members.GetByIdInCenterAsync(memberId, centerId, asNoTracking: true, cancellationToken)
                 ?? throw new MemberNotFoundException();
             return await ToDetailsAsync(created, cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            await tx.RollbackAsync(cancellationToken);
+            // سباق TOCTOU على القيد الفريد لرقم التجنيد بعد الفحص المسبق.
+            if (await _members.RecruitmentNumberExistsAsync(recruitmentNumber, cancellationToken: cancellationToken))
+                throw new MemberRecruitmentNumberExistsException(recruitmentNumber);
+            throw;
         }
         catch
         {

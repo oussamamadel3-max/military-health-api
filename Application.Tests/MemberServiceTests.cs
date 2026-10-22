@@ -6,6 +6,7 @@ using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Application.Mappings;
 using Application.Services.Members;
+using Domain.Entities.Audit;
 using Domain.Entities.Auth;
 using Domain.Entities.Core;
 using Domain.Entities.Patient;
@@ -67,6 +68,82 @@ public class MemberServiceTests
         Assert.Equal(1, first.QueueNumber);
         Assert.Equal(2, second.FileNumber);
         Assert.Equal(2, second.QueueNumber);
+    }
+
+    [Fact]
+    public async Task Create_queue_numbers_are_independent_per_center()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+
+        var serviceA = CreateService(db, CenterA, allowCreate: true, allowView: true);
+        var inA = await serviceA.CreateAsync(ValidCreate(recruitment: "QA-1", fullName: "في أ"));
+
+        var serviceB = CreateService(db, CenterB, allowCreate: true, allowView: true);
+        var inB = await serviceB.CreateAsync(ValidCreate(recruitment: "QB-1", fullName: "في ب"));
+
+        Assert.Equal(1, inA.QueueNumber);
+        Assert.Equal(1, inB.QueueNumber);
+        Assert.Equal(CenterA, inA.CurrentMedicalCenterId);
+        Assert.Equal(CenterB, inB.CurrentMedicalCenterId);
+        Assert.NotEqual(inA.FileNumber, inB.FileNumber);
+    }
+
+    [Fact]
+    public async Task Create_maps_recruitment_unique_db_conflict_to_business_exception()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+
+        var existsCalls = 0;
+        var members = new Mock<IMemberRepository>();
+        members.Setup(m => m.RecruitmentNumberExistsAsync(
+                It.IsAny<string>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => Interlocked.Increment(ref existsCalls) > 1);
+        members.Setup(m => m.AllocateFileAndQueueNumbersAsync(
+                CenterA,
+                It.IsAny<DateOnly>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((1L, 1));
+        members.Setup(m => m.Add(It.IsAny<Member>()));
+        members.Setup(m => m.AddIdentity(It.IsAny<MemberCenterIdentity>()));
+
+        var audit = new Mock<IAuditLogRepository>();
+        audit.Setup(a => a.Add(It.IsAny<AuditEvent>()));
+
+        var uow = new Mock<IUnitOfWork>();
+        uow.Setup(u => u.BeginTransactionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new NoopTransaction());
+        uow.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new DbUpdateException("unique recruitment", innerException: null));
+
+        var gate = new Mock<IPermissionGate>();
+        gate.Setup(g => g.EnsureLocalAsync(
+                MilitaryHealthPermissions.Members.CreateUpdate,
+                It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CenterA);
+
+        var config = new TypeAdapterConfig();
+        new MemberProfile().Register(config);
+        var service = new MemberService(
+            members.Object,
+            new MedicalCenterRepository(db),
+            new ReferenceDataRepository(db),
+            audit.Object,
+            uow.Object,
+            new Mapper(config),
+            gate.Object,
+            new TestCurrentUser());
+
+        var error = await Assert.ThrowsAsync<MemberRecruitmentNumberExistsException>(() =>
+            service.CreateAsync(ValidCreate(recruitment: "RACE-1")));
+
+        Assert.Equal(400, error.Status);
+        Assert.Equal("MEMBER_RECRUITMENT_NUMBER_EXISTS", error.ErrorCode);
+        uow.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -249,6 +326,44 @@ public class MemberServiceTests
         Assert.Equal("طبيعي", MemberBmi.Classify(22.8m, categories));
         Assert.Equal("نقص وزن", MemberBmi.Classify(17m, categories));
         Assert.Null(MemberBmi.Classify(null, categories));
+    }
+
+    [Fact]
+    public async Task Allocate_on_inmemory_skips_advisory_locks_and_returns_next_numbers()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var repo = new MemberRepository(db);
+
+        var (file1, queue1) = await repo.AllocateFileAndQueueNumbersAsync(CenterA, DateOnly.FromDateTime(DateTime.UtcNow));
+        Assert.Equal(1, file1);
+        Assert.Equal(1, queue1);
+
+        db.Members.Add(new Member
+        {
+            MemberId = Guid.NewGuid(),
+            FileNumber = file1,
+            RecruitmentNumber = "ALLOC-1",
+            FullName = "مخصص",
+            MotherName = "أم",
+            BirthDate = DateOnly.FromDateTime(DateTime.UtcNow).AddYears(-20),
+            MaritalStatusId = 1,
+            Occupation = "موظف",
+            RecruitmentCenterId = RecruitmentCenterId,
+            CurrentMedicalCenterId = CenterA,
+            QueueMedicalCenterId = CenterA,
+            QueueDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            QueueNumber = queue1,
+            CreatedByUserId = "actor-1",
+            UpdatedByUserId = "actor-1",
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var (file2, queue2) = await repo.AllocateFileAndQueueNumbersAsync(CenterA, DateOnly.FromDateTime(DateTime.UtcNow));
+        Assert.Equal(2, file2);
+        Assert.Equal(2, queue2);
     }
 
     [Fact]

@@ -20,7 +20,10 @@ public interface IMemberRepository
         Guid? excludingMemberId = null,
         CancellationToken cancellationToken = default);
 
-    /// <summary>يعيد (رقم الملف التالي، رقم الدور التالي لليوم في المركز).</summary>
+    /// <summary>
+    /// يعيد (رقم الملف التالي، رقم الدور التالي لليوم في المركز).
+    /// يجب استدعاؤه داخل معاملة مفتوحة؛ على PostgreSQL يُقفل التسلسل حتى نهاية المعاملة.
+    /// </summary>
     Task<(long FileNumber, int QueueNumber)> AllocateFileAndQueueNumbersAsync(
         Guid centerId,
         DateOnly queueDate,

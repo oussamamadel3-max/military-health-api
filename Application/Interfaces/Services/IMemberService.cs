@@ -3,7 +3,7 @@ using Application.Dtos.Members;
 
 namespace Application.Interfaces.Services;
 
-/// <summary>خدمات ملف المنتسب في المركز النشط (أساس MH-P3-010).</summary>
+/// <summary>خدمات ملف المنتسب في المركز النشط (تسجيل MH-P3-020 على أساس MH-P3-010).</summary>
 public interface IMemberService
 {
     Task<PaginatedList<MemberListItemDto>> ListAsync(
