@@ -15,7 +15,6 @@ namespace Application.Services.AuthServices
     public class PermissionService : IPermissionService
     {
         private readonly IPermissionRepository _permissionRepository;
-        private readonly IRoleRepository _roleRepository;
         private readonly IUserRepository _userRepository;
         private readonly IRefreshTokenRepository _refreshTokenRepository;
         private readonly IUnitOfWork _unitOfWork;
@@ -27,7 +26,6 @@ namespace Application.Services.AuthServices
 
         public PermissionService(
             IPermissionRepository permissionRepository,
-            IRoleRepository roleRepository,
             IUserRepository userRepository,
             IRefreshTokenRepository refreshTokenRepository,
             IUnitOfWork unitOfWork,
@@ -38,7 +36,6 @@ namespace Application.Services.AuthServices
             IMapper mapper)
         {
             _permissionRepository = permissionRepository;
-            _roleRepository = roleRepository;
             _userRepository = userRepository;
             _refreshTokenRepository = refreshTokenRepository;
             _unitOfWork = unitOfWork;
@@ -129,48 +126,22 @@ namespace Application.Services.AuthServices
         {
             _permissionGate.EnsureAll(SystemPermissions.RoleManagement.AssignPermissions);
 
-            _ = await _roleManager.FindByIdAsync(roleId)
+            var role = await _roleManager.FindByIdAsync(roleId)
                 ?? throw new RoleNotFoundException("الدور غير موجود.");
 
             var permission = await _permissionRepository.FindByIdAsync(permissionId)
                 ?? throw new RoleNotFoundException("الصلاحية غير موجودة.");
 
             var existing = await _permissionRepository.FindRolePermissionAsync(roleId, permissionId);
-            var previousNames = (await _roleRepository.GetRolePermissionsForRolesAsync(new[] { roleId }))
-                .Select(rp => rp.Permission?.Name)
-                .Where(n => !string.IsNullOrWhiteSpace(n))
-                .Select(n => n!)
-                .ToList();
 
             if (existing is { IsActive: true })
             {
-                var afterNames = previousNames
-                    .Where(n => !string.Equals(n, permission.Name, StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-
-                await IamAdminGuard.EnsureAtLeastOneIamAdminRemainsAfterRolePermissionChangeAsync(
-                    _userRepository, _roleRepository, roleId, afterNames, previousNames);
-
                 IamRetention.Revoke(existing, AssignmentStamp.RequireActor(_currentUserService.UserId), IamRetention.RolePermissionWithdrawn);
                 await _unitOfWork.SaveChangesAsync();
                 await SecurityStampHelper.InvalidateUsersWithRoleAsync(
                     _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, roleId);
                 return;
             }
-
-            if (!permission.IsActive)
-                throw new InvalidRoleDataException("لا يمكن ربط صلاحية غير نشطة بالدور.");
-
-            IamAdminGuard.EnsureAssignableWithinActorPermissions(
-                new[] { permission.Name }, _permissionGate.GetPermissions());
-
-            var afterGrant = previousNames
-                .Append(permission.Name ?? string.Empty)
-                .Where(n => !string.IsNullOrWhiteSpace(n))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            PermissionDependencyRules.EnsureReadBeforeWriteActions(afterGrant);
 
             if (existing != null)
             {
@@ -180,6 +151,9 @@ namespace Application.Services.AuthServices
                     _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, roleId);
                 return;
             }
+
+            IamAdminGuard.EnsureAssignableWithinActorPermissions(
+                new[] { permission.Name }, _permissionGate.GetPermissions());
 
             var rolePermission = new RolePermission
             {

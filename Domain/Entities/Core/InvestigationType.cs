@@ -1,8 +1,6 @@
-using Domain.Interfaces;
-
 namespace Domain.Entities.Core;
 
-public class InvestigationType : IAuditableEntity
+public class InvestigationType
 {
     public short InvestigationTypeId { get; set; }
     public string Code { get; set; } = null!;

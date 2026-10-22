@@ -5,7 +5,6 @@ public static class SystemPermissions
     public static class UserManagement
     {
         public const string Read = "UserManagement.Read";
-        public const string ViewEffectiveAccess = "UserManagement.ViewEffectiveAccess";
         public const string Create = "UserManagement.Create";
         public const string Edit = "UserManagement.Edit";
         public const string Delete = "UserManagement.Delete";

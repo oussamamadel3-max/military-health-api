@@ -62,7 +62,6 @@ app.UseRateLimiter();
 app.UseMiddleware<CsrfValidationMiddleware>();
 app.UseAuthorization();
 app.UseMiddleware<CurrentUserMiddleware>();
-app.UseMiddleware<MustChangePasswordMiddleware>();
 
 app.MapControllers();
 app.MapHealthChecks("/health").DisableRateLimiting();

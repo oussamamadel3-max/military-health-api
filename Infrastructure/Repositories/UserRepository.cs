@@ -25,105 +25,11 @@ public class UserRepository : IUserRepository
     public IQueryable<User> QueryUsers(bool asNoTracking = true)
         => asNoTracking ? _context.Users.AsNoTracking() : _context.Users;
 
-    public IQueryable<UserProfile> QueryProfiles(bool asNoTracking = true)
-        => asNoTracking ? _context.UserProfiles.AsNoTracking() : _context.UserProfiles;
-
-    public Task<UserProfile?> FindTrackedProfileAsync(string userId, CancellationToken cancellationToken = default)
-        => _context.UserProfiles.FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
-
-    public Task<bool> EmployeeNumberExistsAsync(
-        string employeeNumber,
-        string? excludeUserId = null,
-        CancellationToken cancellationToken = default)
-    {
-        var query = _context.UserProfiles.AsNoTracking()
-            .Where(p => p.EmployeeNumber == employeeNumber);
-        if (!string.IsNullOrWhiteSpace(excludeUserId))
-            query = query.Where(p => p.UserId != excludeUserId);
-        return query.AnyAsync(cancellationToken);
-    }
-
-    public void AddProfile(UserProfile profile)
-        => _context.UserProfiles.Add(profile);
-
-    public IQueryable<User> QueryUsersManageableByLocalActor(string actorUserId, bool asNoTracking = true)
-    {
-        var users = asNoTracking ? _context.Users.AsNoTracking() : _context.Users;
-        var actorCenterIds = _context.UserCenters.AsNoTracking()
-            .Where(uc => uc.UserId == actorUserId && uc.IsActive && uc.Center.IsActive)
-            .Select(uc => uc.CenterId);
-
-        return users.Where(u =>
-            _context.UserCenters.Any(uc =>
-                uc.UserId == u.Id
-                && uc.Center.IsActive
-                && actorCenterIds.Contains(uc.CenterId)
-                && (uc.IsActive || uc.RevokeReason == IamRetention.AccountCreatedInactive))
-            && !_context.UserRoleAssociations.Any(a =>
-                a.UserId == u.Id && a.IsActive && a.CenterId == null && a.Role.IsActive)
-            && !_context.UserPermissions.Any(p =>
-                p.UserId == u.Id
-                && p.IsActive
-                && p.CenterId == null
-                && p.Permission != null
-                && p.Permission.IsActive));
-    }
-
-    public async Task<bool> SharesActiveCenterAsync(
-        string actorUserId,
-        string targetUserId,
-        CancellationToken cancellationToken = default)
-    {
-        var actorCenterIds = await _context.UserCenters.AsNoTracking()
-            .Where(uc => uc.UserId == actorUserId && uc.IsActive && uc.Center.IsActive)
-            .Select(uc => uc.CenterId)
-            .ToListAsync(cancellationToken);
-
-        if (actorCenterIds.Count == 0)
-            return false;
-
-        // يشمل إسناد المركز المعلّق عند إنشاء حساب غير نشط حتى يتمكن المدير من التفعيل.
-        return await _context.UserCenters.AsNoTracking()
-            .AnyAsync(
-                uc => uc.UserId == targetUserId
-                    && uc.Center.IsActive
-                    && actorCenterIds.Contains(uc.CenterId)
-                    && (uc.IsActive || uc.RevokeReason == IamRetention.AccountCreatedInactive),
-                cancellationToken);
-    }
-
     public IQueryable<UserRoleAssociation> QueryRoleAssociations(bool asNoTracking = true)
         => asNoTracking ? _context.UserRoleAssociations.AsNoTracking() : _context.UserRoleAssociations;
 
     public IQueryable<UserPermission> QueryUserPermissions(bool asNoTracking = true)
         => asNoTracking ? _context.UserPermissions.AsNoTracking() : _context.UserPermissions;
-
-    public IQueryable<UserCenter> QueryUserCenters(bool asNoTracking = true)
-        => asNoTracking ? _context.UserCenters.AsNoTracking() : _context.UserCenters;
-
-    public void AddUserCenters(IEnumerable<UserCenter> centers)
-    {
-        foreach (var incoming in centers)
-        {
-            var existing = _context.UserCenters
-                .FirstOrDefault(x => x.UserId == incoming.UserId && x.CenterId == incoming.CenterId);
-            if (existing is { IsActive: true })
-                continue;
-            if (existing != null)
-            {
-                IamRetention.Reactivate(existing, incoming.AssignedByUserId, incoming.AssignedAt);
-                continue;
-            }
-
-            _context.UserCenters.Add(incoming);
-        }
-    }
-
-    public IQueryable<UserClinicAssignment> QueryUserClinicAssignments(bool asNoTracking = true)
-        => asNoTracking ? _context.UserClinicAssignments.AsNoTracking() : _context.UserClinicAssignments;
-
-    public void AddUserClinicAssignment(UserClinicAssignment assignment)
-        => _context.UserClinicAssignments.Add(assignment);
 
     public async Task<Dictionary<string, string>> GetDisplayNamesByIdsAsync(IEnumerable<string> userIds, CancellationToken cancellationToken = default)
     {
@@ -253,15 +159,6 @@ public class UserRepository : IUserRepository
     public async Task<List<Guid>> GetDirectPermissionIdsAsync(string userId, CancellationToken cancellationToken = default)
         => await _context.UserPermissions
             .Where(up => up.UserId == userId && up.IsActive)
-            .Select(up => up.PermissionId)
-            .ToListAsync(cancellationToken);
-
-    public Task<List<Guid>> GetActiveDirectPermissionIdsAsync(
-        string userId,
-        Guid? centerId,
-        CancellationToken cancellationToken = default)
-        => _context.UserPermissions.AsNoTracking()
-            .Where(up => up.UserId == userId && up.IsActive && up.CenterId == centerId)
             .Select(up => up.PermissionId)
             .ToListAsync(cancellationToken);
 

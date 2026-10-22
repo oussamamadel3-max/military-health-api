@@ -1,8 +1,6 @@
-using Domain.Interfaces;
-
 namespace Domain.Entities.Core;
 
-public class RequiredActionType : IAuditableEntity
+public class RequiredActionType
 {
     public short ActionTypeId { get; set; }
     public string Code { get; set; } = null!;

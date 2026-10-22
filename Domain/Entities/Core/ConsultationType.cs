@@ -1,8 +1,6 @@
-using Domain.Interfaces;
-
 namespace Domain.Entities.Core;
 
-public class ConsultationType : IAuditableEntity
+public class ConsultationType
 {
     public short ConsultationTypeId { get; set; }
     public string Code { get; set; } = null!;

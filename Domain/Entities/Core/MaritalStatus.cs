@@ -1,8 +1,6 @@
-using Domain.Interfaces;
-
 namespace Domain.Entities.Core;
 
-public class MaritalStatus : IAuditableEntity
+public class MaritalStatus
 {
     public short MaritalStatusId { get; set; }
     public string Code { get; set; } = null!;

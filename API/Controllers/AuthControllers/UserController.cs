@@ -15,27 +15,14 @@ namespace API.Controllers.AuthControllers
     public class UserController : ControllerBase
     {
         private readonly IUserService _userService;
-        private readonly IUserAssignmentService _userAssignments;
-        private readonly IUserClinicAssignmentService _userClinicAssignments;
-        private readonly IUserEffectiveAccessService _effectiveAccess;
 
-        public UserController(
-            IUserService userService,
-            IUserAssignmentService userAssignments,
-            IUserClinicAssignmentService userClinicAssignments,
-            IUserEffectiveAccessService effectiveAccess)
+        public UserController(IUserService userService)
         {
             _userService = userService;
-            _userAssignments = userAssignments;
-            _userClinicAssignments = userClinicAssignments;
-            _effectiveAccess = effectiveAccess;
         }
 
         [HttpPost("[action]")]
-        [AuthorizePermission(
-            SystemPermissions.UserManagement.Create,
-            SystemPermissions.UserManagement.AssignRoles,
-            MilitaryHealthPermissions.UserCenters.Manage)]
+        [AuthorizePermission(SystemPermissions.UserManagement.Create)]
         public async Task<IResult> Create([FromBody] CreateUserDto userDto)
         {
             var createdUser = await _userService.Create(userDto);
@@ -154,105 +141,11 @@ namespace API.Controllers.AuthControllers
         }
 
         [HttpGet("[action]")]
-        [AuthorizePermission(SystemPermissions.UserManagement.AssignRoles)]
-        public async Task<IResult> AssignableRoles(CancellationToken cancellationToken)
-        {
-            var roles = await _userAssignments.GetAssignableRolesAsync(cancellationToken);
-            return ApiResponse.Success("تم جلب الأدوار القابلة للإسناد.", roles);
-        }
-
-        [HttpGet("[action]")]
         [AuthorizePermission(SystemPermissions.UserManagement.Read)]
         public async Task<IResult> GetDropDownUsers()
         {
             var dropDownUsers = await _userService.GetDropDownUsersAsync();
             return ApiResponse.Success("تم جلب قائمة المستخدمين بنجاح.", dropDownUsers);
-        }
-
-        [HttpGet("[action]/{userId}")]
-        [AuthorizePermission(SystemPermissions.UserManagement.Read)]
-        public async Task<IResult> GetUserAssignments(string userId, CancellationToken cancellationToken)
-        {
-            var assignments = await _userAssignments.GetAssignmentsAsync(userId, cancellationToken);
-            return ApiResponse.Success("تم جلب إسنادات المستخدم بنجاح.", assignments);
-        }
-
-        /// <summary>
-        /// عرض الصلاحيات الفعلية (FR-021). يسمح لصاحب الحساب، أو لمن لديه UserManagement.Read،
-        /// أو لمن لديه UserManagement.ViewEffectiveAccess، ضمن تفويضه.
-        /// </summary>
-        [HttpGet("[action]/{userId}")]
-        public async Task<IResult> GetEffectivePermissions(
-            string userId,
-            [FromQuery] Guid? centerId = null,
-            CancellationToken cancellationToken = default)
-        {
-            var result = await _effectiveAccess.GetEffectiveAccessAsync(userId, centerId, cancellationToken);
-            return ApiResponse.Success("تم جلب الصلاحيات الفعلية بنجاح.", result);
-        }
-
-        [HttpPost("[action]")]
-        [AuthorizePermission(MilitaryHealthPermissions.UserCenters.Manage)]
-        public async Task<IResult> AssignUserCenter([FromBody] AssignUserCenterDto dto, CancellationToken cancellationToken)
-        {
-            var result = await _userAssignments.AssignCenterAsync(dto, cancellationToken);
-            return ApiResponse.Success("تم إسناد المركز بنجاح.", result);
-        }
-
-        [HttpPost("[action]")]
-        [AuthorizePermission(MilitaryHealthPermissions.UserCenters.Manage)]
-        public async Task<IResult> RevokeUserCenter([FromBody] RevokeUserCenterDto dto, CancellationToken cancellationToken)
-        {
-            await _userAssignments.RevokeCenterAsync(dto, cancellationToken);
-            return ApiResponse.Success("تم إلغاء إسناد المركز بنجاح.");
-        }
-
-        [HttpPost("[action]")]
-        [AuthorizePermission(SystemPermissions.UserManagement.AssignRoles)]
-        public async Task<IResult> AssignUserRole([FromBody] AssignUserRoleDto dto, CancellationToken cancellationToken)
-        {
-            var result = await _userAssignments.AssignRoleAsync(dto, cancellationToken);
-            return ApiResponse.Success("تم إسناد الدور بنجاح.", result);
-        }
-
-        [HttpPost("[action]")]
-        [AuthorizePermission(SystemPermissions.UserManagement.AssignRoles)]
-        public async Task<IResult> RevokeUserRole([FromBody] RevokeUserRoleDto dto, CancellationToken cancellationToken)
-        {
-            await _userAssignments.RevokeRoleAsync(dto, cancellationToken);
-            return ApiResponse.Success("تم إلغاء إسناد الدور بنجاح.");
-        }
-
-        [HttpGet("[action]/{userId}")]
-        [AuthorizePermission(MilitaryHealthPermissions.UserClinics.Manage)]
-        public async Task<IResult> GetUserClinicAssignments(
-            string userId,
-            [FromQuery] bool activeOnly = false,
-            CancellationToken cancellationToken = default)
-        {
-            var assignments = await _userClinicAssignments.GetUserClinicAssignmentsAsync(
-                userId, activeOnly, cancellationToken);
-            return ApiResponse.Success("تم جلب إسنادات عيادات المستخدم بنجاح.", assignments);
-        }
-
-        [HttpPost("[action]")]
-        [AuthorizePermission(MilitaryHealthPermissions.UserClinics.Manage)]
-        public async Task<IResult> AssignUserClinic(
-            [FromBody] AssignUserClinicDto dto,
-            CancellationToken cancellationToken = default)
-        {
-            var result = await _userClinicAssignments.AssignAsync(dto, cancellationToken);
-            return ApiResponse.Success("تم إسناد الطبيب إلى العيادة بنجاح.", result);
-        }
-
-        [HttpPost("[action]")]
-        [AuthorizePermission(MilitaryHealthPermissions.UserClinics.Manage)]
-        public async Task<IResult> RevokeUserClinic(
-            [FromBody] RevokeUserClinicDto dto,
-            CancellationToken cancellationToken = default)
-        {
-            await _userClinicAssignments.RevokeAsync(dto, cancellationToken);
-            return ApiResponse.Success("تم إلغاء إسناد الطبيب عن العيادة بنجاح.");
         }
     }
 }

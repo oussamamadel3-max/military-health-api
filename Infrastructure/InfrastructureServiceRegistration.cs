@@ -6,11 +6,7 @@ using Application.Services;
 using Application.Services.Audit;
 using Application.Services.AttachmentService;
 using Application.Services.AuthServices;
-using Application.Services.Centers;
 using Application.Services.Dashboard;
-using Application.Services.Members;
-using Application.Services.ReferenceData;
-using Application.Services.ReferenceData.Handlers;
 using Application.Services.FileStorageService;
 using Application.Services.Reports;
 using Application.Services.Sanitization;
@@ -39,10 +35,6 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
         services.AddScoped<IAccessContextRepository, AccessContextRepository>();
         services.AddScoped<ICrossCenterAccessRepository, CrossCenterAccessRepository>();
-        services.AddScoped<IMedicalCenterRepository, MedicalCenterRepository>();
-        services.AddScoped<ICenterClinicRepository, CenterClinicRepository>();
-        services.AddScoped<IReferenceDataRepository, ReferenceDataRepository>();
-        services.AddScoped<IMemberRepository, MemberRepository>();
         #endregion
 
         #region Auth HTTP services
@@ -52,9 +44,6 @@ public static class InfrastructureServiceRegistration
 
         #region Authorization services
         services.AddScoped<IUserService, UserService>();
-        services.AddScoped<IUserAssignmentService, UserAssignmentService>();
-        services.AddScoped<IUserClinicAssignmentService, UserClinicAssignmentService>();
-        services.AddScoped<IUserEffectiveAccessService, UserEffectiveAccessService>();
         services.AddScoped<IRoleService, RoleService>();
         services.AddScoped<IPermissionService, PermissionService>();
         services.AddScoped<IFieldPermissionService, FieldPermissionService>();
@@ -78,20 +67,6 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IDashboardService, DashboardService>();
         services.AddScoped<IExportService, ExportService>();
         services.AddScoped<IReportsService, ReportsService>();
-        services.AddScoped<IMedicalCenterService, MedicalCenterService>();
-        services.AddScoped<ICenterClinicService, CenterClinicService>();
-        services.AddScoped<IMemberService, MemberService>();
-        services.AddScoped<IReferenceCatalogHandler, RecruitmentCenterCatalogHandler>();
-        services.AddScoped<IReferenceCatalogHandler, ClinicCatalogHandler>();
-        services.AddScoped<IReferenceCatalogHandler, ResultStatusCatalogHandler>();
-        services.AddScoped<IReferenceCatalogHandler, RequiredActionTypeCatalogHandler>();
-        services.AddScoped<IReferenceCatalogHandler, MaritalStatusCatalogHandler>();
-        services.AddScoped<IReferenceCatalogHandler, BloodTypeCatalogHandler>();
-        services.AddScoped<IReferenceCatalogHandler, ConsultationTypeCatalogHandler>();
-        services.AddScoped<IReferenceCatalogHandler, InvestigationTypeCatalogHandler>();
-        services.AddScoped<IReferenceCatalogHandler, BmiCategoryCatalogHandler>();
-        services.AddScoped<IReferenceCatalogHandler, ValidationRuleCatalogHandler>();
-        services.AddScoped<IReferenceDataService, ReferenceDataService>();
         #endregion
 
         return services;

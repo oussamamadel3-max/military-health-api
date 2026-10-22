@@ -1,8 +1,6 @@
-using Domain.Interfaces;
-
 namespace Domain.Entities.Core;
 
-public class BloodType : IAuditableEntity
+public class BloodType
 {
     public short BloodTypeId { get; set; }
     public string Code { get; set; } = null!;

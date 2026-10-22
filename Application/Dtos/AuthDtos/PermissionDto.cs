@@ -29,12 +29,6 @@ namespace Application.Dtos.AuthDtos
         [Required]
         [MinLength(1, ErrorMessage = "يجب تحديد صلاحية واحدة على الأقل.")]
         public List<Guid> PermissionId { get; set; } = new();
-
-        /// <summary>
-        /// نطاق الصلاحية المباشرة. للمدير المحلي يُؤخذ المركز النشط إن تُرك فارغاً، ويُرفض إن اختلف عنه.
-        /// للجهة المركزية: القيمة الفارغة تعني صلاحية مركزية، والقيمة تقيّد الصلاحية بذلك المركز.
-        /// </summary>
-        public Guid? CenterId { get; set; }
     }
 
 

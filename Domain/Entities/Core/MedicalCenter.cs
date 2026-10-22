@@ -1,8 +1,6 @@
-using Domain.Interfaces;
-
 namespace Domain.Entities.Core;
 
-public class MedicalCenter : IAuditableEntity
+public class MedicalCenter
 {
     public Guid CenterId { get; set; }
     public string Code { get; set; } = null!;

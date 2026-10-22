@@ -7,21 +7,8 @@ public interface IUserRepository
     Task<User?> GetByIdAsync(string id, bool asNoTracking = false, CancellationToken cancellationToken = default);
     Task<User?> FindByIdAsync(string id, CancellationToken cancellationToken = default);
     IQueryable<User> QueryUsers(bool asNoTracking = true);
-    IQueryable<UserProfile> QueryProfiles(bool asNoTracking = true);
-    Task<UserProfile?> FindTrackedProfileAsync(string userId, CancellationToken cancellationToken = default);
-    Task<bool> EmployeeNumberExistsAsync(string employeeNumber, string? excludeUserId = null, CancellationToken cancellationToken = default);
-    void AddProfile(UserProfile profile);
-    /// <summary>
-    /// مستخدمو المراكز المشتركة مع الممثل، باستثناء من لديهم سلطة مركزية.
-    /// </summary>
-    IQueryable<User> QueryUsersManageableByLocalActor(string actorUserId, bool asNoTracking = true);
-    Task<bool> SharesActiveCenterAsync(string actorUserId, string targetUserId, CancellationToken cancellationToken = default);
     IQueryable<UserRoleAssociation> QueryRoleAssociations(bool asNoTracking = true);
     IQueryable<UserPermission> QueryUserPermissions(bool asNoTracking = true);
-    IQueryable<UserCenter> QueryUserCenters(bool asNoTracking = true);
-    void AddUserCenters(IEnumerable<UserCenter> centers);
-    IQueryable<UserClinicAssignment> QueryUserClinicAssignments(bool asNoTracking = true);
-    void AddUserClinicAssignment(UserClinicAssignment assignment);
     Task<Dictionary<string, string>> GetDisplayNamesByIdsAsync(IEnumerable<string> userIds, CancellationToken cancellationToken = default);
     Task<List<UserRoleAssociation>> GetRoleAssociationsAsync(string userId, bool asNoTracking = false, CancellationToken cancellationToken = default);
     Task<List<string>> GetActiveRoleNamesAsync(string userId, CancellationToken cancellationToken = default);
@@ -38,7 +25,6 @@ public interface IUserRepository
     Task<List<UserPermission>> GetUserPermissionsAsync(string userId, CancellationToken cancellationToken = default);
     Task<List<UserFieldPermission>> GetUserFieldPermissionsAsync(string userId, CancellationToken cancellationToken = default);
     Task<List<Guid>> GetDirectPermissionIdsAsync(string userId, CancellationToken cancellationToken = default);
-    Task<List<Guid>> GetActiveDirectPermissionIdsAsync(string userId, Guid? centerId, CancellationToken cancellationToken = default);
     Task<List<Guid>> GetDirectFieldPermissionIdsAsync(string userId, CancellationToken cancellationToken = default);
     Task<List<string>> GetUserIdsByRoleIdAsync(string roleId, CancellationToken cancellationToken = default);
     Task<List<string>> GetActiveUserIdsExceptAsync(string excludeUserId, CancellationToken cancellationToken = default);

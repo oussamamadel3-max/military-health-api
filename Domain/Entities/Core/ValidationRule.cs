@@ -1,8 +1,6 @@
-using Domain.Interfaces;
-
 namespace Domain.Entities.Core;
 
-public class ValidationRule : IAuditableEntity
+public class ValidationRule
 {
     public Guid ValidationRuleId { get; set; }
     public string Code { get; set; } = null!;

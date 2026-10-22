@@ -1,9 +1,6 @@
-using Application.Common.Security;
 using Application.Exceptions;
-using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
 using System.Security.Claims;
 
 namespace Application.Services.AuthServices;
@@ -12,22 +9,11 @@ public sealed class PermissionGate : IPermissionGate
 {
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IUserPermissionService _permissions;
-    private readonly IAccessContextRepository _access;
-    private readonly ICurrentCenterService _currentCenter;
-    private readonly ILogger<PermissionGate> _logger;
 
-    public PermissionGate(
-        IHttpContextAccessor httpContextAccessor,
-        IUserPermissionService permissions,
-        IAccessContextRepository access,
-        ICurrentCenterService currentCenter,
-        ILogger<PermissionGate> logger)
+    public PermissionGate(IHttpContextAccessor httpContextAccessor, IUserPermissionService permissions)
     {
         _httpContextAccessor = httpContextAccessor;
         _permissions = permissions;
-        _access = access;
-        _currentCenter = currentCenter;
-        _logger = logger;
     }
 
     public IReadOnlyCollection<string> GetPermissions()
@@ -36,7 +22,7 @@ public sealed class PermissionGate : IPermissionGate
         if (user?.Identity?.IsAuthenticated != true)
             return Array.Empty<string>();
 
-        var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+        var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
             ?? user.FindFirst("sub")?.Value;
         if (string.IsNullOrWhiteSpace(userId))
             return Array.Empty<string>();
@@ -61,100 +47,17 @@ public sealed class PermissionGate : IPermissionGate
 
     public void EnsureAll(params string[] permissions)
     {
-        var userId = RequireUser();
         if (HasAll(permissions)) return;
 
-        _logger.LogWarning(
-            "Rejected protected operation for user {UserId}. Reason {Reason}.",
-            userId,
-            "permission-missing");
+        var owned = GetPermissions();
+        var missing = (permissions ?? Array.Empty<string>())
+            .Where(p => !string.IsNullOrWhiteSpace(p) && !owned.Contains(p, StringComparer.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
-        throw new ForbiddenPermissionException();
-    }
-
-    public async Task<Guid> EnsureLocalAsync(
-        string permission,
-        Guid? clientCenterId = null,
-        CancellationToken cancellationToken = default)
-    {
-        var userId = RequireUser();
-        var sessionCenter = _currentCenter.CenterId;
-        if (_currentCenter.IsCentralContext || sessionCenter is null)
-            throw Denied(userId, permission, "no-active-center");
-
-        var claimed = sessionCenter.Value;
-        var active = ActiveCenterSessionGate.ResolveClaimedCenter(
-            claimed,
-            await _access.IsActivelyAssignedAsync(userId, claimed, cancellationToken));
-
-        if (active is null)
-            throw Denied(userId, permission, "assignment-inactive");
-
-        var centerId = active.Value;
-        if (clientCenterId is Guid requested && requested != centerId)
-            throw Denied(userId, permission, "client-center-mismatch");
-
-        if (!await HasEffectivePermissionAsync(userId, permission, centerId, cancellationToken))
-            throw Denied(userId, permission, "permission-missing");
-
-        return centerId;
-    }
-
-    public async Task EnsureCentralAsync(string permission, CancellationToken cancellationToken = default)
-    {
-        var userId = RequireUser();
-
-        if (!await HasEffectivePermissionAsync(userId, permission, activeCenterId: null, cancellationToken))
-            throw Denied(userId, permission, "permission-missing");
-    }
-
-    private async Task<bool> HasEffectivePermissionAsync(
-        string userId,
-        string permission,
-        Guid? activeCenterId,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(permission))
-            return false;
-
-        var snapshot = await _access.LoadAsync(userId, cancellationToken);
-        var names = CenterPermissionEvaluator.Resolve(
-            snapshot.Roles,
-            snapshot.Directs,
-            snapshot.Links,
-            activeCenterId);
-
-        return names.Contains(permission, StringComparer.OrdinalIgnoreCase);
-    }
-
-    private string RequireUser()
-    {
-        var user = _httpContextAccessor.HttpContext?.User;
-        if (user?.Identity?.IsAuthenticated != true)
-            throw new UnauthenticatedUserException();
-
-        var userId = CurrentUserId();
-        if (string.IsNullOrWhiteSpace(userId) || userId == "0")
-            throw new UnauthenticatedUserException();
-
-        return userId;
-    }
-
-    private string? CurrentUserId()
-    {
-        var user = _httpContextAccessor.HttpContext?.User;
-        return user?.FindFirst(ClaimTypes.NameIdentifier)?.Value
-            ?? user?.FindFirst("sub")?.Value;
-    }
-
-    private ForbiddenPermissionException Denied(string userId, string permission, string reason)
-    {
-        _logger.LogWarning(
-            "Rejected protected operation for user {UserId}. Permission {Permission}. Reason {Reason}.",
-            userId,
-            permission,
-            reason);
-
-        return new ForbiddenPermissionException();
+        throw new ForbiddenPermissionException(
+            missing.Count == 0
+                ? "غير مصرح بتنفيذ هذه العملية."
+                : $"تفتقد الصلاحيات التالية: {string.Join(", ", missing)}");
     }
 }

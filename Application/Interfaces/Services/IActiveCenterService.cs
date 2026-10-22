@@ -5,8 +5,7 @@ namespace Application.Interfaces.Services;
 public interface IActiveCenterService
 {
     Task<IReadOnlyList<AssignedCenterDto>> GetMyCentersAsync(CancellationToken cancellationToken = default);
-    Task<TokenGenerationResultDto> SelectAsync(Guid? centerId, string? currentRefreshToken = null, CancellationToken cancellationToken = default);
-    Task<Guid> RequireOperationalCenterAsync(CancellationToken cancellationToken = default);
+    Task<TokenGenerationResultDto> SelectAsync(Guid? centerId, CancellationToken cancellationToken = default);
 }
 
 public sealed class AssignedCenterDto

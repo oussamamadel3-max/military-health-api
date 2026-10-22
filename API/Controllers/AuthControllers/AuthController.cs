@@ -36,9 +36,9 @@ namespace API.Controllers.AuthControllers
         [HttpPost("[action]")]
         public async Task<IResult> Login([FromBody] RequestToken requestToken)
         {
-            var result = await _authService.LoginAsync(requestToken);
-            _cookieService.SetAuthCookies(Response, result.Tokens.AccessToken, result.Tokens.RefreshToken);
-            _csrfService.IssueCsrf(Response, result.UserId, out var csrfToken);
+            var (tokens, userId) = await _authService.LoginAsync(requestToken);
+            _cookieService.SetAuthCookies(Response, tokens.AccessToken, tokens.RefreshToken);
+            _csrfService.IssueCsrf(Response, userId, out var csrfToken);
 
             return ApiResponse.Success("تم تسجيل الدخول بنجاح.", new LoginResponseDto { CsrfToken = csrfToken });
         }
@@ -48,7 +48,7 @@ namespace API.Controllers.AuthControllers
         public async Task<IResult> Me()
         {
             var meData = await _authService.GetMeAsync(_userContextService.UserId);
-            return ApiResponse.Success("تم جلب سياق المستخدم.", meData);
+            return ApiResponse.Success("User profile retrieved successfully", meData);
         }
 
         [Authorize]
@@ -69,7 +69,7 @@ namespace API.Controllers.AuthControllers
             _cookieService.SetAuthCookies(Response, tokens.AccessToken, tokens.RefreshToken);
             _csrfService.IssueCsrf(Response, userId, out var csrfToken);
 
-            return ApiResponse.Success("تم تجديد الجلسة بنجاح.", new CsrfResponseDto { CsrfToken = csrfToken });
+            return ApiResponse.Success("Session refreshed successfully", new CsrfResponseDto { CsrfToken = csrfToken });
         }
 
         [Authorize]
@@ -77,8 +77,7 @@ namespace API.Controllers.AuthControllers
         public async Task<IResult> Logout()
         {
             var refreshToken = _cookieService.TryGetRefreshToken(Request);
-            var activeCenterId = ReadActiveCenter(_cookieService.TryGetAccessToken(Request));
-            await _authService.LogoutAsync(refreshToken, activeCenterId);
+            await _authService.LogoutAsync(refreshToken);
             _cookieService.ClearAuthCookies(Response);
             return ApiResponse.Success("تم تسجيل الخروج بنجاح.");
         }

@@ -14,7 +14,6 @@ namespace Application.Mappings
             config.NewConfig<CreateUserDto, User>()
                 .Ignore(dest => dest.Id)
                 .Ignore(dest => dest.SecurityStamp)
-                .Ignore(dest => dest.MustChangePassword)
                 .Map(dest => dest.CreationDate, _ => DateTime.Now);
             config.NewConfig<UpdateUserDto, User>()
                 .Ignore(dest => dest.Id);
@@ -26,17 +25,11 @@ namespace Application.Mappings
                 .Map(dest => dest.email, src => src.Email ?? string.Empty)
                 .Map(dest => dest.phone, src => src.PhoneNumber)
                 .Map(dest => dest.isActive, src => src.IsActive)
-                .Map(dest => dest.mustChangePassword, src => src.MustChangePassword)
                 .Map(dest => dest.createdAt, src => src.CreationDate)
-                .Map(dest => dest.lastLoginAt, src => src.LastLoginAt)
-                .Map(dest => dest.updatedAt, src => src.UpdatedAt)
-                .Ignore(dest => dest.employeeNumber)
-                .Ignore(dest => dest.rankOrTitle)
                 .Ignore(dest => dest.rolesCount)
                 .Ignore(dest => dest.permissionsCount)
                 .Ignore(dest => dest.roles)
-                .Ignore(dest => dest.Permissions)
-                .Ignore(dest => dest.centers);
+                .Ignore(dest => dest.Permissions);
 
             config.NewConfig<UpdateUserPatchRequest, User>()
                 .Map(dest => dest.FullName, src => src.fullName)
@@ -62,14 +55,7 @@ namespace Application.Mappings
                 .Ignore(dest => dest.ProfileFileAssetId)
                 .Ignore(dest => dest.ProfileFileUrl)
                 .Ignore(dest => dest.Roles)
-                .Ignore(dest => dest.Permissions)
-                .Ignore(dest => dest.Centers)
-                .Ignore(dest => dest.CenterStatus)
-                .Ignore(dest => dest.ActiveCenter)
-                .Ignore(dest => dest.OperationalAccess)
-                .Ignore(dest => dest.CentralAuthority)
-                .Ignore(dest => dest.MustChangePassword)
-                .Ignore(dest => dest.AccountMessage);
+                .Ignore(dest => dest.Permissions);
 
             // Role Mappings
             config.NewConfig<Role, RoleDto>().TwoWays();
@@ -78,8 +64,7 @@ namespace Application.Mappings
 
             config.NewConfig<Role, DropdownRoleDto>()
                 .Map(dest => dest.roleId, src => src.Id)
-                .Map(dest => dest.name, src => AuthDisplayNames.RoleAr(src.Name ?? string.Empty))
-                .Map(dest => dest.scope, src => src.Scope);
+                .Map(dest => dest.name, src => AuthDisplayNames.RoleAr(src.Name ?? string.Empty));
 
             config.NewConfig<CreateRoleDto, Role>()
                 .Ignore(dest => dest.Id)

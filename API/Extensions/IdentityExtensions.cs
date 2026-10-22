@@ -1,7 +1,6 @@
 using Application.Interfaces.Services;
 using Application.Options;
 using Domain.Entities.Auth;
-using PasswordPolicyRules = Application.Common.PasswordPolicy;
 using Infrastructure.Persistence;
 using Infrastructure.Identity;
 using Microsoft.AspNetCore.Identity;
@@ -42,7 +41,7 @@ namespace API.Extensions
                 options.Password.RequireLowercase = true;
                 options.Password.RequireUppercase = true;
                 options.Password.RequireNonAlphanumeric = true;
-                options.Password.RequiredLength = PasswordPolicyRules.MinLength;
+                options.Password.RequiredLength = 8;
 
                 options.Lockout.AllowedForNewUsers = true;
                 options.Lockout.MaxFailedAccessAttempts = Math.Max(1, lockoutSettings.MaxFailedAccessAttempts);

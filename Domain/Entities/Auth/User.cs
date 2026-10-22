@@ -6,15 +6,8 @@ namespace Domain.Entities.Auth;
 public class User : IdentityUser, IAuditableEntity
 {
     public DateTime CreationDate { get; set; } = DateTime.Now;
-    public DateTimeOffset? LastLoginAt { get; set; }
-    public DateTimeOffset? UpdatedAt { get; set; }
     public bool IsActive { get; set; } = true;
     public string? FullName { get; set; }
-
-    /// <summary>
-    /// عند true يُمنع الوصول التشغيلي حتى يغيّر المستخدم كلمة مروره.
-    /// </summary>
-    public bool MustChangePassword { get; set; }
 
     /// <summary>
     /// مستوى تصعيد حظر تسجيل الدخول (progressive lockout). يُصفَّر عند نجاح الدخول أو بعد فترة هدوء.

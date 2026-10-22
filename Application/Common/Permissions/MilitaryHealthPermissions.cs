@@ -16,11 +16,6 @@ public static class MilitaryHealthPermissions
         public const string Manage = "UserCenters.Manage";
     }
 
-    public static class UserClinics
-    {
-        public const string Manage = "UserClinics.Manage";
-    }
-
     public static class Members
     {
         public const string CreateUpdate = "Members.CreateUpdate";

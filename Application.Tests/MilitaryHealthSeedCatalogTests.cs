@@ -69,7 +69,6 @@ public class MilitaryHealthSeedCatalogTests
 
         Assert.Contains(SystemPermissions.UserManagement.Read, manager);
         Assert.Contains(MilitaryHealthPermissions.UserCenters.Manage, manager);
-        Assert.Contains(MilitaryHealthPermissions.UserClinics.Manage, manager);
         Assert.DoesNotContain(SystemPermissions.RoleManagement.Create, manager);
         Assert.DoesNotContain(MilitaryHealthPermissions.Centers.Manage, manager);
         Assert.DoesNotContain(MilitaryHealthPermissions.Reports.Central, manager);
@@ -87,22 +86,5 @@ public class MilitaryHealthSeedCatalogTests
 
         Assert.Empty(bootstrap.Intersect(domain, StringComparer.Ordinal));
         Assert.Contains(SystemPermissions.FieldPermissionManagement.Read, bootstrap);
-        Assert.Contains(SystemPermissions.UserManagement.ViewEffectiveAccess, bootstrap);
-    }
-
-    [Fact]
-    public void Auditor_views_effective_access_without_user_administration()
-    {
-        var byRole = MilitaryHealthSeedCatalog.GrantsByRoleName();
-        var auditor = byRole["Auditor"];
-        var manager = byRole["CenterManager"];
-
-        Assert.Contains(SystemPermissions.UserManagement.ViewEffectiveAccess, auditor);
-        Assert.DoesNotContain(SystemPermissions.UserManagement.Read, auditor);
-        Assert.DoesNotContain(SystemPermissions.UserManagement.Create, auditor);
-        Assert.DoesNotContain(SystemPermissions.UserManagement.Edit, auditor);
-        Assert.DoesNotContain(SystemPermissions.UserManagement.AssignPermissions, auditor);
-        Assert.Contains(SystemPermissions.UserManagement.Read, manager);
-        Assert.DoesNotContain(SystemPermissions.UserManagement.ViewEffectiveAccess, manager);
     }
 }

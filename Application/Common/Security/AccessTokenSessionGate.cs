@@ -20,16 +20,3 @@ public static class AccessTokenSessionGate
         return true;
     }
 }
-
-public static class SessionFamilyGate
-{
-    public const string ClaimType = "session_family";
-
-    public static bool AllowsAccess(string? sessionFamily, bool familyHasActiveRefreshToken)
-    {
-        if (!Guid.TryParse(sessionFamily, out _))
-            return false;
-
-        return familyHasActiveRefreshToken;
-    }
-}

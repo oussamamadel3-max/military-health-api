@@ -39,13 +39,7 @@ namespace Application.Services.AuthServices
         }
 
         #region    توليد Access/Refresh Token وإرجاع بيانات الصلاحيات لاستخدامها خارجياً
-        public Task<TokenGenerationResultDto> GenerateTokensAsync(string userId, Guid? activeCenterId = null)
-            => GenerateTokensCoreAsync(userId, activeCenterId, rotatedFrom: null);
-
-        private async Task<TokenGenerationResultDto> GenerateTokensCoreAsync(
-            string userId,
-            Guid? activeCenterId,
-            UserRefreshToken? rotatedFrom)
+        public async Task<TokenGenerationResultDto> GenerateTokensAsync(string userId, Guid? activeCenterId = null)
         {
             var user = await _userRepository.GetByIdAsync(userId);
             if (user == null) throw new InvalidSessionException("المستخدم غير موجود.");
@@ -75,7 +69,6 @@ namespace Application.Services.AuthServices
             var fieldPermissions = mergedFieldPermissions.Values.ToList();
 
             var now = DateTime.UtcNow;
-            var sessionFamilyId = rotatedFrom?.TokenFamilyId ?? Guid.NewGuid();
             var claims = new List<Claim>
             {
                 new Claim(ClaimTypes.NameIdentifier, user.Id),
@@ -85,10 +78,6 @@ namespace Application.Services.AuthServices
                 new Claim(JwtRegisteredClaimNames.Iat, new DateTimeOffset(now).ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64),
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
                 new Claim("security_stamp", user.SecurityStamp ?? Guid.NewGuid().ToString()),
-                new Claim(
-                    MustChangePasswordClaims.ClaimType,
-                    user.MustChangePassword ? MustChangePasswordClaims.RequiredValue : "false"),
-                new Claim(SessionFamilyGate.ClaimType, sessionFamilyId.ToString()),
                 new Claim(CenterClaimTypes.Scope, activeCenterId.HasValue ? CenterClaimTypes.Center : CenterClaimTypes.Central)
             };
 
@@ -134,8 +123,7 @@ namespace Application.Services.AuthServices
                 Id = Guid.NewGuid(),
                 UserId = user.Id,
                 Token = refreshTokenHash,
-                TokenFamilyId = sessionFamilyId,
-                ParentRefreshTokenId = rotatedFrom?.Id,
+                TokenFamilyId = Guid.NewGuid(),
                 SecurityStamp = user.SecurityStamp,
                 IssuedAt = new DateTimeOffset(now),
                 ExpiryDate = now.AddDays(_jwtSettings.RefreshTokenExpirationInDays),
@@ -143,8 +131,6 @@ namespace Application.Services.AuthServices
             };
             _refreshTokenRepository.Add(dbRefreshToken);
             await _unitOfWork.SaveChangesAsync();
-            if (rotatedFrom != null)
-                await _refreshTokenRepository.MarkRotatedAsync(rotatedFrom.Id, dbRefreshToken.Id);
 
             return new TokenGenerationResultDto
             {
@@ -160,65 +146,23 @@ namespace Application.Services.AuthServices
         public async Task<TokenResponseDto> RefreshAccessTokenAsync(string refreshToken, Guid? activeCenterId = null)
         {
             if (string.IsNullOrWhiteSpace(refreshToken))
-                throw Reject(SessionRefresh.Missing, null);
+                throw new InvalidSessionException("رمز التحديث غير صالح أو منتهي الصلاحية");
 
             var tokenHash = RefreshTokenProtector.HashToken(refreshToken);
             var now = DateTime.UtcNow;
-            var rejectionCommitted = false;
 
             await using var tx = await _unitOfWork.BeginTransactionAsync();
             try
             {
                 var consumed = await _refreshTokenRepository.TryConsumeValidByTokenHashAsync(tokenHash, now);
                 if (consumed == null)
-                {
-                    var known = await _refreshTokenRepository.GetByTokenAsync(tokenHash);
-                    if (known == null)
-                        throw Reject(SessionRefresh.Invalid, null);
-
-                    if (known.IsRevoked)
-                    {
-                        await _refreshTokenRepository.RevokeActiveFamilyAsync(known.TokenFamilyId, SessionRefresh.ReuseReason);
-                        await tx.CommitAsync();
-                        rejectionCommitted = true;
-                        throw Reject(SessionRefresh.Reused, known.UserId);
-                    }
-
-                    if (known.ExpiryDate < now)
-                        throw Reject(SessionRefresh.Expired, known.UserId);
-
-                    throw Reject(SessionRefresh.Invalid, known.UserId);
-                }
+                    throw new InvalidSessionException("رمز التحديث غير صالح أو منتهي الصلاحية");
 
                 var user = await _userRepository.FindByIdAsync(consumed.UserId);
                 if (user == null || !user.IsActive)
-                {
-                    await _refreshTokenRepository.SetRevokeReasonAsync(consumed.Id, SessionRefresh.Inactive);
-                    await tx.CommitAsync();
-                    rejectionCommitted = true;
-                    throw Reject(SessionRefresh.Inactive, consumed.UserId);
-                }
+                    throw new InvalidSessionException("المستخدم غير موجود أو غير نشط");
 
-                if (!AccessTokenSessionGate.IsAccessTokenAccepted(
-                        userExists: true,
-                        isActive: true,
-                        tokenSecurityStamp: consumed.SecurityStamp,
-                        userSecurityStamp: user.SecurityStamp))
-                {
-                    await _refreshTokenRepository.SetRevokeReasonAsync(consumed.Id, SessionRefresh.SecurityStamp);
-                    await tx.CommitAsync();
-                    rejectionCommitted = true;
-                    throw Reject(SessionRefresh.SecurityStamp, consumed.UserId);
-                }
-
-                var centerForSession = activeCenterId;
-                if (centerForSession is Guid requestedCenter &&
-                    !await _access.IsActivelyAssignedAsync(consumed.UserId, requestedCenter))
-                {
-                    centerForSession = null;
-                }
-
-                var tokenResult = await GenerateTokensCoreAsync(consumed.UserId, centerForSession, consumed);
+                var tokenResult = await GenerateTokensAsync(consumed.UserId, activeCenterId);
                 await tx.CommitAsync();
 
                 return new TokenResponseDto
@@ -229,14 +173,10 @@ namespace Application.Services.AuthServices
             }
             catch
             {
-                if (!rejectionCommitted)
-                    await tx.RollbackAsync();
+                await tx.RollbackAsync();
                 throw;
             }
         }
-
-        private static InvalidSessionException Reject(string reasonCode, string? userId)
-            => new(SessionRefresh.RejectedMessage, reasonCode, userId);
         #endregion
 
         #region  إلغاء Refresh Token
@@ -247,9 +187,8 @@ namespace Application.Services.AuthServices
 
             var tokenHash = RefreshTokenProtector.HashToken(refreshToken);
             var dbToken = await _refreshTokenRepository.GetByTokenAsync(tokenHash);
-            if (dbToken == null || dbToken.IsRevoked) return false;
+            if (dbToken == null) return false;
 
-            dbToken.RevokeReason = SessionRefresh.LogoutReason;
             _refreshTokenRepository.MarkRevoked(dbToken);
             await _unitOfWork.SaveChangesAsync();
             return true;
