@@ -8,6 +8,7 @@ using Application.Services.AttachmentService;
 using Application.Services.AuthServices;
 using Application.Services.Centers;
 using Application.Services.Dashboard;
+using Application.Services.Members;
 using Application.Services.ReferenceData;
 using Application.Services.ReferenceData.Handlers;
 using Application.Services.FileStorageService;
@@ -41,6 +42,7 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IMedicalCenterRepository, MedicalCenterRepository>();
         services.AddScoped<ICenterClinicRepository, CenterClinicRepository>();
         services.AddScoped<IReferenceDataRepository, ReferenceDataRepository>();
+        services.AddScoped<IMemberRepository, MemberRepository>();
         #endregion
 
         #region Auth HTTP services
@@ -78,6 +80,7 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IReportsService, ReportsService>();
         services.AddScoped<IMedicalCenterService, MedicalCenterService>();
         services.AddScoped<ICenterClinicService, CenterClinicService>();
+        services.AddScoped<IMemberService, MemberService>();
         services.AddScoped<IReferenceCatalogHandler, RecruitmentCenterCatalogHandler>();
         services.AddScoped<IReferenceCatalogHandler, ClinicCatalogHandler>();
         services.AddScoped<IReferenceCatalogHandler, ResultStatusCatalogHandler>();
