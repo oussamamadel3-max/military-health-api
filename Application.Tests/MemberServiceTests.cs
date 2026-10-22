@@ -154,6 +154,8 @@ public class MemberServiceTests
         var service = CreateService(db, CenterA, allowCreate: true, allowView: true);
 
         var created = await service.CreateAsync(ValidCreate());
+        var createdAt = (await db.Members.SingleAsync(m => m.MemberId == created.MemberId)).CreatedAt;
+
         var updated = await service.UpdateAsync(created.MemberId, new UpdateMemberRequest
         {
             FullName = "اسم معدّل",
@@ -170,16 +172,89 @@ public class MemberServiceTests
         });
 
         Assert.Equal(created.FileNumber, updated.FileNumber);
+        Assert.Equal(created.QueueNumber, updated.QueueNumber);
         Assert.Equal(created.CurrentMedicalCenterId, updated.CurrentMedicalCenterId);
         Assert.Equal("اسم معدّل", updated.FullName);
         Assert.Equal(2, updated.DataRevision);
         Assert.Equal(24.7m, updated.Bmi);
+        Assert.Equal("طبيعي", updated.BmiCategoryNameAr);
 
         var row = await db.Members.SingleAsync(m => m.MemberId == created.MemberId);
         Assert.Equal(created.FileNumber, row.FileNumber);
+        Assert.Equal(created.QueueNumber, row.QueueNumber);
+        Assert.Equal(created.QueueDate, row.QueueDate);
         Assert.Equal(CenterA, row.CurrentMedicalCenterId);
+        Assert.Equal("actor-1", row.UpdatedByUserId);
+        Assert.True(row.UpdatedAt >= createdAt);
 
-        Assert.Contains(await db.AuditEvents.ToListAsync(), e => e.EventType == "MemberUpdate");
+        var audit = Assert.Single(await db.AuditEvents.Where(e => e.EventType == "MemberUpdate").ToListAsync());
+        Assert.False(string.IsNullOrWhiteSpace(audit.OldValues));
+        Assert.False(string.IsNullOrWhiteSpace(audit.NewValues));
+
+        using var oldJson = System.Text.Json.JsonDocument.Parse(audit.OldValues!);
+        using var newJson = System.Text.Json.JsonDocument.Parse(audit.NewValues!);
+        Assert.Equal(created.FullName, oldJson.RootElement.GetProperty("FullName").GetString());
+        Assert.Equal("اسم معدّل", newJson.RootElement.GetProperty("FullName").GetString());
+        Assert.Equal(created.FileNumber, oldJson.RootElement.GetProperty("FileNumber").GetInt64());
+        Assert.Equal(created.FileNumber, newJson.RootElement.GetProperty("FileNumber").GetInt64());
+        Assert.Equal(1, oldJson.RootElement.GetProperty("DataRevision").GetInt64());
+        Assert.Equal(2, newJson.RootElement.GetProperty("DataRevision").GetInt64());
+        Assert.False(oldJson.RootElement.TryGetProperty("password", out _));
+        Assert.False(newJson.RootElement.TryGetProperty("SecurityStamp", out _));
+    }
+
+    [Fact]
+    public async Task Update_from_other_center_is_not_found()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var createService = CreateService(db, CenterA, allowCreate: true, allowView: true);
+        var created = await createService.CreateAsync(ValidCreate());
+
+        var updateB = CreateService(db, CenterB, allowCreate: true, allowView: true);
+        await Assert.ThrowsAsync<MemberNotFoundException>(() =>
+            updateB.UpdateAsync(created.MemberId, ToUpdate(created, fullName: "محاولة مركز آخر")));
+
+        var row = await db.Members.SingleAsync(m => m.MemberId == created.MemberId);
+        Assert.Equal(created.FullName, row.FullName);
+        Assert.Equal(1, row.DataRevision);
+        Assert.Empty(await db.AuditEvents.Where(e => e.EventType == "MemberUpdate").ToListAsync());
+    }
+
+    [Fact]
+    public async Task Update_rejects_invalid_birth_date_using_create_rules()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var service = CreateService(db, CenterA, allowCreate: true, allowView: true);
+        var created = await service.CreateAsync(ValidCreate());
+
+        var request = ToUpdate(created);
+        request.BirthDate = DateOnly.FromDateTime(DateTime.UtcNow).AddYears(-10);
+
+        var error = await Assert.ThrowsAsync<InvalidMemberDataException>(() =>
+            service.UpdateAsync(created.MemberId, request));
+        Assert.Equal(400, error.Status);
+        Assert.Equal(1, (await db.Members.SingleAsync(m => m.MemberId == created.MemberId)).DataRevision);
+    }
+
+    [Fact]
+    public async Task Update_rejects_duplicate_recruitment_number()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var service = CreateService(db, CenterA, allowCreate: true, allowView: true);
+
+        var first = await service.CreateAsync(ValidCreate(recruitment: "DUP-U-1"));
+        var second = await service.CreateAsync(ValidCreate(recruitment: "DUP-U-2", fullName: "منتسب ثانٍ"));
+
+        var error = await Assert.ThrowsAsync<MemberRecruitmentNumberExistsException>(() =>
+            service.UpdateAsync(second.MemberId, ToUpdate(second, recruitment: "dup-u-1")));
+
+        Assert.Equal(400, error.Status);
+        Assert.Equal("MEMBER_RECRUITMENT_NUMBER_EXISTS", error.ErrorCode);
+        Assert.Equal("DUP-U-2", (await db.Members.SingleAsync(m => m.MemberId == second.MemberId)).RecruitmentNumber);
+        Assert.Equal(1, (await db.Members.SingleAsync(m => m.MemberId == first.MemberId)).DataRevision);
     }
 
     [Fact]
@@ -419,6 +494,29 @@ public class MemberServiceTests
             BloodPressure = "120/80",
             PulseBpm = 72,
             HasTattoo = false
+        };
+
+    private static UpdateMemberRequest ToUpdate(
+        MemberDetailsDto source,
+        string? fullName = null,
+        string? recruitment = null)
+        => new()
+        {
+            FullName = fullName ?? source.FullName,
+            MotherName = source.MotherName,
+            BirthDate = source.BirthDate,
+            MaritalStatusId = source.MaritalStatusId,
+            Occupation = source.Occupation,
+            RecruitmentNumber = recruitment ?? source.RecruitmentNumber,
+            RecruitmentCenterId = source.RecruitmentCenterId,
+            BloodTypeId = source.BloodTypeId,
+            BloodSugarMgDl = source.BloodSugarMgDl,
+            HeightCm = source.HeightCm,
+            WeightKg = source.WeightKg,
+            BloodPressure = source.BloodPressure,
+            PulseBpm = source.PulseBpm,
+            HasTattoo = source.HasTattoo,
+            DistinguishingMarks = source.DistinguishingMarks
         };
 
     private static MemberService CreateService(

@@ -17,7 +17,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Application.Services.Members;
 
 /// <summary>
-/// خدمات ملف المنتسب المحلية: تسجيل (MH-P3-020) وتعديل/قائمة/تفاصيل مع عزل المركز النشط وتدقيق صريح.
+/// خدمات ملف المنتسب المحلية: تسجيل (MH-P3-020) وتعديل (MH-P3-050 / FR-024) وقائمة/تفاصيل مع عزل المركز النشط وتدقيق صريح.
 /// </summary>
 public class MemberService : IMemberService
 {
@@ -240,12 +240,20 @@ public class MemberService : IMemberService
         }
     }
 
+    /// <summary>
+    /// يعدّل بيانات المنتسب الشخصية والطبية ضمن المركز النشط (FR-024)، مع ثبات الأرقام/المركز وإعادة حساب BMI عبر العمود المحسوب.
+    /// </summary>
+    /// <remarks>
+    /// TODO(FR-024 A5): تقييد التعديل عند وجود قرار نهائي معتمد معلّق حتى اعتماد سياسة الجهة / مسار القرار النهائي (T-07).
+    /// السلوك المؤقت المعتمد: السماح بالتعديل مع تسجيل Audit بالقيم السابقة والجديدة دون قفل.
+    /// </remarks>
     public async Task<MemberDetailsDto> UpdateAsync(
         Guid memberId,
         UpdateMemberRequest request,
         Guid? clientCenterId = null,
         CancellationToken cancellationToken = default)
     {
+        // TODO(FR-024 A5): لا يُفحص FinalDecision هنا — السماح + Audit حتى سياسة الجهة / T-07.
         var centerId = await _permissionGate.EnsureLocalAsync(
             MilitaryHealthPermissions.Members.CreateUpdate,
             clientCenterId,
