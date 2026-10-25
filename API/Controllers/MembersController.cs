@@ -13,7 +13,7 @@ using Microsoft.AspNetCore.RateLimiting;
 namespace API.Controllers;
 
 /// <summary>
-/// مسارات ملف المنتسب في المركز النشط (CRUD، إيصال، استيراد/تصدير Excel).
+/// مسارات ملف المنتسب: محلي (CRUD، إيصال، Excel) ومركزي (بحث/عرض مع تدقيق عابر).
 /// </summary>
 [ApiController]
 [Authorize]
@@ -29,6 +29,7 @@ public class MembersController : ControllerBase
     [AuthorizeOperation(MilitaryHealthPermissions.Members.View, OperationScope.Local)]
     public async Task<IResult> List(
         [FromQuery] long? fileNumber = null,
+        [FromQuery] string? barcode = null,
         [FromQuery] string? recruitmentNumber = null,
         [FromQuery] string? fullName = null,
         [FromQuery] DateOnly? date = null,
@@ -42,6 +43,7 @@ public class MembersController : ControllerBase
             new MemberListQuery
             {
                 FileNumber = fileNumber,
+                Barcode = barcode,
                 RecruitmentNumber = recruitmentNumber,
                 FullName = fullName,
                 Date = date,
@@ -56,12 +58,62 @@ public class MembersController : ControllerBase
         return ApiResponse.Success("تم جلب قائمة المنتسبين بنجاح.", result);
     }
 
+    /// <summary>قائمة وبحث المنتسبين عبر المراكز بصلاحية مركزية مع تسجيل الاطلاع العابر.</summary>
+    [HttpGet("central")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Members.ViewCentral, OperationScope.Central)]
+    public async Task<IResult> ListCentral(
+        [FromQuery][Required] string accessReason,
+        [FromQuery] Guid? centerId = null,
+        [FromQuery] long? fileNumber = null,
+        [FromQuery] string? barcode = null,
+        [FromQuery] string? recruitmentNumber = null,
+        [FromQuery] string? fullName = null,
+        [FromQuery] DateOnly? date = null,
+        [FromQuery] DateOnly? fromDate = null,
+        [FromQuery] DateOnly? toDate = null,
+        [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
+        [FromQuery][Range(1, 500)] int pageSize = 10,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _members.ListCentralAsync(
+            new MemberListQuery
+            {
+                FileNumber = fileNumber,
+                Barcode = barcode,
+                RecruitmentNumber = recruitmentNumber,
+                FullName = fullName,
+                Date = date,
+                FromDate = fromDate,
+                ToDate = toDate,
+                PageNumber = pageNumber,
+                PageSize = pageSize
+            },
+            accessReason,
+            centerId,
+            cancellationToken);
+
+        return ApiResponse.Success("تم جلب قائمة المنتسبين المركزية بنجاح.", result);
+    }
+
+    /// <summary>تفاصيل منتسب عبر المراكز بصلاحية مركزية مع تسجيل الاطلاع العابر.</summary>
+    [HttpGet("central/{memberId:guid}")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Members.ViewCentral, OperationScope.Central)]
+    public async Task<IResult> GetByIdCentral(
+        Guid memberId,
+        [FromQuery][Required] string accessReason,
+        CancellationToken cancellationToken = default)
+    {
+        var details = await _members.GetByIdCentralAsync(memberId, accessReason, cancellationToken);
+        return ApiResponse.Success("تم جلب تفاصيل ملف المنتسب المركزية بنجاح.", details);
+    }
+
     /// <summary>تصدير قائمة المنتسبين إلى Excel وفق التصفية ونطاق المركز النشط.</summary>
     [HttpGet("export")]
     [AuthorizeOperation(MilitaryHealthPermissions.Members.Export, OperationScope.Local)]
     [EnableRateLimiting(RateLimitPolicies.Reports)]
     public async Task<IActionResult> Export(
         [FromQuery] long? fileNumber = null,
+        [FromQuery] string? barcode = null,
         [FromQuery] string? recruitmentNumber = null,
         [FromQuery] string? fullName = null,
         [FromQuery] DateOnly? date = null,
@@ -73,6 +125,7 @@ public class MembersController : ControllerBase
             new MemberListQuery
             {
                 FileNumber = fileNumber,
+                Barcode = barcode,
                 RecruitmentNumber = recruitmentNumber,
                 FullName = fullName,
                 Date = date,

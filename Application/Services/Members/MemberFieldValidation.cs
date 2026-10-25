@@ -114,6 +114,27 @@ public static class MemberFieldValidation
             throw new InvalidMemberDataException("تاريخ البداية يجب ألا يتجاوز تاريخ النهاية.");
     }
 
+    /// <summary>
+    /// يفسّر قيمة الباركود كرقم ملف ويضبط <see cref="MemberListQuery.FileNumber"/>.
+    /// عند فشل التحليل يتيح البحث اليدوي برسالة واضحة دون إنشاء ملف.
+    /// </summary>
+    public static void ApplyBarcodeToFileNumber(MemberListQuery query)
+    {
+        if (string.IsNullOrWhiteSpace(query.Barcode))
+            return;
+
+        var raw = query.Barcode.Trim();
+        if (!long.TryParse(raw, out var fileNumber) || fileNumber <= 0)
+            throw new InvalidMemberDataException(
+                "قيمة الباركود غير صالحة أو تالفة. أدخل رقم الملف يدوياً أو امسح رمزاً صحيحاً.");
+
+        if (query.FileNumber.HasValue && query.FileNumber.Value != fileNumber)
+            throw new InvalidMemberDataException(
+                "تعارض بين رقم الملف وقيمة الباركود. استخدم معياراً واحداً للبحث.");
+
+        query.FileNumber = fileNumber;
+    }
+
     public static void ValidateOptionalMeasurements(
         decimal? bloodSugarMgDl,
         decimal? heightCm,

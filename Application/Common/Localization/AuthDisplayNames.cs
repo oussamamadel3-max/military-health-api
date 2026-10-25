@@ -65,6 +65,7 @@ namespace Application.Common.Localization
                 ["UserClinics.Manage"] = "إسناد الأطباء إلى عيادات المراكز",
                 ["Members.CreateUpdate"] = "إنشاء ملف المنتسب وتعديله",
                 ["Members.View"] = "البحث وعرض ملف المنتسب",
+                ["Members.ViewCentral"] = "البحث وعرض ملف المنتسب عبر المراكز",
                 ["Members.PrintReceipt"] = "طباعة الإيصال والباركود",
                 ["Members.GeneralNotes"] = "إدخال الملاحظات العامة للمريض",
                 ["Members.Import"] = "استيراد معلومات المرضى من Excel",

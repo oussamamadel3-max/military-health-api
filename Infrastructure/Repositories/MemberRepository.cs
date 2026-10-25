@@ -82,6 +82,30 @@ public class MemberRepository : IMemberRepository
 
     public void AddIdentity(MemberCenterIdentity identity) => _context.MemberCenterIdentities.Add(identity);
 
+    public async Task<IReadOnlyList<MemberGeneralNote>> GetActiveNotesAsync(
+        Guid memberId,
+        CancellationToken cancellationToken = default)
+    {
+        return await _context.MemberGeneralNotes.AsNoTracking()
+            .Include(n => n.AuthorClinic)
+            .Include(n => n.AuthorUser)
+            .Where(n => n.MemberId == memberId && n.IsActive)
+            .OrderByDescending(n => n.WrittenAt)
+            .ToListAsync(cancellationToken);
+    }
+
+    public Task<MemberTransfer?> GetLastTransferAsync(
+        Guid memberId,
+        CancellationToken cancellationToken = default)
+    {
+        return _context.MemberTransfers.AsNoTracking()
+            .Include(t => t.FromCenter)
+            .Include(t => t.ToCenter)
+            .Where(t => t.MemberId == memberId)
+            .OrderByDescending(t => t.ExecutedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     private async Task AcquireAllocationLocksAsync(
         Guid centerId,
         DateOnly queueDate,

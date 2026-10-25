@@ -33,6 +33,7 @@ public static class MilitaryHealthSeedCatalog
         new(MilitaryHealthPermissions.UserClinics.Manage, "إسناد الأطباء إلى عيادات المراكز", "UserClinics.Manage"),
         new(MilitaryHealthPermissions.Members.CreateUpdate, "إنشاء ملف المنتسب وتعديله", "Members.CreateUpdate"),
         new(MilitaryHealthPermissions.Members.View, "البحث وعرض ملف المنتسب", "Members.View"),
+        new(MilitaryHealthPermissions.Members.ViewCentral, "البحث وعرض ملف المنتسب عبر المراكز", "Members.ViewCentral"),
         new(MilitaryHealthPermissions.Members.PrintReceipt, "طباعة الإيصال والباركود", "Members.PrintReceipt"),
         new(MilitaryHealthPermissions.Members.GeneralNotes, "إدخال الملاحظات العامة للمريض", "Members.GeneralNotes"),
         new(MilitaryHealthPermissions.Members.Import, "استيراد معلومات المرضى من Excel", "Members.Import"),
@@ -151,6 +152,11 @@ public static class MilitaryHealthSeedCatalog
         Grant("CenterOfficer", MilitaryHealthPermissions.Members.View),
         Grant("ArchiveClerk", MilitaryHealthPermissions.Members.View),
         Grant("Auditor", MilitaryHealthPermissions.Members.View),
+
+        // البحث وعرض ملف المنتسب عبر المراكز (صلاحية مركزية صريحة)
+        Grant("SuperAdmin", MilitaryHealthPermissions.Members.ViewCentral),
+        Grant("CenterOfficer", MilitaryHealthPermissions.Members.ViewCentral),
+        Grant("Auditor", MilitaryHealthPermissions.Members.ViewCentral),
 
         // طباعة الإيصال والباركود
         Grant("ReceptionClerk", MilitaryHealthPermissions.Members.PrintReceipt),

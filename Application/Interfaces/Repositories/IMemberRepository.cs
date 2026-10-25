@@ -32,4 +32,14 @@ public interface IMemberRepository
     void Add(Member member);
 
     void AddIdentity(MemberCenterIdentity identity);
+
+    /// <summary>الملاحظات العامة النشطة للمنتسب مرتبة من الأحدث.</summary>
+    Task<IReadOnlyList<MemberGeneralNote>> GetActiveNotesAsync(
+        Guid memberId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>آخر عملية نقل للمنتسب إن وُجدت.</summary>
+    Task<MemberTransfer?> GetLastTransferAsync(
+        Guid memberId,
+        CancellationToken cancellationToken = default);
 }

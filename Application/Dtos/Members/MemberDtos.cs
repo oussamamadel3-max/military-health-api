@@ -44,6 +44,8 @@ public class UpdateMemberRequest
 public class MemberListQuery
 {
     public long? FileNumber { get; set; }
+    /// <summary>قيمة الباركود الممسوحة (تُفسَّر كرقم ملف).</summary>
+    public string? Barcode { get; set; }
     public string? RecruitmentNumber { get; set; }
     public string? FullName { get; set; }
     public DateOnly? Date { get; set; }
@@ -68,7 +70,10 @@ public class MemberListItemDto
     public string? BmiCategoryNameAr { get; set; }
 }
 
-/// <summary>تفاصيل ملف المنتسب الأساسية (بدون عيادات/استشارات/قرار).</summary>
+/// <summary>
+/// تفاصيل ملف المنتسب الشخصية والطبية مع الملاحظات والنقل.
+/// القيم الاختيارية غير المحددة تُرجع <c>null</c> دون إخفاء الحقل (عيادات/استشارات/قرار خارج هذه البطاقة).
+/// </summary>
 public class MemberDetailsDto
 {
     public Guid MemberId { get; set; }
@@ -101,4 +106,37 @@ public class MemberDetailsDto
     public long DataRevision { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
+
+    /// <summary>تنبيه الملاحظات العامة عندما توجد ملاحظات نشطة غير فارغة.</summary>
+    public bool HasGeneralNotesAlert { get; set; }
+
+    /// <summary>الملاحظات العامة النشطة؛ قائمة فارغة عند عدم وجود ملاحظات.</summary>
+    public IReadOnlyList<MemberGeneralNoteItemDto> GeneralNotes { get; set; } = Array.Empty<MemberGeneralNoteItemDto>();
+
+    /// <summary>آخر عملية نقل إن وُجدت؛ <c>null</c> إن لم يُنقل الملف.</summary>
+    public MemberTransferSummaryDto? LastTransfer { get; set; }
+}
+
+/// <summary>عنصر ملاحظة عامة في تفاصيل المنتسب.</summary>
+public class MemberGeneralNoteItemDto
+{
+    public Guid NoteId { get; set; }
+    public string NoteText { get; set; } = null!;
+    public string AuthorUserId { get; set; } = null!;
+    public string? AuthorUserName { get; set; }
+    public Guid AuthorClinicId { get; set; }
+    public string? AuthorClinicNameAr { get; set; }
+    public DateTimeOffset WrittenAt { get; set; }
+}
+
+/// <summary>ملخص آخر نقل لملف المنتسب.</summary>
+public class MemberTransferSummaryDto
+{
+    public Guid TransferId { get; set; }
+    public Guid FromCenterId { get; set; }
+    public string? FromCenterNameAr { get; set; }
+    public Guid ToCenterId { get; set; }
+    public string? ToCenterNameAr { get; set; }
+    public string TransferReason { get; set; } = null!;
+    public DateTimeOffset ExecutedAt { get; set; }
 }

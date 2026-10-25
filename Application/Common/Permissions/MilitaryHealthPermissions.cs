@@ -25,6 +25,8 @@ public static class MilitaryHealthPermissions
     {
         public const string CreateUpdate = "Members.CreateUpdate";
         public const string View = "Members.View";
+        /// <summary>بحث وعرض ملف المنتسب عبر المراكز (صلاحية مركزية صريحة).</summary>
+        public const string ViewCentral = "Members.ViewCentral";
         public const string PrintReceipt = "Members.PrintReceipt";
         public const string GeneralNotes = "Members.GeneralNotes";
         public const string Import = "Members.Import";

@@ -19,8 +19,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Application.Services.Members;
 
 /// <summary>
-/// خدمات ملف المنتسب المحلية: تسجيل وتعديل وإيصال وطباعة واستيراد/تصدير Excel
-/// مع عزل المركز النشط وتدقيق صريح.
+/// خدمات ملف المنتسب: محلي (تسجيل/تعديل/إيصال/Excel) ومركزي (بحث/عرض مع تدقيق اطلاع عابر).
 /// </summary>
 public class MemberService : IMemberService
 {
@@ -36,6 +35,7 @@ public class MemberService : IMemberService
     private readonly IMedicalCenterRepository _centers;
     private readonly IReferenceDataRepository _references;
     private readonly IAuditLogRepository _audit;
+    private readonly ICrossCenterAccessService _crossCenterAccess;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IMapper _mapper;
     private readonly IPermissionGate _permissionGate;
@@ -48,6 +48,7 @@ public class MemberService : IMemberService
         IMedicalCenterRepository centers,
         IReferenceDataRepository references,
         IAuditLogRepository audit,
+        ICrossCenterAccessService crossCenterAccess,
         IUnitOfWork unitOfWork,
         IMapper mapper,
         IPermissionGate permissionGate,
@@ -59,6 +60,7 @@ public class MemberService : IMemberService
         _centers = centers;
         _references = references;
         _audit = audit;
+        _crossCenterAccess = crossCenterAccess;
         _unitOfWork = unitOfWork;
         _mapper = mapper;
         _permissionGate = permissionGate;
@@ -76,30 +78,46 @@ public class MemberService : IMemberService
             clientCenterId,
             cancellationToken);
 
-        MemberFieldValidation.ValidateListDateFilter(query.Date, query.FromDate, query.ToDate);
+        return await ExecuteListAsync(query, centerId, cancellationToken);
+    }
 
-        var pageNumber = query.PageNumber < 1 ? 1 : query.PageNumber;
-        var pageSize = query.PageSize < 1 ? 10 : query.PageSize;
-        if (pageSize > 500) pageSize = 500;
+    public async Task<PaginatedList<MemberListItemDto>> ListCentralAsync(
+        MemberListQuery query,
+        string accessReason,
+        Guid? targetCenterId = null,
+        CancellationToken cancellationToken = default)
+    {
+        await _permissionGate.EnsureCentralAsync(
+            MilitaryHealthPermissions.Members.ViewCentral,
+            cancellationToken);
 
-        var q = BuildFilteredMemberQuery(centerId, query);
-        var totalCount = await q.CountAsync(cancellationToken);
-        var page = await q
-            .Skip((pageNumber - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(accessReason))
+            throw new InvalidMemberDataException("سبب الاطلاع العابر مطلوب.");
 
-        var categories = await LoadBmiCategoriesAsync(cancellationToken);
-        var items = page.Select(m =>
+        var page = await ExecuteListAsync(query, targetCenterId, cancellationToken);
+
+        var criteria = BuildListCriteria(query, targetCenterId);
+        var centersToAudit = page.Items
+            .Select(i => i.CurrentMedicalCenterId)
+            .Distinct()
+            .ToList();
+
+        if (centersToAudit.Count == 0 && targetCenterId.HasValue)
+            centersToAudit.Add(targetCenterId.Value);
+
+        foreach (var centerId in centersToAudit)
         {
-            var dto = _mapper.Map<MemberListItemDto>(m);
-            var bmi = m.Bmi ?? MemberBmi.Calculate(m.HeightCm, m.WeightKg);
-            dto.Bmi = bmi;
-            dto.BmiCategoryNameAr = MemberBmi.Classify(bmi, categories);
-            return dto;
-        }).ToList();
+            await _crossCenterAccess.RecordAsync(
+                centerId,
+                accessReason.Trim(),
+                dataType: "Member",
+                queryCriteria: criteria,
+                entityType: nameof(Member),
+                entityId: null,
+                cancellationToken);
+        }
 
-        return new PaginatedList<MemberListItemDto>(items, totalCount, pageNumber, pageSize);
+        return page;
     }
 
     public async Task<MemberDetailsDto> GetByIdAsync(
@@ -116,6 +134,35 @@ public class MemberService : IMemberService
             ?? throw new MemberNotFoundException();
 
         return await ToDetailsAsync(member, cancellationToken);
+    }
+
+    public async Task<MemberDetailsDto> GetByIdCentralAsync(
+        Guid memberId,
+        string accessReason,
+        CancellationToken cancellationToken = default)
+    {
+        await _permissionGate.EnsureCentralAsync(
+            MilitaryHealthPermissions.Members.ViewCentral,
+            cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(accessReason))
+            throw new InvalidMemberDataException("سبب الاطلاع العابر مطلوب.");
+
+        var member = await _members.GetByIdAsync(memberId, asNoTracking: true, cancellationToken)
+            ?? throw new MemberNotFoundException();
+
+        var details = await ToDetailsAsync(member, cancellationToken);
+
+        await _crossCenterAccess.RecordAsync(
+            member.CurrentMedicalCenterId,
+            accessReason.Trim(),
+            dataType: "Member",
+            queryCriteria: $"memberId={memberId:D}",
+            entityType: nameof(Member),
+            entityId: memberId.ToString(),
+            cancellationToken);
+
+        return details;
     }
 
     /// <summary>
@@ -733,6 +780,7 @@ public class MemberService : IMemberService
             cancellationToken);
 
         var userId = RequireUser();
+        MemberFieldValidation.ApplyBarcodeToFileNumber(query);
         MemberFieldValidation.ValidateListDateFilter(query.Date, query.FromDate, query.ToDate);
 
         var q = BuildFilteredMemberQuery(centerId, query);
@@ -814,9 +862,46 @@ public class MemberService : IMemberService
 
     #region Private helpers
 
-    private IQueryable<Member> BuildFilteredMemberQuery(Guid centerId, MemberListQuery query)
+    private async Task<PaginatedList<MemberListItemDto>> ExecuteListAsync(
+        MemberListQuery query,
+        Guid? centerId,
+        CancellationToken cancellationToken)
     {
-        var q = _members.Query().Where(m => m.CurrentMedicalCenterId == centerId);
+        MemberFieldValidation.ApplyBarcodeToFileNumber(query);
+        MemberFieldValidation.ValidateListDateFilter(query.Date, query.FromDate, query.ToDate);
+
+        var pageNumber = query.PageNumber < 1 ? 1 : query.PageNumber;
+        var pageSize = query.PageSize < 1 ? 10 : query.PageSize;
+        if (pageSize > 500) pageSize = 500;
+
+        var q = BuildFilteredMemberQuery(centerId, query);
+        var totalCount = await q.CountAsync(cancellationToken);
+        var page = await q
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        var categories = await LoadBmiCategoriesAsync(cancellationToken);
+        var items = page.Select(m =>
+        {
+            var dto = _mapper.Map<MemberListItemDto>(m);
+            var bmi = m.Bmi ?? MemberBmi.Calculate(m.HeightCm, m.WeightKg);
+            dto.Bmi = bmi;
+            dto.BmiCategoryNameAr = MemberBmi.Classify(bmi, categories);
+            return dto;
+        }).ToList();
+
+        return new PaginatedList<MemberListItemDto>(items, totalCount, pageNumber, pageSize);
+    }
+
+    /// <summary>
+    /// يبني استعلام القائمة بعد تطبيق نطاق المركز (إن وُجد) ثم معايير البحث والتصفية الزمنية.
+    /// </summary>
+    private IQueryable<Member> BuildFilteredMemberQuery(Guid? centerId, MemberListQuery query)
+    {
+        var q = _members.Query();
+        if (centerId.HasValue)
+            q = q.Where(m => m.CurrentMedicalCenterId == centerId.Value);
 
         if (query.FileNumber.HasValue)
             q = q.Where(m => m.FileNumber == query.FileNumber.Value);
@@ -843,7 +928,56 @@ public class MemberService : IMemberService
         var bmi = member.Bmi ?? MemberBmi.Calculate(member.HeightCm, member.WeightKg);
         dto.Bmi = bmi;
         dto.BmiCategoryNameAr = MemberBmi.Classify(bmi, await LoadBmiCategoriesAsync(cancellationToken));
+
+        var notes = await _members.GetActiveNotesAsync(member.MemberId, cancellationToken);
+        dto.GeneralNotes = notes
+            .Where(n => !string.IsNullOrWhiteSpace(n.NoteText))
+            .Select(n => new MemberGeneralNoteItemDto
+            {
+                NoteId = n.NoteId,
+                NoteText = n.NoteText,
+                AuthorUserId = n.AuthorUserId,
+                AuthorUserName = n.AuthorUser?.UserName,
+                AuthorClinicId = n.AuthorClinicId,
+                AuthorClinicNameAr = n.AuthorClinic?.NameAr,
+                WrittenAt = n.WrittenAt
+            })
+            .ToList();
+        dto.HasGeneralNotesAlert = dto.GeneralNotes.Count > 0;
+
+        var transfer = await _members.GetLastTransferAsync(member.MemberId, cancellationToken);
+        if (transfer is not null)
+        {
+            dto.LastTransfer = new MemberTransferSummaryDto
+            {
+                TransferId = transfer.TransferId,
+                FromCenterId = transfer.FromCenterId,
+                FromCenterNameAr = transfer.FromCenter?.NameAr,
+                ToCenterId = transfer.ToCenterId,
+                ToCenterNameAr = transfer.ToCenter?.NameAr,
+                TransferReason = transfer.TransferReason,
+                ExecutedAt = transfer.ExecutedAt
+            };
+        }
+
         return dto;
+    }
+
+    private static string BuildListCriteria(MemberListQuery query, Guid? targetCenterId)
+    {
+        var parts = new List<string>();
+        if (targetCenterId.HasValue) parts.Add($"centerId={targetCenterId:D}");
+        if (query.FileNumber.HasValue) parts.Add($"fileNumber={query.FileNumber}");
+        if (!string.IsNullOrWhiteSpace(query.Barcode)) parts.Add($"barcode={query.Barcode.Trim()}");
+        if (!string.IsNullOrWhiteSpace(query.FullName)) parts.Add($"fullName={query.FullName.Trim()}");
+        if (!string.IsNullOrWhiteSpace(query.RecruitmentNumber))
+            parts.Add($"recruitmentNumber={query.RecruitmentNumber.Trim()}");
+        if (query.Date.HasValue) parts.Add($"date={query.Date:yyyy-MM-dd}");
+        if (query.FromDate.HasValue) parts.Add($"fromDate={query.FromDate:yyyy-MM-dd}");
+        if (query.ToDate.HasValue) parts.Add($"toDate={query.ToDate:yyyy-MM-dd}");
+        parts.Add($"pageNumber={query.PageNumber}");
+        parts.Add($"pageSize={query.PageSize}");
+        return string.Join(';', parts);
     }
 
     private async Task EnsureReferenceAsync(

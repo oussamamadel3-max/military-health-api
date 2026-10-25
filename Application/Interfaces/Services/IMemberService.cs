@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Http;
 
 namespace Application.Interfaces.Services;
 
-/// <summary>خدمات ملف المنتسب في المركز النشط (CRUD، إيصال، استيراد/تصدير Excel).</summary>
+/// <summary>خدمات ملف المنتسب: محلي (CRUD/إيصال/Excel) ومركزي (بحث/عرض مع تدقيق عابر).</summary>
 public interface IMemberService
 {
     Task<PaginatedList<MemberListItemDto>> ListAsync(
@@ -13,9 +13,22 @@ public interface IMemberService
         Guid? clientCenterId = null,
         CancellationToken cancellationToken = default);
 
+    /// <summary>قائمة/بحث عبر المراكز بصلاحية مركزية مع تسجيل الاطلاع العابر.</summary>
+    Task<PaginatedList<MemberListItemDto>> ListCentralAsync(
+        MemberListQuery query,
+        string accessReason,
+        Guid? targetCenterId = null,
+        CancellationToken cancellationToken = default);
+
     Task<MemberDetailsDto> GetByIdAsync(
         Guid memberId,
         Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>تفاصيل منتسب عبر المراكز بصلاحية مركزية مع تسجيل الاطلاع العابر.</summary>
+    Task<MemberDetailsDto> GetByIdCentralAsync(
+        Guid memberId,
+        string accessReason,
         CancellationToken cancellationToken = default);
 
     Task<MemberDetailsDto> CreateAsync(

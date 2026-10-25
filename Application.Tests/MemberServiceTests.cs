@@ -135,6 +135,7 @@ public class MemberServiceTests
             new MedicalCenterRepository(db),
             new ReferenceDataRepository(db),
             audit.Object,
+            Mock.Of<ICrossCenterAccessService>(),
             uow.Object,
             new Mapper(config),
             gate.Object,
@@ -478,6 +479,209 @@ public class MemberServiceTests
     }
 
     [Fact]
+    public async Task List_searches_by_file_name_and_recruitment_separately()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var service = CreateService(db, CenterA, allowCreate: true, allowView: true);
+
+        var a = await service.CreateAsync(ValidCreate(recruitment: "SRCH-A", fullName: "أحمد علي"));
+        await service.CreateAsync(ValidCreate(recruitment: "SRCH-B", fullName: "سارة محمد"));
+
+        var byFile = await service.ListAsync(new MemberListQuery { FileNumber = a.FileNumber });
+        Assert.Equal(1, byFile.TotalCount);
+        Assert.Equal(a.MemberId, Assert.Single(byFile.Items).MemberId);
+
+        var byName = await service.ListAsync(new MemberListQuery { FullName = "سارة" });
+        Assert.Equal(1, byName.TotalCount);
+        Assert.Equal("سارة محمد", Assert.Single(byName.Items).FullName);
+
+        var byRecruitment = await service.ListAsync(new MemberListQuery { RecruitmentNumber = "srch-a" });
+        Assert.Equal(1, byRecruitment.TotalCount);
+        Assert.Equal("SRCH-A", Assert.Single(byRecruitment.Items).RecruitmentNumber);
+    }
+
+    [Fact]
+    public async Task List_barcode_maps_to_file_number_and_rejects_invalid()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var service = CreateService(db, CenterA, allowCreate: true, allowView: true);
+        var created = await service.CreateAsync(ValidCreate(recruitment: "BC-1"));
+
+        var byBarcode = await service.ListAsync(new MemberListQuery { Barcode = created.FileNumber.ToString() });
+        Assert.Equal(1, byBarcode.TotalCount);
+        Assert.Equal(created.MemberId, Assert.Single(byBarcode.Items).MemberId);
+
+        var error = await Assert.ThrowsAsync<InvalidMemberDataException>(() =>
+            service.ListAsync(new MemberListQuery { Barcode = "NOT-A-NUMBER" }));
+        Assert.Equal(400, error.Status);
+        Assert.Contains("باركود", error.Message);
+    }
+
+    [Fact]
+    public async Task List_pagination_returns_total_and_empty_page()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var service = CreateService(db, CenterA, allowCreate: true, allowView: true);
+
+        for (var i = 0; i < 3; i++)
+            await service.CreateAsync(ValidCreate(recruitment: $"PG-{i}", fullName: $"منتسب {i}"));
+
+        var page1 = await service.ListAsync(new MemberListQuery { PageNumber = 1, PageSize = 2 });
+        Assert.Equal(3, page1.TotalCount);
+        Assert.Equal(2, page1.Items.Count);
+
+        var page2 = await service.ListAsync(new MemberListQuery { PageNumber = 2, PageSize = 2 });
+        Assert.Equal(3, page2.TotalCount);
+        Assert.Equal(1, page2.Items.Count);
+
+        var empty = await service.ListAsync(new MemberListQuery { FullName = "لا يوجد", PageNumber = 1, PageSize = 10 });
+        Assert.Equal(0, empty.TotalCount);
+        Assert.Empty(empty.Items);
+    }
+
+    [Fact]
+    public async Task List_date_range_is_inclusive_on_both_ends()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var service = CreateService(db, CenterA, allowCreate: true, allowView: true);
+
+        var early = await service.CreateAsync(ValidCreate(recruitment: "DT-1", fullName: "مبكر"));
+        var late = await service.CreateAsync(ValidCreate(recruitment: "DT-2", fullName: "متأخر"));
+
+        var earlyRow = await db.Members.SingleAsync(m => m.MemberId == early.MemberId);
+        var lateRow = await db.Members.SingleAsync(m => m.MemberId == late.MemberId);
+        earlyRow.CreatedAt = new DateTimeOffset(2026, 10, 10, 8, 0, 0, TimeSpan.Zero);
+        lateRow.CreatedAt = new DateTimeOffset(2026, 10, 12, 20, 0, 0, TimeSpan.Zero);
+        await db.SaveChangesAsync();
+
+        var range = await service.ListAsync(new MemberListQuery
+        {
+            FromDate = new DateOnly(2026, 10, 10),
+            ToDate = new DateOnly(2026, 10, 12)
+        });
+        Assert.Equal(2, range.TotalCount);
+
+        var single = await service.ListAsync(new MemberListQuery { Date = new DateOnly(2026, 10, 12) });
+        Assert.Equal(1, single.TotalCount);
+        Assert.Equal(late.MemberId, Assert.Single(single.Items).MemberId);
+    }
+
+    [Fact]
+    public async Task ListCentral_returns_cross_center_and_records_access()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+
+        var localA = CreateService(db, CenterA, allowCreate: true, allowView: true);
+        var localB = CreateService(db, CenterB, allowCreate: true, allowView: true);
+        await localA.CreateAsync(ValidCreate(recruitment: "CX-A", fullName: "مركزي أ"));
+        await localB.CreateAsync(ValidCreate(recruitment: "CX-B", fullName: "مركزي ب"));
+
+        var central = CreateService(db, CenterA, allowCreate: false, allowView: false, allowViewCentral: true);
+        var list = await central.ListCentralAsync(
+            new MemberListQuery(),
+            accessReason: "مراجعة مركزية",
+            targetCenterId: null);
+
+        Assert.Equal(2, list.TotalCount);
+        var accesses = await db.CrossCenterAccesses.ToListAsync();
+        Assert.Equal(2, accesses.Count); // two distinct target centers on the page
+        Assert.All(accesses, a => Assert.Equal("Member", a.DataType));
+        Assert.All(accesses, a => Assert.Equal("مراجعة مركزية", a.AccessReason));
+        Assert.Equal(2, await db.AuditEvents.CountAsync(e => e.EventType == "READ"));
+    }
+
+    [Fact]
+    public async Task ListCentral_without_permission_is_forbidden()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var service = CreateService(db, CenterA, allowCreate: false, allowView: true, allowViewCentral: false);
+
+        await Assert.ThrowsAsync<ForbiddenPermissionException>(() =>
+            service.ListCentralAsync(new MemberListQuery(), accessReason: "سبب"));
+    }
+
+    [Fact]
+    public async Task GetByIdCentral_records_access_and_includes_notes_and_transfer()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var local = CreateService(db, CenterA, allowCreate: true, allowView: true);
+        var created = await local.CreateAsync(ValidCreate(recruitment: "NT-1"));
+
+        var clinicId = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
+        db.Clinics.Add(new Clinic
+        {
+            ClinicId = clinicId,
+            Code = "EYE",
+            NameAr = "عيون",
+            SortOrder = 1,
+            IsActive = true
+        });
+        db.MemberGeneralNotes.Add(new MemberGeneralNote
+        {
+            NoteId = Guid.NewGuid(),
+            MemberId = created.MemberId,
+            CenterId = CenterA,
+            NoteText = "ملاحظة هامة",
+            AuthorUserId = "actor-1",
+            AuthorClinicId = clinicId,
+            IsActive = true,
+            WrittenAt = DateTimeOffset.UtcNow,
+            UpdatedByUserId = "actor-1",
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+        db.MemberTransfers.Add(new MemberTransfer
+        {
+            TransferId = Guid.NewGuid(),
+            MemberId = created.MemberId,
+            FromCenterId = CenterB,
+            ToCenterId = CenterA,
+            FromMemberCenterIdentityId = Guid.NewGuid(),
+            ToMemberCenterIdentityId = Guid.NewGuid(),
+            TransferReason = "نقل اختبار",
+            ExecutedByUserId = "actor-1",
+            ExecutedAt = DateTimeOffset.UtcNow.AddDays(-1)
+        });
+        await db.SaveChangesAsync();
+
+        var central = CreateService(db, CenterA, allowCreate: false, allowView: false, allowViewCentral: true);
+        var details = await central.GetByIdCentralAsync(created.MemberId, accessReason: "اطلاع ملف");
+
+        Assert.True(details.HasGeneralNotesAlert);
+        Assert.Equal("ملاحظة هامة", Assert.Single(details.GeneralNotes).NoteText);
+        Assert.NotNull(details.LastTransfer);
+        Assert.Equal(CenterB, details.LastTransfer!.FromCenterId);
+        Assert.Equal("نقل اختبار", details.LastTransfer.TransferReason);
+
+        var access = Assert.Single(await db.CrossCenterAccesses.ToListAsync());
+        Assert.Equal(CenterA, access.TargetCenterId);
+        Assert.Equal(created.MemberId.ToString(), await db.AuditEvents
+            .Where(e => e.EventType == "READ")
+            .Select(e => e.EntityId)
+            .SingleAsync());
+    }
+
+    [Fact]
+    public async Task GetById_without_notes_has_no_alert()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var service = CreateService(db, CenterA, allowCreate: true, allowView: true);
+        var created = await service.CreateAsync(ValidCreate(recruitment: "NO-NOTE"));
+
+        var details = await service.GetByIdAsync(created.MemberId);
+        Assert.False(details.HasGeneralNotesAlert);
+        Assert.Empty(details.GeneralNotes);
+        Assert.Null(details.LastTransfer);
+    }
+
+    [Fact]
     public async Task Bmi_is_null_when_height_or_weight_missing()
     {
         await using var db = CreateDb();
@@ -633,7 +837,8 @@ public class MemberServiceTests
         bool allowView,
         bool allowPrintReceipt = false,
         bool allowImport = false,
-        bool allowExport = false)
+        bool allowExport = false,
+        bool allowViewCentral = false)
     {
         var gate = new Mock<IPermissionGate>();
         if (allowCreate)
@@ -666,6 +871,21 @@ public class MemberServiceTests
             gate.Setup(g => g.EnsureLocalAsync(
                     MilitaryHealthPermissions.Members.View,
                     It.IsAny<Guid?>(),
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new ForbiddenPermissionException());
+        }
+
+        if (allowViewCentral)
+        {
+            gate.Setup(g => g.EnsureCentralAsync(
+                    MilitaryHealthPermissions.Members.ViewCentral,
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+        }
+        else
+        {
+            gate.Setup(g => g.EnsureCentralAsync(
+                    MilitaryHealthPermissions.Members.ViewCentral,
                     It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new ForbiddenPermissionException());
         }
@@ -730,6 +950,11 @@ public class MemberServiceTests
         new MemberProfile().Register(config);
         var mapper = new Mapper(config);
         var currentUser = new TestCurrentUser();
+        var crossCenter = new Application.Services.Audit.CrossCenterAccessService(
+            new CrossCenterAccessRepository(db),
+            currentUser,
+            new TestCenter(null, central: true),
+            new TestUnitOfWork(db));
 
         return new MemberService(
             new MemberRepository(db),
@@ -737,6 +962,7 @@ public class MemberServiceTests
             new MedicalCenterRepository(db),
             new ReferenceDataRepository(db),
             new AuditLogRepository(db),
+            crossCenter,
             new TestUnitOfWork(db),
             mapper,
             gate,

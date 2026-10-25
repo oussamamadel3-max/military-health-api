@@ -105,4 +105,18 @@ public class MilitaryHealthSeedCatalogTests
         Assert.Contains(SystemPermissions.UserManagement.Read, manager);
         Assert.DoesNotContain(SystemPermissions.UserManagement.ViewEffectiveAccess, manager);
     }
+
+    [Fact]
+    public void ViewCentral_is_granted_like_Reports_Central_and_not_to_local_only_roles()
+    {
+        var byRole = MilitaryHealthSeedCatalog.GrantsByRoleName();
+        Assert.Contains(MilitaryHealthPermissions.Members.ViewCentral, byRole["SuperAdmin"]);
+        Assert.Contains(MilitaryHealthPermissions.Members.ViewCentral, byRole["CenterOfficer"]);
+        Assert.Contains(MilitaryHealthPermissions.Members.ViewCentral, byRole["Auditor"]);
+        Assert.DoesNotContain(MilitaryHealthPermissions.Members.ViewCentral, byRole["ReceptionClerk"]);
+        Assert.DoesNotContain(MilitaryHealthPermissions.Members.ViewCentral, byRole["CenterManager"]);
+        Assert.Contains(
+            MilitaryHealthPermissions.Members.ViewCentral,
+            MilitaryHealthSeedCatalog.DomainPermissions.Select(p => p.Name));
+    }
 }
