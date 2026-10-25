@@ -11,6 +11,8 @@ public class MemberImportValidRow
     public string Occupation { get; set; } = null!;
     public string RecruitmentNumber { get; set; } = null!;
     public Guid RecruitmentCenterId { get; set; }
+    /// <summary>اسم مركز التجنيد للعرض في معاينة الواجهة؛ يُملأ عند المعاينة.</summary>
+    public string? RecruitmentCenterNameAr { get; set; }
     public short? BloodTypeId { get; set; }
     public decimal? BloodSugarMgDl { get; set; }
     public decimal? HeightCm { get; set; }
@@ -27,7 +29,11 @@ public class MemberImportIssueRow
     public int RowNumber { get; set; }
     /// <summary>Duplicate | Invalid</summary>
     public string Status { get; set; } = null!;
+    /// <summary>ملخص الأخطاء للعرض/تقرير Excel (مفصولة بفاصل عربي).</summary>
     public string Reason { get; set; } = null!;
+    /// <summary>كل أخطاء الصف كما اكتُشفت أثناء التحقق.</summary>
+    public IReadOnlyList<string> Errors { get; set; } = Array.Empty<string>();
+    public string? FullName { get; set; }
     public string? RecruitmentNumber { get; set; }
 }
 
@@ -39,6 +45,8 @@ public class MemberImportPreviewResult
     public int ValidCount { get; set; }
     public int DuplicateCount { get; set; }
     public int InvalidCount { get; set; }
+    /// <summary>الصفوف الصالحة المعروضة في المعاينة (بما فيها اسم مركز التجنيد).</summary>
+    public IReadOnlyList<MemberImportValidRow> ValidRows { get; set; } = Array.Empty<MemberImportValidRow>();
     public IReadOnlyList<MemberImportIssueRow> Issues { get; set; } = Array.Empty<MemberImportIssueRow>();
 }
 

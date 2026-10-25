@@ -48,6 +48,10 @@ public class MemberExcelImportExportTests
         var preview = await service.PreviewImportAsync(form);
 
         Assert.Equal(1, preview.ValidCount);
+        var valid = Assert.Single(preview.ValidRows);
+        Assert.Equal("منتسب استيراد", valid.FullName);
+        Assert.Equal("IMP-1", valid.RecruitmentNumber);
+        Assert.Equal("تجنيد 1", valid.RecruitmentCenterNameAr);
         Assert.Equal(0, await db.Members.CountAsync());
         Assert.Equal(1, await db.MemberImportBatches.CountAsync());
         Assert.Equal(MemberImportBatchStatuses.Previewed, (await db.MemberImportBatches.SingleAsync()).Status);
@@ -100,8 +104,19 @@ public class MemberExcelImportExportTests
 
         Assert.Equal(1, preview.ValidCount);
         Assert.Equal(2, preview.DuplicateCount);
-        Assert.Contains(preview.Issues, i => i.Status == "Duplicate" && i.Reason.Contains("داخل الملف"));
-        Assert.Contains(preview.Issues, i => i.Status == "Duplicate" && i.Reason.Contains("مسجّل مسبقاً"));
+        Assert.Single(preview.ValidRows);
+        Assert.Contains(preview.Issues, i =>
+            i.Status == "Duplicate"
+            && i.Reason.Contains("داخل الملف")
+            && i.FullName == "ثاني"
+            && i.RecruitmentNumber == "DUP-IN"
+            && i.Errors.Count >= 1);
+        Assert.Contains(preview.Issues, i =>
+            i.Status == "Duplicate"
+            && i.Reason.Contains("مسجّل مسبقاً")
+            && i.FullName == "من النظام"
+            && i.RecruitmentNumber == "EXIST-1"
+            && i.Errors.Count >= 1);
     }
 
     [Fact]
@@ -135,7 +150,13 @@ public class MemberExcelImportExportTests
         var commit = await service.CommitImportAsync(preview.ImportId);
         Assert.Equal(2, commit.CommittedCount);
         Assert.Equal(2, await db.Members.CountAsync());
-        Assert.All(await db.Members.ToListAsync(), m => Assert.Equal(CenterA, m.CurrentMedicalCenterId));
+        var members = await db.Members.OrderBy(m => m.FileNumber).ToListAsync();
+        Assert.All(members, m => Assert.Equal(CenterA, m.CurrentMedicalCenterId));
+        Assert.Equal(2, members.Select(m => m.FileNumber).Distinct().Count());
+        Assert.Equal(2, members.Select(m => m.QueueNumber).Distinct().Count());
+        Assert.Equal(members[0].FileNumber + 1, members[1].FileNumber);
+        Assert.Equal(members[0].QueueNumber + 1, members[1].QueueNumber);
+        Assert.Equal(commit.CreatedFileNumbers, members.Select(m => m.FileNumber).ToList());
         Assert.Equal(MemberImportBatchStatuses.Committed, (await db.MemberImportBatches.SingleAsync()).Status);
 
         var audit = await db.AuditEvents.SingleAsync(e => e.EventType == "MemberImport");

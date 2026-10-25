@@ -23,6 +23,7 @@ public interface IMemberRepository
     /// <summary>
     /// يعيد (رقم الملف التالي، رقم الدور التالي لليوم في المركز).
     /// يجب استدعاؤه داخل معاملة مفتوحة؛ على PostgreSQL يُقفل التسلسل حتى نهاية المعاملة.
+    /// يحسب التالي من أعلى رقم محفوظ وأعلى رقم معلّق في وحدة العمل الحالية (ChangeTracker).
     /// </summary>
     Task<(long FileNumber, int QueueNumber)> AllocateFileAndQueueNumbersAsync(
         Guid centerId,

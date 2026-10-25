@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Application.Common.Permissions;
 using Application.Dtos.Members;
 using Application.Exceptions;
@@ -592,6 +593,14 @@ public class MemberServiceTests
         Assert.Equal(2, accesses.Count); // two distinct target centers on the page
         Assert.All(accesses, a => Assert.Equal("Member", a.DataType));
         Assert.All(accesses, a => Assert.Equal("مراجعة مركزية", a.AccessReason));
+        Assert.All(accesses, a =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(a.QueryCriteria));
+            using var doc = JsonDocument.Parse(a.QueryCriteria!);
+            Assert.Equal(JsonValueKind.Object, doc.RootElement.ValueKind);
+            Assert.True(doc.RootElement.TryGetProperty("pageNumber", out _));
+            Assert.True(doc.RootElement.TryGetProperty("pageSize", out _));
+        });
         Assert.Equal(2, await db.AuditEvents.CountAsync(e => e.EventType == "READ"));
     }
 
@@ -661,6 +670,11 @@ public class MemberServiceTests
 
         var access = Assert.Single(await db.CrossCenterAccesses.ToListAsync());
         Assert.Equal(CenterA, access.TargetCenterId);
+        using (var doc = JsonDocument.Parse(access.QueryCriteria!))
+        {
+            Assert.Equal(created.MemberId.ToString("D"), doc.RootElement.GetProperty("memberId").GetString());
+        }
+
         Assert.Equal(created.MemberId.ToString(), await db.AuditEvents
             .Where(e => e.EventType == "READ")
             .Select(e => e.EntityId)
@@ -720,8 +734,9 @@ public class MemberServiceTests
         await using var db = CreateDb();
         await SeedReferencesAsync(db);
         var repo = new MemberRepository(db);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
-        var (file1, queue1) = await repo.AllocateFileAndQueueNumbersAsync(CenterA, DateOnly.FromDateTime(DateTime.UtcNow));
+        var (file1, queue1) = await repo.AllocateFileAndQueueNumbersAsync(CenterA, today);
         Assert.Equal(1, file1);
         Assert.Equal(1, queue1);
 
@@ -732,13 +747,13 @@ public class MemberServiceTests
             RecruitmentNumber = "ALLOC-1",
             FullName = "مخصص",
             MotherName = "أم",
-            BirthDate = DateOnly.FromDateTime(DateTime.UtcNow).AddYears(-20),
+            BirthDate = today.AddYears(-20),
             MaritalStatusId = 1,
             Occupation = "موظف",
             RecruitmentCenterId = RecruitmentCenterId,
             CurrentMedicalCenterId = CenterA,
             QueueMedicalCenterId = CenterA,
-            QueueDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            QueueDate = today,
             QueueNumber = queue1,
             CreatedByUserId = "actor-1",
             UpdatedByUserId = "actor-1",
@@ -747,9 +762,71 @@ public class MemberServiceTests
         });
         await db.SaveChangesAsync();
 
-        var (file2, queue2) = await repo.AllocateFileAndQueueNumbersAsync(CenterA, DateOnly.FromDateTime(DateTime.UtcNow));
+        var (file2, queue2) = await repo.AllocateFileAndQueueNumbersAsync(CenterA, today);
         Assert.Equal(2, file2);
         Assert.Equal(2, queue2);
+    }
+
+    [Fact]
+    public async Task Allocate_without_save_advances_from_tracked_pending_members()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var repo = new MemberRepository(db);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var (file1, queue1) = await repo.AllocateFileAndQueueNumbersAsync(CenterA, today);
+        db.Members.Add(new Member
+        {
+            MemberId = Guid.NewGuid(),
+            FileNumber = file1,
+            RecruitmentNumber = "ALLOC-PENDING-1",
+            FullName = "أول معلّق",
+            MotherName = "أم",
+            BirthDate = today.AddYears(-20),
+            MaritalStatusId = 1,
+            Occupation = "موظف",
+            RecruitmentCenterId = RecruitmentCenterId,
+            CurrentMedicalCenterId = CenterA,
+            QueueMedicalCenterId = CenterA,
+            QueueDate = today,
+            QueueNumber = queue1,
+            CreatedByUserId = "actor-1",
+            UpdatedByUserId = "actor-1",
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+
+        var (file2, queue2) = await repo.AllocateFileAndQueueNumbersAsync(CenterA, today);
+        Assert.Equal(file1 + 1, file2);
+        Assert.Equal(queue1 + 1, queue2);
+
+        db.Members.Add(new Member
+        {
+            MemberId = Guid.NewGuid(),
+            FileNumber = file2,
+            RecruitmentNumber = "ALLOC-PENDING-2",
+            FullName = "ثاني معلّق",
+            MotherName = "أم",
+            BirthDate = today.AddYears(-21),
+            MaritalStatusId = 1,
+            Occupation = "موظف",
+            RecruitmentCenterId = RecruitmentCenterId,
+            CurrentMedicalCenterId = CenterA,
+            QueueMedicalCenterId = CenterA,
+            QueueDate = today,
+            QueueNumber = queue2,
+            CreatedByUserId = "actor-1",
+            UpdatedByUserId = "actor-1",
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+
+        await db.SaveChangesAsync();
+        var saved = await db.Members.OrderBy(m => m.FileNumber).ToListAsync();
+        Assert.Equal(2, saved.Count);
+        Assert.Equal(new[] { file1, file2 }, saved.Select(m => m.FileNumber).ToArray());
+        Assert.Equal(new[] { queue1, queue2 }, saved.Select(m => m.QueueNumber).ToArray());
     }
 
     [Fact]

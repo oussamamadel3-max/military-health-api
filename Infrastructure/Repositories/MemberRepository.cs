@@ -60,6 +60,8 @@ public class MemberRepository : IMemberRepository
     /// <summary>
     /// يخصص رقم ملف عالمي ورقم دور يومي للمركز ضمن المعاملة الحالية.
     /// على PostgreSQL يُؤخذ قفل معاملة (pg_advisory_xact_lock) قبل MAX+1 لمنع سباق التزامن؛ يُتخطى على InMemory.
+    /// يراعي أيضاً صفوف <see cref="Member"/> المضافة/المعدَّلة في ChangeTracker ولم تُحفظ بعد،
+    /// حتى لا تتصادم أرقام الدفعة الواحدة (مثل اعتماد استيراد متعدد الصفوف).
     /// </summary>
     public async Task<(long FileNumber, int QueueNumber)> AllocateFileAndQueueNumbersAsync(
         Guid centerId,
@@ -68,14 +70,26 @@ public class MemberRepository : IMemberRepository
     {
         await AcquireAllocationLocksAsync(centerId, queueDate, cancellationToken);
 
-        var maxFile = await _context.Members.AsNoTracking()
+        var maxFileDb = await _context.Members.AsNoTracking()
             .MaxAsync(m => (long?)m.FileNumber, cancellationToken) ?? 0L;
 
-        var maxQueue = await _context.Members.AsNoTracking()
+        var maxQueueDb = await _context.Members.AsNoTracking()
             .Where(m => m.QueueMedicalCenterId == centerId && m.QueueDate == queueDate)
             .MaxAsync(m => (int?)m.QueueNumber, cancellationToken) ?? 0;
 
-        return (maxFile + 1, maxQueue + 1);
+        var pending = _context.ChangeTracker.Entries<Member>()
+            .Where(e => e.State is EntityState.Added or EntityState.Modified)
+            .Select(e => e.Entity)
+            .ToList();
+
+        var maxFilePending = pending.Count == 0 ? 0L : pending.Max(m => m.FileNumber);
+        var maxQueuePending = pending
+            .Where(m => m.QueueMedicalCenterId == centerId && m.QueueDate == queueDate)
+            .Select(m => (int?)m.QueueNumber)
+            .DefaultIfEmpty(null)
+            .Max() ?? 0;
+
+        return (Math.Max(maxFileDb, maxFilePending) + 1, Math.Max(maxQueueDb, maxQueuePending) + 1);
     }
 
     public void Add(Member member) => _context.Members.Add(member);

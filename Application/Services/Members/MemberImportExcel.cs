@@ -155,10 +155,16 @@ public static class MemberImportExcel
                 if (IsEmptyRow(row, headerMap))
                     continue;
 
+                var peekedFullName = OptionalText(row, headerMap, "الاسم الكامل");
+                var peekedRecruitment = OptionalText(row, headerMap, "رقم المنتسب/التجنيد");
+
                 try
                 {
                     var parsed = ParseRow(row, headerMap, rowNumber);
-                    MemberFieldValidation.ValidateCreateOrUpdate(
+                    peekedFullName = parsed.FullName;
+                    peekedRecruitment = parsed.RecruitmentNumber;
+
+                    var fieldErrors = MemberFieldValidation.CollectCreateOrUpdateErrors(
                         parsed.FullName,
                         parsed.MotherName,
                         parsed.BirthDate,
@@ -174,17 +180,26 @@ public static class MemberImportExcel
                         parsed.PulseBpm,
                         today,
                         activeRules);
+                    if (fieldErrors.Count > 0)
+                    {
+                        issues.Add(CreateIssue(
+                            rowNumber,
+                            "Invalid",
+                            fieldErrors,
+                            peekedFullName,
+                            peekedRecruitment));
+                        continue;
+                    }
 
                     var key = parsed.RecruitmentNumber.Trim();
                     if (seenRecruitment.TryGetValue(key, out var firstRow))
                     {
-                        issues.Add(new MemberImportIssueRow
-                        {
-                            RowNumber = rowNumber,
-                            Status = "Duplicate",
-                            Reason = $"تكرار داخل الملف مع الصف {firstRow}.",
-                            RecruitmentNumber = key
-                        });
+                        issues.Add(CreateIssue(
+                            rowNumber,
+                            "Duplicate",
+                            new[] { $"تكرار داخل الملف مع الصف {firstRow}." },
+                            parsed.FullName,
+                            key));
                         continue;
                     }
 
@@ -193,21 +208,21 @@ public static class MemberImportExcel
                 }
                 catch (BusinessException ex)
                 {
-                    issues.Add(new MemberImportIssueRow
-                    {
-                        RowNumber = rowNumber,
-                        Status = "Invalid",
-                        Reason = ex.Message
-                    });
+                    issues.Add(CreateIssue(
+                        rowNumber,
+                        "Invalid",
+                        new[] { ex.Message },
+                        peekedFullName,
+                        peekedRecruitment));
                 }
                 catch (FormatException)
                 {
-                    issues.Add(new MemberImportIssueRow
-                    {
-                        RowNumber = rowNumber,
-                        Status = "Invalid",
-                        Reason = "صيغة أحد الحقول غير صحيحة."
-                    });
+                    issues.Add(CreateIssue(
+                        rowNumber,
+                        "Invalid",
+                        new[] { "صيغة أحد الحقول غير صحيحة." },
+                        peekedFullName,
+                        peekedRecruitment));
                 }
             }
 
@@ -219,6 +234,28 @@ public static class MemberImportExcel
     public sealed record ParsedImport(
         IReadOnlyList<MemberImportValidRow> ValidRows,
         IReadOnlyList<MemberImportIssueRow> Issues);
+
+    private static MemberImportIssueRow CreateIssue(
+        int rowNumber,
+        string status,
+        IReadOnlyList<string> errors,
+        string? fullName,
+        string? recruitmentNumber)
+    {
+        var list = errors.Where(e => !string.IsNullOrWhiteSpace(e)).Select(e => e.Trim()).ToList();
+        if (list.Count == 0)
+            list.Add("سجل غير صالح.");
+
+        return new MemberImportIssueRow
+        {
+            RowNumber = rowNumber,
+            Status = status,
+            Errors = list,
+            Reason = string.Join("؛ ", list),
+            FullName = string.IsNullOrWhiteSpace(fullName) ? null : fullName.Trim(),
+            RecruitmentNumber = string.IsNullOrWhiteSpace(recruitmentNumber) ? null : recruitmentNumber.Trim()
+        };
+    }
 
     private static Dictionary<string, int> ReadHeaderMap(IXLWorksheet sheet)
     {

@@ -37,22 +37,128 @@ public static class MemberFieldValidation
         DateOnly today,
         IReadOnlyList<ValidationRule> activeRules)
     {
-        if (string.IsNullOrWhiteSpace(fullName))
-            throw new InvalidMemberDataException("الاسم الكامل مطلوب.");
-        if (string.IsNullOrWhiteSpace(motherName))
-            throw new InvalidMemberDataException("اسم الأم مطلوب.");
-        if (string.IsNullOrWhiteSpace(occupation))
-            throw new InvalidMemberDataException("العمل/المهنة مطلوب.");
-        if (string.IsNullOrWhiteSpace(recruitmentNumber))
-            throw new InvalidMemberDataException("رقم المنتسب/التجنيد مطلوب.");
-        if (maritalStatusId <= 0)
-            throw new InvalidMemberDataException("الحالة الاجتماعية مطلوبة.");
-        if (recruitmentCenterId == Guid.Empty)
-            throw new InvalidMemberDataException("مركز التجنيد مطلوب.");
+        var errors = CollectCreateOrUpdateErrors(
+            fullName,
+            motherName,
+            birthDate,
+            maritalStatusId,
+            occupation,
+            recruitmentNumber,
+            recruitmentCenterId,
+            bloodTypeId,
+            bloodSugarMgDl,
+            heightCm,
+            weightKg,
+            bloodPressure,
+            pulseBpm,
+            today,
+            activeRules);
+        if (errors.Count > 0)
+            throw new InvalidMemberDataException(errors[0]);
+    }
 
-        ValidateBirthDate(birthDate, today);
-        ValidateOptionalMeasurements(bloodSugarMgDl, heightCm, weightKg, bloodPressure, pulseBpm, activeRules);
+    /// <summary>
+    /// يجمع كل أخطاء التحقق للصف دون التوقف عند أول خطأ (مفيد لمعاينة الاستيراد).
+    /// </summary>
+    public static IReadOnlyList<string> CollectCreateOrUpdateErrors(
+        string fullName,
+        string motherName,
+        DateOnly birthDate,
+        short maritalStatusId,
+        string occupation,
+        string recruitmentNumber,
+        Guid recruitmentCenterId,
+        short? bloodTypeId,
+        decimal? bloodSugarMgDl,
+        decimal? heightCm,
+        decimal? weightKg,
+        string? bloodPressure,
+        short? pulseBpm,
+        DateOnly today,
+        IReadOnlyList<ValidationRule> activeRules)
+    {
+        var errors = new List<string>();
+        if (string.IsNullOrWhiteSpace(fullName))
+            errors.Add("الاسم الكامل مطلوب.");
+        if (string.IsNullOrWhiteSpace(motherName))
+            errors.Add("اسم الأم مطلوب.");
+        if (string.IsNullOrWhiteSpace(occupation))
+            errors.Add("العمل/المهنة مطلوب.");
+        if (string.IsNullOrWhiteSpace(recruitmentNumber))
+            errors.Add("رقم المنتسب/التجنيد مطلوب.");
+        if (maritalStatusId <= 0)
+            errors.Add("الحالة الاجتماعية مطلوبة.");
+        if (recruitmentCenterId == Guid.Empty)
+            errors.Add("مركز التجنيد مطلوب.");
+
+        try
+        {
+            ValidateBirthDate(birthDate, today);
+        }
+        catch (InvalidMemberDataException ex)
+        {
+            errors.Add(ex.Message);
+        }
+
+        CollectOptionalMeasurementErrors(
+            bloodSugarMgDl, heightCm, weightKg, bloodPressure, pulseBpm, activeRules, errors);
+
         _ = bloodTypeId;
+        return errors;
+    }
+
+    private static void CollectOptionalMeasurementErrors(
+        decimal? bloodSugarMgDl,
+        decimal? heightCm,
+        decimal? weightKg,
+        string? bloodPressure,
+        short? pulseBpm,
+        IReadOnlyList<ValidationRule> activeRules,
+        List<string> errors)
+    {
+        if (bloodSugarMgDl is <= 0)
+            errors.Add("نسبة سكر الدم يجب أن تكون أكبر من صفر.");
+        if (heightCm is <= 0)
+            errors.Add("الطول يجب أن يكون أكبر من صفر.");
+        if (weightKg is <= 0)
+            errors.Add("الوزن يجب أن يكون أكبر من صفر.");
+        if (pulseBpm is <= 0)
+            errors.Add("النبض يجب أن يكون أكبر من صفر.");
+
+        if (!string.IsNullOrWhiteSpace(bloodPressure))
+        {
+            var trimmed = bloodPressure.Trim();
+            if (trimmed.Length > 15)
+                errors.Add("صيغة ضغط الدم تتجاوز الحد المسموح.");
+            else if (!BloodPressurePattern.IsMatch(trimmed))
+                errors.Add("صيغة ضغط الدم غير صحيحة. استخدم الشكل مثل 120/80.");
+        }
+
+        CollectActiveRuleErrors(nameof(CreateMemberRequest.BloodSugarMgDl), bloodSugarMgDl, activeRules, "نسبة سكر الدم", errors);
+        CollectActiveRuleErrors(nameof(CreateMemberRequest.HeightCm), heightCm, activeRules, "الطول", errors);
+        CollectActiveRuleErrors(nameof(CreateMemberRequest.WeightKg), weightKg, activeRules, "الوزن", errors);
+        if (pulseBpm.HasValue)
+            CollectActiveRuleErrors(nameof(CreateMemberRequest.PulseBpm), pulseBpm.Value, activeRules, "النبض", errors);
+    }
+
+    private static void CollectActiveRuleErrors(
+        string fieldName,
+        decimal? value,
+        IReadOnlyList<ValidationRule> activeRules,
+        string fieldLabelAr,
+        List<string> errors)
+    {
+        if (value is null)
+            return;
+
+        foreach (var rule in activeRules.Where(r =>
+                     string.Equals(r.TargetField, fieldName, StringComparison.OrdinalIgnoreCase)))
+        {
+            if (rule.MinValue.HasValue && value.Value < rule.MinValue.Value)
+                errors.Add($"{fieldLabelAr} أقل من الحد الأدنى المعتمد ({Format(rule.MinValue.Value)}).");
+            if (rule.MaxValue.HasValue && value.Value > rule.MaxValue.Value)
+                errors.Add($"{fieldLabelAr} أكبر من الحد الأعلى المعتمد ({Format(rule.MaxValue.Value)}).");
+        }
     }
 
     public static void ValidateCreateOrUpdate(CreateMemberRequest request, DateOnly today, IReadOnlyList<ValidationRule> activeRules)

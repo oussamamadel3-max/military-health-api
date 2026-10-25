@@ -157,7 +157,10 @@ public class MemberService : IMemberService
             member.CurrentMedicalCenterId,
             accessReason.Trim(),
             dataType: "Member",
-            queryCriteria: $"memberId={memberId:D}",
+            queryCriteria: JsonSerializer.Serialize(new Dictionary<string, string?>
+            {
+                ["memberId"] = memberId.ToString("D")
+            }),
             entityType: nameof(Member),
             entityId: memberId.ToString(),
             cancellationToken);
@@ -509,13 +512,12 @@ public class MemberService : IMemberService
                         row.RecruitmentNumber.Trim(),
                         cancellationToken: cancellationToken))
                 {
-                    issues.Add(new MemberImportIssueRow
-                    {
-                        RowNumber = row.RowNumber,
-                        Status = "Duplicate",
-                        Reason = "رقم المنتسب/التجنيد مسجّل مسبقاً في النظام.",
-                        RecruitmentNumber = row.RecruitmentNumber.Trim()
-                    });
+                    issues.Add(CreateImportIssue(
+                        row.RowNumber,
+                        "Duplicate",
+                        new[] { "رقم المنتسب/التجنيد مسجّل مسبقاً في النظام." },
+                        row.FullName,
+                        row.RecruitmentNumber.Trim()));
                     continue;
                 }
 
@@ -523,15 +525,16 @@ public class MemberService : IMemberService
             }
             catch (InvalidMemberDataException ex)
             {
-                issues.Add(new MemberImportIssueRow
-                {
-                    RowNumber = row.RowNumber,
-                    Status = "Invalid",
-                    Reason = ex.Message,
-                    RecruitmentNumber = row.RecruitmentNumber
-                });
+                issues.Add(CreateImportIssue(
+                    row.RowNumber,
+                    "Invalid",
+                    new[] { ex.Message },
+                    row.FullName,
+                    row.RecruitmentNumber));
             }
         }
+
+        await EnrichRecruitmentCenterNamesAsync(valid, cancellationToken);
 
         var duplicateCount = issues.Count(i => i.Status == "Duplicate");
         var invalidCount = issues.Count(i => i.Status == "Invalid");
@@ -562,6 +565,7 @@ public class MemberService : IMemberService
             ValidCount = valid.Count,
             DuplicateCount = duplicateCount,
             InvalidCount = invalidCount,
+            ValidRows = valid,
             Issues = issues
         };
     }
@@ -762,8 +766,9 @@ public class MemberService : IMemberService
             {
                 [nameof(MemberImportIssueRow.RowNumber)] = "رقم الصف",
                 [nameof(MemberImportIssueRow.Status)] = "الحالة",
-                [nameof(MemberImportIssueRow.Reason)] = "سبب الخطأ",
-                [nameof(MemberImportIssueRow.RecruitmentNumber)] = "رقم المنتسب/التجنيد"
+                [nameof(MemberImportIssueRow.FullName)] = "الاسم الكامل",
+                [nameof(MemberImportIssueRow.RecruitmentNumber)] = "رقم المنتسب/التجنيد",
+                [nameof(MemberImportIssueRow.Reason)] = "سبب الخطأ"
             }
         });
     }
@@ -963,21 +968,66 @@ public class MemberService : IMemberService
         return dto;
     }
 
+    /// <summary>
+    /// يبني معايير البحث كـ JSON صالح لعمود jsonb في CrossCenterAccess.QueryCriteria.
+    /// </summary>
     private static string BuildListCriteria(MemberListQuery query, Guid? targetCenterId)
     {
-        var parts = new List<string>();
-        if (targetCenterId.HasValue) parts.Add($"centerId={targetCenterId:D}");
-        if (query.FileNumber.HasValue) parts.Add($"fileNumber={query.FileNumber}");
-        if (!string.IsNullOrWhiteSpace(query.Barcode)) parts.Add($"barcode={query.Barcode.Trim()}");
-        if (!string.IsNullOrWhiteSpace(query.FullName)) parts.Add($"fullName={query.FullName.Trim()}");
+        var criteria = new Dictionary<string, object?>();
+        if (targetCenterId.HasValue) criteria["centerId"] = targetCenterId.Value.ToString("D");
+        if (query.FileNumber.HasValue) criteria["fileNumber"] = query.FileNumber.Value;
+        if (!string.IsNullOrWhiteSpace(query.Barcode)) criteria["barcode"] = query.Barcode.Trim();
+        if (!string.IsNullOrWhiteSpace(query.FullName)) criteria["fullName"] = query.FullName.Trim();
         if (!string.IsNullOrWhiteSpace(query.RecruitmentNumber))
-            parts.Add($"recruitmentNumber={query.RecruitmentNumber.Trim()}");
-        if (query.Date.HasValue) parts.Add($"date={query.Date:yyyy-MM-dd}");
-        if (query.FromDate.HasValue) parts.Add($"fromDate={query.FromDate:yyyy-MM-dd}");
-        if (query.ToDate.HasValue) parts.Add($"toDate={query.ToDate:yyyy-MM-dd}");
-        parts.Add($"pageNumber={query.PageNumber}");
-        parts.Add($"pageSize={query.PageSize}");
-        return string.Join(';', parts);
+            criteria["recruitmentNumber"] = query.RecruitmentNumber.Trim();
+        if (query.Date.HasValue) criteria["date"] = query.Date.Value.ToString("yyyy-MM-dd");
+        if (query.FromDate.HasValue) criteria["fromDate"] = query.FromDate.Value.ToString("yyyy-MM-dd");
+        if (query.ToDate.HasValue) criteria["toDate"] = query.ToDate.Value.ToString("yyyy-MM-dd");
+        criteria["pageNumber"] = query.PageNumber;
+        criteria["pageSize"] = query.PageSize;
+        return JsonSerializer.Serialize(criteria);
+    }
+
+    private async Task EnrichRecruitmentCenterNamesAsync(
+        IReadOnlyList<MemberImportValidRow> rows,
+        CancellationToken cancellationToken)
+    {
+        if (rows.Count == 0)
+            return;
+
+        var ids = rows.Select(r => r.RecruitmentCenterId).Distinct().ToList();
+        var names = await _references.RecruitmentCenters()
+            .Where(c => ids.Contains(c.RecruitmentCenterId))
+            .Select(c => new { c.RecruitmentCenterId, c.NameAr })
+            .ToDictionaryAsync(c => c.RecruitmentCenterId, c => c.NameAr, cancellationToken);
+
+        foreach (var row in rows)
+        {
+            if (names.TryGetValue(row.RecruitmentCenterId, out var nameAr))
+                row.RecruitmentCenterNameAr = nameAr;
+        }
+    }
+
+    private static MemberImportIssueRow CreateImportIssue(
+        int rowNumber,
+        string status,
+        IReadOnlyList<string> errors,
+        string? fullName,
+        string? recruitmentNumber)
+    {
+        var list = errors.Where(e => !string.IsNullOrWhiteSpace(e)).Select(e => e.Trim()).ToList();
+        if (list.Count == 0)
+            list.Add("سجل غير صالح.");
+
+        return new MemberImportIssueRow
+        {
+            RowNumber = rowNumber,
+            Status = status,
+            Errors = list,
+            Reason = string.Join("؛ ", list),
+            FullName = string.IsNullOrWhiteSpace(fullName) ? null : fullName.Trim(),
+            RecruitmentNumber = string.IsNullOrWhiteSpace(recruitmentNumber) ? null : recruitmentNumber.Trim()
+        };
     }
 
     private async Task EnsureReferenceAsync(
