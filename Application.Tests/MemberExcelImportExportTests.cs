@@ -136,6 +136,28 @@ public class MemberExcelImportExportTests
     }
 
     [Fact]
+    public async Task Import_preview_applies_the_same_age_rule_as_registration()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await MemberServiceTests.SeedReferencesAsync(db);
+        var service = MemberServiceTests.CreateService(db, CenterA, allowCreate: false, allowView: false, allowImport: true);
+
+        var young = ValidRow("YOUNG");
+        young["تاريخ الميلاد"] = DateTime.UtcNow.AddYears(-10).ToString("yyyy-MM-dd");
+        var tooOld = ValidRow("OLD");
+        tooOld["تاريخ الميلاد"] = "1900-01-01";
+        var form = BuildImportFile(young, tooOld, ValidRow("OK-AGE"));
+
+        var preview = await service.PreviewImportAsync(form);
+
+        Assert.Equal(1, preview.ValidCount);
+        Assert.Equal(2, preview.InvalidCount);
+        Assert.Contains(preview.Issues, row => row.RecruitmentNumber == "YOUNG" && row.Reason.Contains("الحد الأدنى"));
+        Assert.Contains(preview.Issues, row => row.RecruitmentNumber == "OLD" && row.Reason.Contains("الحد الأعلى"));
+        Assert.Equal(0, await db.Members.CountAsync());
+    }
+
+    [Fact]
     public async Task Import_commit_creates_valid_only_and_rejects_second_commit()
     {
         await using var db = MemberServiceTests.CreateDb();

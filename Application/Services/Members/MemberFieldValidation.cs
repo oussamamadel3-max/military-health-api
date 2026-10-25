@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using Application.Common.ReferenceData;
 using Application.Dtos.Members;
 using Application.Exceptions;
 using Domain.Entities.Core;
@@ -7,18 +8,14 @@ using Domain.Entities.Core;
 namespace Application.Services.Members;
 
 /// <summary>
-/// قواعد تحقق مشتركة لإنشاء/تعديل المنتسب (قابلة لإعادة الاستخدام لاحقاً للاستيراد FR-028).
-/// لا تثبّت حدود قياسات جديدة (CON-11)؛ تطبق ValidationRule النشطة إن وُجدت فقط.
+/// قواعد تحقق مشتركة لإنشاء المنتسب وتعديله واستيراده.
+/// حدود القياسات والعمر تُقرأ من ValidationRule النشطة فقط، بلا أرقام مثبتة في الكود.
 /// </summary>
 public static class MemberFieldValidation
 {
     private static readonly Regex BloodPressurePattern = new(
         @"^\d{2,3}/\d{2,3}$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
-
-    /// <summary>الحد الأدنى والأعلى التقريبي للعمر وفق السلوك المؤقت BR-004.</summary>
-    public const int MinAgeYears = 18;
-    public const int MaxAgeYears = 120;
 
     public static void ValidateCreateOrUpdate(
         string fullName,
@@ -93,7 +90,7 @@ public static class MemberFieldValidation
 
         try
         {
-            ValidateBirthDate(birthDate, today);
+            ValidateBirthDate(birthDate, today, activeRules);
         }
         catch (InvalidMemberDataException ex)
         {
@@ -197,7 +194,7 @@ public static class MemberFieldValidation
             today,
             activeRules);
 
-    public static void ValidateBirthDate(DateOnly birthDate, DateOnly today)
+    public static void ValidateBirthDate(DateOnly birthDate, DateOnly today, IReadOnlyList<ValidationRule> activeRules)
     {
         if (birthDate > today)
             throw new InvalidMemberDataException("تاريخ الميلاد لا يمكن أن يكون في المستقبل.");
@@ -206,10 +203,26 @@ public static class MemberFieldValidation
         if (birthDate > today.AddYears(-age))
             age--;
 
-        if (age < MinAgeYears || age > MaxAgeYears)
-            throw new InvalidMemberDataException(
-                $"تاريخ الميلاد يجب أن يقابل عمراً بين {MinAgeYears} و{MaxAgeYears} سنة.");
+        ApplyAgeRules(age, activeRules);
     }
+
+    private static void ApplyAgeRules(int age, IReadOnlyList<ValidationRule> activeRules)
+    {
+        foreach (var rule in AgeRules(activeRules))
+        {
+            if (rule.MinValue.HasValue && age < rule.MinValue.Value)
+                throw new InvalidMemberDataException(
+                    $"العمر أقل من الحد الأدنى المعتمد ({Format(rule.MinValue.Value)}).");
+            if (rule.MaxValue.HasValue && age > rule.MaxValue.Value)
+                throw new InvalidMemberDataException(
+                    $"العمر أكبر من الحد الأعلى المعتمد ({Format(rule.MaxValue.Value)}).");
+        }
+    }
+
+    private static IEnumerable<ValidationRule> AgeRules(IReadOnlyList<ValidationRule> activeRules)
+        => activeRules.Where(rule =>
+            string.Equals(rule.Code, ReceptionReferenceCatalog.AgeRuleCode, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(rule.TargetField, ReceptionReferenceCatalog.AgeTargetField, StringComparison.OrdinalIgnoreCase));
 
     public static void ValidateListDateFilter(DateOnly? date, DateOnly? fromDate, DateOnly? toDate)
     {

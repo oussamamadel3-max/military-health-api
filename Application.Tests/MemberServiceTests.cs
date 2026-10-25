@@ -449,7 +449,7 @@ public class MemberServiceTests
     }
 
     [Fact]
-    public async Task Create_rejects_age_outside_temporary_br004()
+    public async Task Create_rejects_age_outside_active_validation_rule()
     {
         await using var db = CreateDb();
         await SeedReferencesAsync(db);
@@ -461,6 +461,24 @@ public class MemberServiceTests
         var error = await Assert.ThrowsAsync<InvalidMemberDataException>(() =>
             service.CreateAsync(request));
         Assert.Equal(400, error.Status);
+        Assert.Contains("الحد الأدنى", error.Message);
+    }
+
+    [Fact]
+    public async Task Create_accepts_age_when_validation_rule_is_inactive()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var rule = await db.ValidationRules.SingleAsync();
+        rule.IsActive = false;
+        await db.SaveChangesAsync();
+        var service = CreateService(db, CenterA, allowCreate: true, allowView: true);
+
+        var request = ValidCreate(recruitment: "AGE-OFF");
+        request.BirthDate = DateOnly.FromDateTime(DateTime.UtcNow).AddYears(-10);
+
+        var created = await service.CreateAsync(request);
+        Assert.Equal(request.BirthDate, created.BirthDate);
     }
 
     [Fact]
@@ -1110,6 +1128,7 @@ public class MemberServiceTests
             CreatedAt = now,
             UpdatedAt = now
         });
+        db.ValidationRules.Add(ReceptionReferenceSeed.CreateAgeRule(now));
         db.BmiCategories.AddRange(
             new BmiCategory
             {

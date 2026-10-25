@@ -426,6 +426,8 @@ namespace Infrastructure.Persistence
                 templateBootstrapPermissions.Select(p => p.Name));
             if (grantsByRole.TryGetValue("SuperAdmin", out var superAdminMatrix))
                 await EnsurePermissionsAssignedToRoleAsync(roleSuperAdmin.Id, superAdmin.Id, superAdminMatrix);
+
+            await ReceptionReferenceSeed.ApplyAsync(context, superAdmin.Id);
         }
     }
 }
