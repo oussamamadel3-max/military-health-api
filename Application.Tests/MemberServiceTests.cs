@@ -5,6 +5,7 @@ using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Application.Mappings;
+using Application.Services;
 using Application.Services.Members;
 using Domain.Entities.Audit;
 using Domain.Entities.Auth;
@@ -130,13 +131,15 @@ public class MemberServiceTests
         new MemberProfile().Register(config);
         var service = new MemberService(
             members.Object,
+            Mock.Of<IMemberImportBatchRepository>(),
             new MedicalCenterRepository(db),
             new ReferenceDataRepository(db),
             audit.Object,
             uow.Object,
             new Mapper(config),
             gate.Object,
-            new TestCurrentUser());
+            new TestCurrentUser(),
+            Mock.Of<IExportService>());
 
         var error = await Assert.ThrowsAsync<MemberRecruitmentNumberExistsException>(() =>
             service.CreateAsync(ValidCreate(recruitment: "RACE-1")));
@@ -623,12 +626,14 @@ public class MemberServiceTests
             DistinguishingMarks = source.DistinguishingMarks
         };
 
-    private static MemberService CreateService(
+    internal static MemberService CreateService(
         AppDbContext db,
         Guid activeCenter,
         bool allowCreate,
         bool allowView,
-        bool allowPrintReceipt = false)
+        bool allowPrintReceipt = false,
+        bool allowImport = false,
+        bool allowExport = false)
     {
         var gate = new Mock<IPermissionGate>();
         if (allowCreate)
@@ -682,6 +687,40 @@ public class MemberServiceTests
                 .ThrowsAsync(new ForbiddenPermissionException());
         }
 
+        if (allowImport)
+        {
+            gate.Setup(g => g.EnsureLocalAsync(
+                    MilitaryHealthPermissions.Members.Import,
+                    It.IsAny<Guid?>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(activeCenter);
+        }
+        else
+        {
+            gate.Setup(g => g.EnsureLocalAsync(
+                    MilitaryHealthPermissions.Members.Import,
+                    It.IsAny<Guid?>(),
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new ForbiddenPermissionException());
+        }
+
+        if (allowExport)
+        {
+            gate.Setup(g => g.EnsureLocalAsync(
+                    MilitaryHealthPermissions.Members.Export,
+                    It.IsAny<Guid?>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(activeCenter);
+        }
+        else
+        {
+            gate.Setup(g => g.EnsureLocalAsync(
+                    MilitaryHealthPermissions.Members.Export,
+                    It.IsAny<Guid?>(),
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new ForbiddenPermissionException());
+        }
+
         return CreateService(db, gate.Object);
     }
 
@@ -694,16 +733,18 @@ public class MemberServiceTests
 
         return new MemberService(
             new MemberRepository(db),
+            new MemberImportBatchRepository(db),
             new MedicalCenterRepository(db),
             new ReferenceDataRepository(db),
             new AuditLogRepository(db),
             new TestUnitOfWork(db),
             mapper,
             gate,
-            currentUser);
+            currentUser,
+            new ExportService());
     }
 
-    private static async Task SeedReferencesAsync(AppDbContext db)
+    internal static async Task SeedReferencesAsync(AppDbContext db)
     {
         var now = DateTimeOffset.UtcNow;
         db.Users.Add(new User
@@ -800,7 +841,7 @@ public class MemberServiceTests
         await db.SaveChangesAsync();
     }
 
-    private static AppDbContext CreateDb()
+    internal static AppDbContext CreateDb()
     {
         var user = new TestCurrentUser();
         var options = new DbContextOptionsBuilder<AppDbContext>()

@@ -3264,6 +3264,94 @@ namespace Infrastructure.Migrations
                     b.ToTable("memberGeneralNote", "patient");
                 });
 
+            modelBuilder.Entity("Domain.Entities.Patient.MemberImportBatch", b =>
+                {
+                    b.Property<Guid>("ImportBatchId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("importBatchId");
+
+                    b.Property<DateTimeOffset?>("CancelledAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("cancelledAt");
+
+                    b.Property<Guid>("CenterId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("centerId");
+
+                    b.Property<DateTimeOffset?>("CommittedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("committedAt");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("contentHash");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("createdAt");
+
+                    b.Property<string>("CreatedByUserId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("createdByUserId");
+
+                    b.Property<int>("DuplicateCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("duplicateCount");
+
+                    b.Property<string>("ErrorsJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("errorsJson");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("character varying(260)")
+                        .HasColumnName("fileName");
+
+                    b.Property<int>("InvalidCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("invalidCount");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("status");
+
+                    b.Property<int>("ValidCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("validCount");
+
+                    b.Property<string>("ValidRowsJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("validRowsJson");
+
+                    b.HasKey("ImportBatchId");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("CenterId", "CreatedAt");
+
+                    b.HasIndex("CenterId", "Status");
+
+                    b.ToTable("memberImportBatch", "patient", t =>
+                        {
+                            t.HasCheckConstraint("ckMemberImportBatchDuplicateCount", "\"duplicateCount\" >= 0");
+
+                            t.HasCheckConstraint("ckMemberImportBatchInvalidCount", "\"invalidCount\" >= 0");
+
+                            t.HasCheckConstraint("ckMemberImportBatchStatus", "\"status\" IN ('Previewed','Committed','Cancelled')");
+
+                            t.HasCheckConstraint("ckMemberImportBatchValidCount", "\"validCount\" >= 0");
+                        });
+                });
+
             modelBuilder.Entity("Domain.Entities.Patient.MemberTransfer", b =>
                 {
                     b.Property<Guid>("TransferId")
@@ -4503,6 +4591,25 @@ namespace Infrastructure.Migrations
                     b.Navigation("Member");
 
                     b.Navigation("UpdatedByUser");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Patient.MemberImportBatch", b =>
+                {
+                    b.HasOne("Domain.Entities.Core.MedicalCenter", "Center")
+                        .WithMany()
+                        .HasForeignKey("CenterId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Domain.Entities.Auth.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Center");
+
+                    b.Navigation("CreatedByUser");
                 });
 
             modelBuilder.Entity("Domain.Entities.Patient.MemberTransfer", b =>

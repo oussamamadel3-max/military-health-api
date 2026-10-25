@@ -43,6 +43,7 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<ICenterClinicRepository, CenterClinicRepository>();
         services.AddScoped<IReferenceDataRepository, ReferenceDataRepository>();
         services.AddScoped<IMemberRepository, MemberRepository>();
+        services.AddScoped<IMemberImportBatchRepository, MemberImportBatchRepository>();
         #endregion
 
         #region Auth HTTP services

@@ -119,3 +119,31 @@ public class MemberGeneralNoteConfiguration : IEntityTypeConfiguration<MemberGen
         builder.HasOne(x => x.UpdatedByUser).WithMany().HasForeignKey(x => x.UpdatedByUserId).OnDelete(DeleteBehavior.Restrict);
     }
 }
+
+public class MemberImportBatchConfiguration : IEntityTypeConfiguration<MemberImportBatch>
+{
+    public void Configure(EntityTypeBuilder<MemberImportBatch> builder)
+    {
+        builder.ToTable("memberImportBatch", "patient");
+        builder.HasKey(x => x.ImportBatchId);
+        builder.UseCamelCaseColumns();
+        builder.Property(x => x.Status).HasMaxLength(32);
+        builder.Property(x => x.FileName).HasMaxLength(260);
+        builder.Property(x => x.ContentHash).HasMaxLength(128);
+        builder.Property(x => x.ValidRowsJson).HasColumnType("text");
+        builder.Property(x => x.ErrorsJson).HasColumnType("text");
+        builder.HasIndex(x => new { x.CenterId, x.CreatedAt });
+        builder.HasIndex(x => new { x.CenterId, x.Status });
+        builder.HasOne(x => x.Center).WithMany().HasForeignKey(x => x.CenterId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(x => x.CreatedByUser).WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        builder.ToTable(t =>
+        {
+            t.HasCheckConstraint(
+                "ckMemberImportBatchStatus",
+                "\"status\" IN ('Previewed','Committed','Cancelled')");
+            t.HasCheckConstraint("ckMemberImportBatchValidCount", "\"validCount\" >= 0");
+            t.HasCheckConstraint("ckMemberImportBatchDuplicateCount", "\"duplicateCount\" >= 0");
+            t.HasCheckConstraint("ckMemberImportBatchInvalidCount", "\"invalidCount\" >= 0");
+        });
+    }
+}

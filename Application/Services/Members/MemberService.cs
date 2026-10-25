@@ -13,17 +13,26 @@ using Domain.Entities.Audit;
 using Domain.Entities.Core;
 using Domain.Entities.Patient;
 using MapsterMapper;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 
 namespace Application.Services.Members;
 
 /// <summary>
-/// خدمات ملف المنتسب المحلية: تسجيل (MH-P3-020) وتعديل (MH-P3-050 / FR-024)
-/// وإيصال الطباعة (MH-P3-070 / FR-027) وقائمة/تفاصيل مع عزل المركز النشط وتدقيق صريح.
+/// خدمات ملف المنتسب المحلية: تسجيل وتعديل وإيصال وطباعة واستيراد/تصدير Excel
+/// مع عزل المركز النشط وتدقيق صريح.
 /// </summary>
 public class MemberService : IMemberService
 {
+    public const int MaxExportRows = 10000;
+
+    private static readonly JsonSerializerOptions ImportJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
     private readonly IMemberRepository _members;
+    private readonly IMemberImportBatchRepository _importBatches;
     private readonly IMedicalCenterRepository _centers;
     private readonly IReferenceDataRepository _references;
     private readonly IAuditLogRepository _audit;
@@ -31,18 +40,22 @@ public class MemberService : IMemberService
     private readonly IMapper _mapper;
     private readonly IPermissionGate _permissionGate;
     private readonly ICurrentUserService _currentUser;
+    private readonly IExportService _export;
 
     public MemberService(
         IMemberRepository members,
+        IMemberImportBatchRepository importBatches,
         IMedicalCenterRepository centers,
         IReferenceDataRepository references,
         IAuditLogRepository audit,
         IUnitOfWork unitOfWork,
         IMapper mapper,
         IPermissionGate permissionGate,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        IExportService export)
     {
         _members = members;
+        _importBatches = importBatches;
         _centers = centers;
         _references = references;
         _audit = audit;
@@ -50,6 +63,7 @@ public class MemberService : IMemberService
         _mapper = mapper;
         _permissionGate = permissionGate;
         _currentUser = currentUser;
+        _export = export;
     }
 
     public async Task<PaginatedList<MemberListItemDto>> ListAsync(
@@ -68,26 +82,7 @@ public class MemberService : IMemberService
         var pageSize = query.PageSize < 1 ? 10 : query.PageSize;
         if (pageSize > 500) pageSize = 500;
 
-        var q = _members.Query().Where(m => m.CurrentMedicalCenterId == centerId);
-
-        if (query.FileNumber.HasValue)
-            q = q.Where(m => m.FileNumber == query.FileNumber.Value);
-
-        if (!string.IsNullOrWhiteSpace(query.RecruitmentNumber))
-        {
-            var term = query.RecruitmentNumber.Trim().ToLower();
-            q = q.Where(m => m.RecruitmentNumber.ToLower().Contains(term));
-        }
-
-        if (!string.IsNullOrWhiteSpace(query.FullName))
-        {
-            var term = query.FullName.Trim().ToLower();
-            q = q.Where(m => m.FullName.ToLower().Contains(term));
-        }
-
-        q = ApplyCreatedAtFilter(q, query.Date, query.FromDate, query.ToDate);
-        q = q.OrderByDescending(m => m.CreatedAt).ThenByDescending(m => m.FileNumber);
-
+        var q = BuildFilteredMemberQuery(centerId, query);
         var totalCount = await q.CountAsync(cancellationToken);
         var page = await q
             .Skip((pageNumber - 1) * pageSize)
@@ -406,7 +401,441 @@ public class MemberService : IMemberService
         return pdf;
     }
 
+    /// <summary>ينزّل قالب استيراد Excel المعتمد (FR-028).</summary>
+    public async Task<ExportFileDto> GetImportTemplateAsync(
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default)
+    {
+        await _permissionGate.EnsureLocalAsync(
+            MilitaryHealthPermissions.Members.Import,
+            clientCenterId,
+            cancellationToken);
+        _ = cancellationToken;
+
+        var bytes = MemberImportExcel.BuildTemplateBytes();
+        return new ExportFileDto
+        {
+            FileContents = bytes,
+            ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            FileName = "قالب_استيراد_المنتسبين.xlsx"
+        };
+    }
+
+    /// <summary>يرفع ملف Excel ويعيد معاينة دون إنشاء منتسبين (FR-028 / BR-076).</summary>
+    public async Task<MemberImportPreviewResult> PreviewImportAsync(
+        IFormFile file,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var centerId = await _permissionGate.EnsureLocalAsync(
+            MilitaryHealthPermissions.Members.Import,
+            clientCenterId,
+            cancellationToken);
+
+        var userId = RequireUser();
+        if (file is null)
+            throw new MemberImportException("ملف الاستيراد مطلوب.");
+
+        await using var stream = file.OpenReadStream();
+        MemberImportExcel.ValidateUpload(file.FileName, file.Length, stream);
+
+        var contentHash = MemberImportExcel.ComputeSha256Hex(stream);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var activeRules = await LoadActiveValidationRulesAsync(cancellationToken);
+
+        var parsed = MemberImportExcel.ParseAndValidate(stream, today, activeRules);
+
+        var valid = new List<MemberImportValidRow>();
+        var issues = parsed.Issues.ToList();
+
+        foreach (var row in parsed.ValidRows)
+        {
+            try
+            {
+                await EnsureReferenceAsync(
+                    row.MaritalStatusId,
+                    row.RecruitmentCenterId,
+                    row.BloodTypeId,
+                    cancellationToken);
+
+                if (await _members.RecruitmentNumberExistsAsync(
+                        row.RecruitmentNumber.Trim(),
+                        cancellationToken: cancellationToken))
+                {
+                    issues.Add(new MemberImportIssueRow
+                    {
+                        RowNumber = row.RowNumber,
+                        Status = "Duplicate",
+                        Reason = "رقم المنتسب/التجنيد مسجّل مسبقاً في النظام.",
+                        RecruitmentNumber = row.RecruitmentNumber.Trim()
+                    });
+                    continue;
+                }
+
+                valid.Add(row);
+            }
+            catch (InvalidMemberDataException ex)
+            {
+                issues.Add(new MemberImportIssueRow
+                {
+                    RowNumber = row.RowNumber,
+                    Status = "Invalid",
+                    Reason = ex.Message,
+                    RecruitmentNumber = row.RecruitmentNumber
+                });
+            }
+        }
+
+        var duplicateCount = issues.Count(i => i.Status == "Duplicate");
+        var invalidCount = issues.Count(i => i.Status == "Invalid");
+        var importId = Guid.NewGuid();
+        var batch = new MemberImportBatch
+        {
+            ImportBatchId = importId,
+            CenterId = centerId,
+            CreatedByUserId = userId,
+            Status = MemberImportBatchStatuses.Previewed,
+            FileName = Path.GetFileName(file.FileName),
+            ContentHash = contentHash,
+            ValidCount = valid.Count,
+            DuplicateCount = duplicateCount,
+            InvalidCount = invalidCount,
+            ValidRowsJson = JsonSerializer.Serialize(valid, ImportJsonOptions),
+            ErrorsJson = JsonSerializer.Serialize(issues, ImportJsonOptions),
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+
+        _importBatches.Add(batch);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return new MemberImportPreviewResult
+        {
+            ImportId = importId,
+            TotalRows = valid.Count + issues.Count,
+            ValidCount = valid.Count,
+            DuplicateCount = duplicateCount,
+            InvalidCount = invalidCount,
+            Issues = issues
+        };
+    }
+
+    /// <summary>يعتمد السجلات الصالحة مرة واحدة فقط ويولّد أرقام الملف/الدور في المركز النشط.</summary>
+    public async Task<MemberImportCommitResult> CommitImportAsync(
+        Guid importId,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var centerId = await _permissionGate.EnsureLocalAsync(
+            MilitaryHealthPermissions.Members.Import,
+            clientCenterId,
+            cancellationToken);
+
+        var userId = RequireUser();
+        var batch = await _importBatches.GetByIdInCenterAsync(importId, centerId, asNoTracking: false, cancellationToken)
+            ?? throw new MemberImportBatchNotFoundException();
+
+        if (batch.Status == MemberImportBatchStatuses.Committed)
+            throw new MemberImportAlreadyCommittedException();
+        if (batch.Status != MemberImportBatchStatuses.Previewed)
+            throw new MemberImportNotPreviewedException();
+
+        var center = await _centers.GetByIdAsync(centerId, asNoTracking: true, cancellationToken);
+        MedicalCenterActivityGuard.EnsureAcceptsNewRelations(center);
+
+        var rows = JsonSerializer.Deserialize<List<MemberImportValidRow>>(batch.ValidRowsJson, ImportJsonOptions)
+            ?? new List<MemberImportValidRow>();
+        if (rows.Count == 0)
+            throw new MemberImportException("لا توجد سجلات صالحة للاعتماد في هذه الجلسة.");
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var createdFileNumbers = new List<long>();
+        var skippedDuplicate = 0;
+
+        await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            // إعادة التحقق من الحالة داخل المعاملة لمنع الاعتماد المزدوج المتزامن.
+            if (batch.Status != MemberImportBatchStatuses.Previewed)
+                throw new MemberImportAlreadyCommittedException();
+
+            foreach (var row in rows)
+            {
+                var recruitmentNumber = row.RecruitmentNumber.Trim();
+                if (await _members.RecruitmentNumberExistsAsync(recruitmentNumber, cancellationToken: cancellationToken))
+                {
+                    skippedDuplicate++;
+                    continue;
+                }
+
+                var (fileNumber, queueNumber) = await _members.AllocateFileAndQueueNumbersAsync(
+                    centerId, today, cancellationToken);
+
+                var now = DateTimeOffset.UtcNow;
+                var memberId = Guid.NewGuid();
+                var member = new Member
+                {
+                    MemberId = memberId,
+                    FileNumber = fileNumber,
+                    RecruitmentNumber = recruitmentNumber,
+                    FullName = row.FullName.Trim(),
+                    MotherName = row.MotherName.Trim(),
+                    BirthDate = row.BirthDate,
+                    MaritalStatusId = row.MaritalStatusId,
+                    Occupation = row.Occupation.Trim(),
+                    RecruitmentCenterId = row.RecruitmentCenterId,
+                    BloodTypeId = row.BloodTypeId,
+                    BloodSugarMgDl = row.BloodSugarMgDl,
+                    HeightCm = row.HeightCm,
+                    WeightKg = row.WeightKg,
+                    BloodPressure = TrimOrNull(row.BloodPressure),
+                    PulseBpm = row.PulseBpm,
+                    HasTattoo = row.HasTattoo,
+                    DistinguishingMarks = TrimOrNull(row.DistinguishingMarks),
+                    CurrentMedicalCenterId = centerId,
+                    QueueMedicalCenterId = centerId,
+                    QueueDate = today,
+                    QueueNumber = queueNumber,
+                    ExportStatus = "UNEXPORTED",
+                    DataRevision = 1,
+                    CreatedByUserId = userId,
+                    UpdatedByUserId = userId,
+                    CreatedAt = now,
+                    UpdatedAt = now
+                };
+
+                _members.Add(member);
+                _members.AddIdentity(new MemberCenterIdentity
+                {
+                    MemberCenterIdentityId = Guid.NewGuid(),
+                    MemberId = memberId,
+                    MedicalCenterId = centerId,
+                    CenterMemberId = fileNumber.ToString(),
+                    ValidFrom = now,
+                    ValidTo = null,
+                    AssignedByUserId = userId,
+                    ClosedByUserId = null
+                });
+
+                createdFileNumbers.Add(fileNumber);
+            }
+
+            batch.Status = MemberImportBatchStatuses.Committed;
+            batch.CommittedAt = DateTimeOffset.UtcNow;
+
+            RecordAudit(
+                userId,
+                centerId,
+                "MemberImport",
+                "SUCCESS",
+                batch.ImportBatchId.ToString(),
+                "تم اعتماد استيراد منتسبين من Excel",
+                oldValues: null,
+                newValues: JsonSerializer.Serialize(new
+                {
+                    batch.ImportBatchId,
+                    batch.FileName,
+                    CommittedCount = createdFileNumbers.Count,
+                    SkippedDuplicate = skippedDuplicate,
+                    batch.InvalidCount,
+                    batch.DuplicateCount
+                }));
+
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            await tx.RollbackAsync(cancellationToken);
+            throw new MemberImportException("تعذر اعتماد الاستيراد بسبب تعارض بيانات. أعد المعاينة ثم حاول مجدداً.");
+        }
+        catch
+        {
+            await tx.RollbackAsync(cancellationToken);
+            throw;
+        }
+
+        return new MemberImportCommitResult
+        {
+            ImportId = importId,
+            CommittedCount = createdFileNumbers.Count,
+            SkippedDuplicateCount = skippedDuplicate,
+            SkippedInvalidCount = batch.InvalidCount,
+            CreatedFileNumbers = createdFileNumbers
+        };
+    }
+
+    /// <summary>يلغي جلسة المعاينة دون حفظ منتسبين.</summary>
+    public async Task CancelImportAsync(
+        Guid importId,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var centerId = await _permissionGate.EnsureLocalAsync(
+            MilitaryHealthPermissions.Members.Import,
+            clientCenterId,
+            cancellationToken);
+
+        var batch = await _importBatches.GetByIdInCenterAsync(importId, centerId, asNoTracking: false, cancellationToken)
+            ?? throw new MemberImportBatchNotFoundException();
+
+        if (batch.Status == MemberImportBatchStatuses.Committed)
+            throw new MemberImportAlreadyCommittedException();
+        if (batch.Status != MemberImportBatchStatuses.Previewed)
+            throw new MemberImportNotPreviewedException();
+
+        batch.Status = MemberImportBatchStatuses.Cancelled;
+        batch.CancelledAt = DateTimeOffset.UtcNow;
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>ينزّل تقرير أخطاء جلسة الاستيراد كملف Excel.</summary>
+    public async Task<ExportFileDto> GetImportErrorsAsync(
+        Guid importId,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var centerId = await _permissionGate.EnsureLocalAsync(
+            MilitaryHealthPermissions.Members.Import,
+            clientCenterId,
+            cancellationToken);
+
+        var batch = await _importBatches.GetByIdInCenterAsync(importId, centerId, asNoTracking: true, cancellationToken)
+            ?? throw new MemberImportBatchNotFoundException();
+
+        var issues = JsonSerializer.Deserialize<List<MemberImportIssueRow>>(batch.ErrorsJson, ImportJsonOptions)
+            ?? new List<MemberImportIssueRow>();
+
+        return await _export.ExportToExcelAsync(issues, new ExportOptions
+        {
+            ReportName = "اخطاء_استيراد_المنتسبين",
+            SheetName = "الأخطاء",
+            CustomTitle = "تقرير أخطاء استيراد المنتسبين",
+            IncludeSummary = false,
+            ColumnMappings = new Dictionary<string, string>
+            {
+                [nameof(MemberImportIssueRow.RowNumber)] = "رقم الصف",
+                [nameof(MemberImportIssueRow.Status)] = "الحالة",
+                [nameof(MemberImportIssueRow.Reason)] = "سبب الخطأ",
+                [nameof(MemberImportIssueRow.RecruitmentNumber)] = "رقم المنتسب/التجنيد"
+            }
+        });
+    }
+
+    /// <summary>يصدّر قائمة المنتسبين وفق تصفية القائمة ونطاق المركز النشط (FR-029).</summary>
+    public async Task<ExportFileDto> ExportAsync(
+        MemberListQuery query,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var centerId = await _permissionGate.EnsureLocalAsync(
+            MilitaryHealthPermissions.Members.Export,
+            clientCenterId,
+            cancellationToken);
+
+        var userId = RequireUser();
+        MemberFieldValidation.ValidateListDateFilter(query.Date, query.FromDate, query.ToDate);
+
+        var q = BuildFilteredMemberQuery(centerId, query);
+        var totalCount = await q.CountAsync(cancellationToken);
+        if (totalCount == 0)
+            throw new MemberExportEmptyException();
+        if (totalCount > MaxExportRows)
+            throw new MemberImportException(
+                $"عدد السجلات ({totalCount}) يتجاوز حد التصدير ({MaxExportRows}). ضيّق التصفية.",
+                "MEMBER_EXPORT_TOO_LARGE");
+
+        var members = await q.Take(MaxExportRows).ToListAsync(cancellationToken);
+        var center = await _centers.GetByIdAsync(centerId, asNoTracking: true, cancellationToken);
+        var centerName = center?.NameAr;
+        var categories = await LoadBmiCategoriesAsync(cancellationToken);
+
+        var rows = members.Select(m =>
+        {
+            var bmi = m.Bmi ?? MemberBmi.Calculate(m.HeightCm, m.WeightKg);
+            return new MemberExportRowDto
+            {
+                FileNumber = m.FileNumber,
+                QueueNumber = m.QueueNumber,
+                QueueDate = m.QueueDate,
+                FullName = m.FullName,
+                RecruitmentNumber = m.RecruitmentNumber,
+                CreatedAt = m.CreatedAt,
+                CurrentMedicalCenterId = m.CurrentMedicalCenterId,
+                CurrentMedicalCenterNameAr = centerName,
+                Bmi = bmi,
+                BmiCategoryNameAr = MemberBmi.Classify(bmi, categories)
+            };
+        }).ToList();
+
+        var file = await _export.ExportToExcelAsync(rows, new ExportOptions
+        {
+            ReportName = "منتسبين",
+            SheetName = "المنتسبون",
+            CustomTitle = "تصدير قائمة المنتسبين",
+            BranchName = centerName,
+            IncludeSummary = false,
+            ColumnMappings = new Dictionary<string, string>
+            {
+                [nameof(MemberExportRowDto.FileNumber)] = "رقم الملف",
+                [nameof(MemberExportRowDto.QueueNumber)] = "رقم الدور",
+                [nameof(MemberExportRowDto.QueueDate)] = "تاريخ الدور",
+                [nameof(MemberExportRowDto.FullName)] = "الاسم الكامل",
+                [nameof(MemberExportRowDto.RecruitmentNumber)] = "رقم المنتسب/التجنيد",
+                [nameof(MemberExportRowDto.CreatedAt)] = "تاريخ التسجيل",
+                [nameof(MemberExportRowDto.CurrentMedicalCenterId)] = "معرف المركز",
+                [nameof(MemberExportRowDto.CurrentMedicalCenterNameAr)] = "اسم المركز",
+                [nameof(MemberExportRowDto.Bmi)] = "مؤشر كتلة الجسم",
+                [nameof(MemberExportRowDto.BmiCategoryNameAr)] = "تصنيف مؤشر كتلة الجسم"
+            }
+        });
+
+        RecordAudit(
+            userId,
+            centerId,
+            "MemberExport",
+            "SUCCESS",
+            centerId.ToString(),
+            "تم تصدير قائمة المنتسبين إلى Excel",
+            oldValues: null,
+            newValues: JsonSerializer.Serialize(new
+            {
+                RecordCount = rows.Count,
+                query.FileNumber,
+                query.RecruitmentNumber,
+                query.FullName,
+                query.Date,
+                query.FromDate,
+                query.ToDate
+            }));
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return file;
+    }
+
     #region Private helpers
+
+    private IQueryable<Member> BuildFilteredMemberQuery(Guid centerId, MemberListQuery query)
+    {
+        var q = _members.Query().Where(m => m.CurrentMedicalCenterId == centerId);
+
+        if (query.FileNumber.HasValue)
+            q = q.Where(m => m.FileNumber == query.FileNumber.Value);
+
+        if (!string.IsNullOrWhiteSpace(query.RecruitmentNumber))
+        {
+            var term = query.RecruitmentNumber.Trim().ToLower();
+            q = q.Where(m => m.RecruitmentNumber.ToLower().Contains(term));
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.FullName))
+        {
+            var term = query.FullName.Trim().ToLower();
+            q = q.Where(m => m.FullName.ToLower().Contains(term));
+        }
+
+        q = ApplyCreatedAtFilter(q, query.Date, query.FromDate, query.ToDate);
+        return q.OrderByDescending(m => m.CreatedAt).ThenByDescending(m => m.FileNumber);
+    }
 
     private async Task<MemberDetailsDto> ToDetailsAsync(Member member, CancellationToken cancellationToken)
     {

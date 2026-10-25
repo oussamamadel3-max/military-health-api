@@ -1,16 +1,19 @@
 using System.ComponentModel.DataAnnotations;
 using API.Infrastructure;
+using API.RateLimiting;
 using Application.Common.Permissions;
 using Application.Common.Security;
 using Application.Dtos.Members;
 using Application.Interfaces.Services;
+using Application.Services.Members;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace API.Controllers;
 
 /// <summary>
-/// مسارات ملف المنتسب في المركز النشط (أساس MH-P3-010: إنشاء/تعديل/قائمة/تفاصيل).
+/// مسارات ملف المنتسب في المركز النشط (CRUD، إيصال، استيراد/تصدير Excel).
 /// </summary>
 [ApiController]
 [Authorize]
@@ -51,6 +54,94 @@ public class MembersController : ControllerBase
             cancellationToken);
 
         return ApiResponse.Success("تم جلب قائمة المنتسبين بنجاح.", result);
+    }
+
+    /// <summary>تصدير قائمة المنتسبين إلى Excel وفق التصفية ونطاق المركز النشط.</summary>
+    [HttpGet("export")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Members.Export, OperationScope.Local)]
+    [EnableRateLimiting(RateLimitPolicies.Reports)]
+    public async Task<IActionResult> Export(
+        [FromQuery] long? fileNumber = null,
+        [FromQuery] string? recruitmentNumber = null,
+        [FromQuery] string? fullName = null,
+        [FromQuery] DateOnly? date = null,
+        [FromQuery] DateOnly? fromDate = null,
+        [FromQuery] DateOnly? toDate = null,
+        CancellationToken cancellationToken = default)
+    {
+        var file = await _members.ExportAsync(
+            new MemberListQuery
+            {
+                FileNumber = fileNumber,
+                RecruitmentNumber = recruitmentNumber,
+                FullName = fullName,
+                Date = date,
+                FromDate = fromDate,
+                ToDate = toDate
+            },
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+        return File(file.FileContents, file.ContentType, file.FileName);
+    }
+
+    /// <summary>تنزيل قالب استيراد المنتسبين المعتمد.</summary>
+    [HttpGet("import/template")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Members.Import, OperationScope.Local)]
+    public async Task<IActionResult> DownloadImportTemplate(CancellationToken cancellationToken = default)
+    {
+        var file = await _members.GetImportTemplateAsync(
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+        return File(file.FileContents, file.ContentType, file.FileName);
+    }
+
+    /// <summary>رفع ملف Excel ومعاينة النتائج دون حفظ منتسبين.</summary>
+    [HttpPost("import/preview")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Members.Import, OperationScope.Local)]
+    [RequestSizeLimit(MemberImportExcel.MaxFileBytes + (512 * 1024))]
+    public async Task<IResult> PreviewImport(IFormFile file, CancellationToken cancellationToken = default)
+    {
+        var preview = await _members.PreviewImportAsync(
+            file,
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+        return ApiResponse.Success("تمت معاينة ملف الاستيراد بنجاح.", preview);
+    }
+
+    /// <summary>اعتماد السجلات الصالحة من جلسة المعاينة.</summary>
+    [HttpPost("import/{importId:guid}/commit")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Members.Import, OperationScope.Local)]
+    public async Task<IResult> CommitImport(Guid importId, CancellationToken cancellationToken = default)
+    {
+        var result = await _members.CommitImportAsync(
+            importId,
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+        return ApiResponse.Success("تم اعتماد استيراد المنتسبين بنجاح.", result);
+    }
+
+    /// <summary>إلغاء جلسة معاينة الاستيراد دون حفظ.</summary>
+    [HttpPost("import/{importId:guid}/cancel")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Members.Import, OperationScope.Local)]
+    public async Task<IResult> CancelImport(Guid importId, CancellationToken cancellationToken = default)
+    {
+        await _members.CancelImportAsync(
+            importId,
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+        return ApiResponse.Success("تم إلغاء جلسة الاستيراد.");
+    }
+
+    /// <summary>تنزيل تقرير أخطاء جلسة الاستيراد.</summary>
+    [HttpGet("import/{importId:guid}/errors")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Members.Import, OperationScope.Local)]
+    public async Task<IActionResult> DownloadImportErrors(Guid importId, CancellationToken cancellationToken = default)
+    {
+        var file = await _members.GetImportErrorsAsync(
+            importId,
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+        return File(file.FileContents, file.ContentType, file.FileName);
     }
 
     /// <summary>تفاصيل ملف منتسب ضمن المركز النشط.</summary>

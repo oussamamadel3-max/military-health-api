@@ -65,6 +65,7 @@ public class AppDbContext : DbContext
     public DbSet<MemberCenterIdentity> MemberCenterIdentities { get; set; } = null!;
     public DbSet<MemberTransfer> MemberTransfers { get; set; } = null!;
     public DbSet<MemberGeneralNote> MemberGeneralNotes { get; set; } = null!;
+    public DbSet<MemberImportBatch> MemberImportBatches { get; set; } = null!;
 
     public DbSet<MedicalExam> MedicalExams { get; set; } = null!;
     public DbSet<ClinicAssessment> ClinicAssessments { get; set; } = null!;
