@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using API.Infrastructure;
 using Application.Common.Permissions;
 using Application.Common.Security;
+using Application.Dtos.ClinicWorkspace;
 using Application.Dtos.Members;
 using Application.Interfaces.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -10,7 +11,8 @@ using Microsoft.AspNetCore.Mvc;
 namespace API.Controllers;
 
 /// <summary>
-/// مساحة عمل الطبيب: عيادات المسند، بحث المنتسب، وفتح ملخص الملف ضمن العيادة (FR-032 / FR-045 فتح).
+/// مساحة عمل الطبيب: عيادات المسند، بحث/فتح الملف، حفظ التقييم، وتحرير قفل الفحص
+/// (FR-032 / FR-040 / FR-041 / FR-045).
 /// </summary>
 [ApiController]
 [Authorize]
@@ -18,8 +20,15 @@ namespace API.Controllers;
 public class ClinicWorkspaceController : ControllerBase
 {
     private readonly IClinicWorkspaceService _workspace;
+    private readonly IClinicAssessmentService _assessments;
 
-    public ClinicWorkspaceController(IClinicWorkspaceService workspace) => _workspace = workspace;
+    public ClinicWorkspaceController(
+        IClinicWorkspaceService workspace,
+        IClinicAssessmentService assessments)
+    {
+        _workspace = workspace;
+        _assessments = assessments;
+    }
 
     /// <summary>عيادات الطبيب النشطة ضمن المركز النشط.</summary>
     [HttpGet("my-clinics")]
@@ -78,5 +87,37 @@ public class ClinicWorkspaceController : ControllerBase
             ClientCenterBinding.Read(Request),
             cancellationToken);
         return ApiResponse.Success("تم فتح ملخص ملف المنتسب في العيادة بنجاح.", summary);
+    }
+
+    /// <summary>يحفظ هيكل الفحص الأساسي وتقييم العيادة (مع DeferredAction عند مؤجل) ويحرّر القفل.</summary>
+    [HttpPost("members/{memberId:guid}/assessment")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Clinical.AssessmentWrite, OperationScope.Local)]
+    public async Task<IResult> SaveAssessment(
+        Guid memberId,
+        [FromBody] SaveClinicAssessmentRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var saved = await _assessments.SaveAsync(
+            memberId,
+            request,
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+        return ApiResponse.Success("تم حفظ تقييم العيادة بنجاح.", saved);
+    }
+
+    /// <summary>يحرّر قفل التحرير المملوك للطبيب الحالي دون حفظ تقييم.</summary>
+    [HttpDelete("members/{memberId:guid}/edit-lock")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Clinical.AssessmentWrite, OperationScope.Local)]
+    public async Task<IResult> ReleaseEditLock(
+        Guid memberId,
+        [FromQuery][Required] Guid clinicId,
+        CancellationToken cancellationToken = default)
+    {
+        await _assessments.ReleaseEditLockAsync(
+            memberId,
+            clinicId,
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+        return ApiResponse.Success("تم تحرير قفل الفحص بنجاح.");
     }
 }

@@ -46,4 +46,10 @@ public class ClinicWorkspaceRepository : IClinicWorkspaceRepository
     public void AddEditLock(ClinicExamEditLock editLock) => _context.ClinicExamEditLocks.Add(editLock);
 
     public void RemoveEditLock(ClinicExamEditLock editLock) => _context.ClinicExamEditLocks.Remove(editLock);
+
+    public void AddMedicalExam(MedicalExam exam) => _context.MedicalExams.Add(exam);
+
+    public void AddClinicAssessment(ClinicAssessment assessment) => _context.ClinicAssessments.Add(assessment);
+
+    public void AddDeferredAction(DeferredAction deferredAction) => _context.DeferredActions.Add(deferredAction);
 }

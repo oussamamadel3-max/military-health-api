@@ -60,6 +60,11 @@ public static class ReceptionReferenceSeed
             if (ContainsCode(bmi.Select(x => x.Code), item.Code))
                 continue;
 
+            // لا تُدرج فئة بنفس المدى تحت رمز مختلف؛ قيد DB يرفض تداخل المجالات النشطة.
+            if (bmi.Any(existing => existing.IsActive
+                    && RangesOverlap(item.MinBmi, item.MaxBmi, existing.MinBmi, existing.MaxBmi)))
+                continue;
+
             context.BmiCategories.Add(new BmiCategory
             {
                 Code = item.Code,
@@ -100,4 +105,12 @@ public static class ReceptionReferenceSeed
 
     private static bool ContainsCode(IEnumerable<string> codes, string code)
         => codes.Any(existing => string.Equals(existing, code, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>تداخل مجالات نصف مفتوحة [min, max) كما في تصنيف BMI.</summary>
+    private static bool RangesOverlap(decimal minA, decimal? maxA, decimal minB, decimal? maxB)
+    {
+        var endA = maxA ?? decimal.MaxValue;
+        var endB = maxB ?? decimal.MaxValue;
+        return minA < endB && minB < endA;
+    }
 }

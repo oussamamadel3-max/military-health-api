@@ -22,4 +22,10 @@ public interface IClinicWorkspaceRepository
     void AddEditLock(ClinicExamEditLock editLock);
 
     void RemoveEditLock(ClinicExamEditLock editLock);
+
+    void AddMedicalExam(MedicalExam exam);
+
+    void AddClinicAssessment(ClinicAssessment assessment);
+
+    void AddDeferredAction(DeferredAction deferredAction);
 }
