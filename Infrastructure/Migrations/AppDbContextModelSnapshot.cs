@@ -1138,6 +1138,55 @@ namespace Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Domain.Entities.Clinical.ClinicExamEditLock", b =>
+                {
+                    b.Property<Guid>("LockId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("lockId");
+
+                    b.Property<Guid>("CenterId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("centerId");
+
+                    b.Property<Guid>("ClinicId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("clinicId");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expiresAt");
+
+                    b.Property<DateTimeOffset>("LockedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lockedAt");
+
+                    b.Property<string>("LockedByUserId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("lockedByUserId");
+
+                    b.Property<Guid>("MemberId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("memberId");
+
+                    b.HasKey("LockId");
+
+                    b.HasIndex("ClinicId");
+
+                    b.HasIndex("LockedByUserId");
+
+                    b.HasIndex("MemberId", "ClinicId")
+                        .IsUnique();
+
+                    b.HasIndex("CenterId", "ClinicId", "ExpiresAt");
+
+                    b.ToTable("clinicExamEditLock", "clinical", t =>
+                        {
+                            t.HasCheckConstraint("ckClinicExamEditLock1", "\"expiresAt\" > \"lockedAt\"");
+                        });
+                });
+
             modelBuilder.Entity("Domain.Entities.Clinical.DeferredAction", b =>
                 {
                     b.Property<Guid>("DeferredActionId")
@@ -3878,6 +3927,41 @@ namespace Infrastructure.Migrations
                     b.Navigation("ResultStatus");
 
                     b.Navigation("UpdatedByUser");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Clinical.ClinicExamEditLock", b =>
+                {
+                    b.HasOne("Domain.Entities.Core.MedicalCenter", "Center")
+                        .WithMany()
+                        .HasForeignKey("CenterId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Domain.Entities.Core.Clinic", "Clinic")
+                        .WithMany()
+                        .HasForeignKey("ClinicId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Domain.Entities.Auth.User", "LockedByUser")
+                        .WithMany()
+                        .HasForeignKey("LockedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Domain.Entities.Patient.Member", "Member")
+                        .WithMany()
+                        .HasForeignKey("MemberId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Center");
+
+                    b.Navigation("Clinic");
+
+                    b.Navigation("LockedByUser");
+
+                    b.Navigation("Member");
                 });
 
             modelBuilder.Entity("Domain.Entities.Clinical.DeferredAction", b =>

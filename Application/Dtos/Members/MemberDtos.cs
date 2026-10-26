@@ -48,6 +48,8 @@ public class MemberListQuery
     public string? Barcode { get; set; }
     public string? RecruitmentNumber { get; set; }
     public string? FullName { get; set; }
+    /// <summary>رقم الدور ضمن مركز الدور وتاريخه الحالي للمنتسب.</summary>
+    public int? QueueNumber { get; set; }
     public DateOnly? Date { get; set; }
     public DateOnly? FromDate { get; set; }
     public DateOnly? ToDate { get; set; }

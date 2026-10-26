@@ -241,3 +241,21 @@ public class SupervisorObjectionConfiguration : IEntityTypeConfiguration<Supervi
         });
     }
 }
+
+/// <summary>تعيين EF لأقفال تحرير فحص العيادة المؤقتة (شريحة فتح FR-045).</summary>
+public class ClinicExamEditLockConfiguration : IEntityTypeConfiguration<ClinicExamEditLock>
+{
+    public void Configure(EntityTypeBuilder<ClinicExamEditLock> builder)
+    {
+        builder.ToTable("clinicExamEditLock", "clinical");
+        builder.HasKey(x => x.LockId);
+        builder.UseCamelCaseColumns();
+        builder.HasIndex(x => new { x.MemberId, x.ClinicId }).IsUnique();
+        builder.HasIndex(x => new { x.CenterId, x.ClinicId, x.ExpiresAt });
+        builder.HasOne(x => x.Member).WithMany().HasForeignKey(x => x.MemberId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(x => x.Center).WithMany().HasForeignKey(x => x.CenterId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(x => x.Clinic).WithMany().HasForeignKey(x => x.ClinicId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(x => x.LockedByUser).WithMany().HasForeignKey(x => x.LockedByUserId).OnDelete(DeleteBehavior.Restrict);
+        builder.ToTable(t => t.HasCheckConstraint("ckClinicExamEditLock1", "\"expiresAt\" > \"lockedAt\""));
+    }
+}

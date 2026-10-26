@@ -1,6 +1,7 @@
 using API.Extensions;
 using API.Middleware;
 using API.RateLimiting;
+using Application.Common.Options;
 using Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -32,6 +33,10 @@ builder.Services
 builder.Services.AddCookieSecurity(builder.Environment);
 builder.Services.AddApiValidationBehavior();
 builder.Services.AddHealthChecks();
+
+// مهلة قفل التحرير المؤقتة لـ FR-045 حتى تعتمد الجهة قيمة رسمية.
+builder.Services.Configure<ClinicWorkspaceOptions>(
+    builder.Configuration.GetSection(ClinicWorkspaceOptions.SectionName));
 
 #endregion
 

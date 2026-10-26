@@ -76,6 +76,7 @@ public class AppDbContext : DbContext
     public DbSet<OrthopedicExamDetail> OrthopedicExamDetails { get; set; } = null!;
     public DbSet<EntExamDetail> EntExamDetails { get; set; } = null!;
     public DbSet<DeferredAction> DeferredActions { get; set; } = null!;
+    public DbSet<ClinicExamEditLock> ClinicExamEditLocks { get; set; } = null!;
     public DbSet<FinalDecision> FinalDecisions { get; set; } = null!;
     public DbSet<FinalDecisionHistory> FinalDecisionHistories { get; set; } = null!;
     public DbSet<SupervisorObjection> SupervisorObjections { get; set; } = null!;

@@ -911,6 +911,9 @@ public class MemberService : IMemberService
         if (query.FileNumber.HasValue)
             q = q.Where(m => m.FileNumber == query.FileNumber.Value);
 
+        if (query.QueueNumber.HasValue)
+            q = q.Where(m => m.QueueNumber == query.QueueNumber.Value);
+
         if (!string.IsNullOrWhiteSpace(query.RecruitmentNumber))
         {
             var term = query.RecruitmentNumber.Trim().ToLower();
@@ -980,6 +983,7 @@ public class MemberService : IMemberService
         if (!string.IsNullOrWhiteSpace(query.FullName)) criteria["fullName"] = query.FullName.Trim();
         if (!string.IsNullOrWhiteSpace(query.RecruitmentNumber))
             criteria["recruitmentNumber"] = query.RecruitmentNumber.Trim();
+        if (query.QueueNumber.HasValue) criteria["queueNumber"] = query.QueueNumber.Value;
         if (query.Date.HasValue) criteria["date"] = query.Date.Value.ToString("yyyy-MM-dd");
         if (query.FromDate.HasValue) criteria["fromDate"] = query.FromDate.Value.ToString("yyyy-MM-dd");
         if (query.ToDate.HasValue) criteria["toDate"] = query.ToDate.Value.ToString("yyyy-MM-dd");
