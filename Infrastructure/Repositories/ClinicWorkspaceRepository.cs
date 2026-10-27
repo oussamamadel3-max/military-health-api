@@ -67,4 +67,9 @@ public class ClinicWorkspaceRepository : IClinicWorkspaceRepository
         => asNoTracking ? _context.InternalExamDetails.AsNoTracking() : _context.InternalExamDetails;
 
     public void AddInternalExamDetail(InternalExamDetail detail) => _context.InternalExamDetails.Add(detail);
+
+    public IQueryable<SurgeryExamDetail> QuerySurgeryExamDetails(bool asNoTracking = true)
+        => asNoTracking ? _context.SurgeryExamDetails.AsNoTracking() : _context.SurgeryExamDetails;
+
+    public void AddSurgeryExamDetail(SurgeryExamDetail detail) => _context.SurgeryExamDetails.Add(detail);
 }

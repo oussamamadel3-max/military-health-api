@@ -2,6 +2,7 @@ using Application.Dtos.ClinicWorkspace;
 using Application.Dtos.Members;
 using Application.Exceptions;
 using Application.Interfaces;
+using Application.Interfaces.Services;
 using Application.Services.ClinicWorkspace;
 using Domain.Entities.Auth;
 using Domain.Entities.Clinical;

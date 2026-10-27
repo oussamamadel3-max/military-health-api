@@ -88,6 +88,7 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IClinicAssessmentService, ClinicAssessmentService>();
         services.AddScoped<IEyeExamService, EyeExamService>();
         services.AddScoped<IInternalExamService, InternalExamService>();
+        services.AddScoped<ISurgeryExamService, SurgeryExamService>();
         services.AddScoped<IReferenceCatalogHandler, RecruitmentCenterCatalogHandler>();
         services.AddScoped<IReferenceCatalogHandler, ClinicCatalogHandler>();
         services.AddScoped<IReferenceCatalogHandler, ResultStatusCatalogHandler>();
