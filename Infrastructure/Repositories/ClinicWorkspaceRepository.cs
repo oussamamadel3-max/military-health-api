@@ -72,4 +72,9 @@ public class ClinicWorkspaceRepository : IClinicWorkspaceRepository
         => asNoTracking ? _context.SurgeryExamDetails.AsNoTracking() : _context.SurgeryExamDetails;
 
     public void AddSurgeryExamDetail(SurgeryExamDetail detail) => _context.SurgeryExamDetails.Add(detail);
+
+    public IQueryable<OrthopedicExamDetail> QueryOrthopedicExamDetails(bool asNoTracking = true)
+        => asNoTracking ? _context.OrthopedicExamDetails.AsNoTracking() : _context.OrthopedicExamDetails;
+
+    public void AddOrthopedicExamDetail(OrthopedicExamDetail detail) => _context.OrthopedicExamDetails.Add(detail);
 }

@@ -44,4 +44,8 @@ public interface IClinicWorkspaceRepository
     IQueryable<SurgeryExamDetail> QuerySurgeryExamDetails(bool asNoTracking = true);
 
     void AddSurgeryExamDetail(SurgeryExamDetail detail);
+
+    IQueryable<OrthopedicExamDetail> QueryOrthopedicExamDetails(bool asNoTracking = true);
+
+    void AddOrthopedicExamDetail(OrthopedicExamDetail detail);
 }
