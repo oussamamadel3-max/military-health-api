@@ -70,3 +70,21 @@ public class EyeExamNotFoundException : BusinessException
     {
     }
 }
+
+/// <summary>يُرمى عند نقص أو تعارض بيانات فحص الباطنة (FR-035).</summary>
+public class InvalidInternalExamDataException : BusinessException
+{
+    public InvalidInternalExamDataException(string message)
+        : base(message, "INTERNAL_EXAM_INVALID_DATA", 400)
+    {
+    }
+}
+
+/// <summary>يُرمى عندما لا يُوجد فحص باطنة محفوظ للمنتسب في العيادة المطلوبة.</summary>
+public class InternalExamNotFoundException : BusinessException
+{
+    public InternalExamNotFoundException()
+        : base("لا يوجد فحص باطنة مسجّل لهذا المنتسب في العيادة.", "INTERNAL_EXAM_NOT_FOUND", 404)
+    {
+    }
+}

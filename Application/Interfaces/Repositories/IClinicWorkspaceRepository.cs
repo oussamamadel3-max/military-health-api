@@ -36,4 +36,8 @@ public interface IClinicWorkspaceRepository
     void AddEyeExamDetail(EyeExamDetail detail);
 
     void AddEyeRefractionDetail(EyeRefractionDetail detail);
+
+    IQueryable<InternalExamDetail> QueryInternalExamDetails(bool asNoTracking = true);
+
+    void AddInternalExamDetail(InternalExamDetail detail);
 }
