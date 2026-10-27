@@ -124,3 +124,21 @@ public class OrthopedicExamNotFoundException : BusinessException
     {
     }
 }
+
+/// <summary>يُرمى عند نقص أو تعارض بيانات فحص الأذنية (FR-038).</summary>
+public class InvalidEntExamDataException : BusinessException
+{
+    public InvalidEntExamDataException(string message)
+        : base(message, "ENT_EXAM_INVALID_DATA", 400)
+    {
+    }
+}
+
+/// <summary>يُرمى عندما لا يُوجد فحص أذنية محفوظ للمنتسب في العيادة المطلوبة.</summary>
+public class EntExamNotFoundException : BusinessException
+{
+    public EntExamNotFoundException()
+        : base("لا يوجد فحص أذنية مسجّل لهذا المنتسب في العيادة.", "ENT_EXAM_NOT_FOUND", 404)
+    {
+    }
+}

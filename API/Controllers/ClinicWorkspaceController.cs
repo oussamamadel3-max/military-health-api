@@ -12,7 +12,7 @@ namespace API.Controllers;
 
 /// <summary>
 /// مساحة عمل الطبيب: عيادات المسند، بحث/فتح الملف، حفظ التقييم، فحوصات العيادات، وتحرير قفل الفحص
-/// (FR-032 / FR-033 / FR-034 / FR-035 / FR-036 / FR-037 / FR-039 / FR-040 / FR-041 / FR-045).
+/// (FR-032 / FR-033 / FR-034 / FR-035 / FR-036 / FR-037 / FR-038 / FR-039 / FR-040 / FR-041 / FR-045).
 /// </summary>
 [ApiController]
 [Authorize]
@@ -25,6 +25,7 @@ public class ClinicWorkspaceController : ControllerBase
     private readonly IInternalExamService _internalExams;
     private readonly ISurgeryExamService _surgeryExams;
     private readonly IOrthopedicExamService _orthopedicExams;
+    private readonly IEntExamService _entExams;
 
     public ClinicWorkspaceController(
         IClinicWorkspaceService workspace,
@@ -32,7 +33,8 @@ public class ClinicWorkspaceController : ControllerBase
         IEyeExamService eyeExams,
         IInternalExamService internalExams,
         ISurgeryExamService surgeryExams,
-        IOrthopedicExamService orthopedicExams)
+        IOrthopedicExamService orthopedicExams,
+        IEntExamService entExams)
     {
         _workspace = workspace;
         _assessments = assessments;
@@ -40,6 +42,7 @@ public class ClinicWorkspaceController : ControllerBase
         _internalExams = internalExams;
         _surgeryExams = surgeryExams;
         _orthopedicExams = orthopedicExams;
+        _entExams = entExams;
     }
 
     /// <summary>عيادات الطبيب النشطة ضمن المركز النشط.</summary>
@@ -255,6 +258,41 @@ public class ClinicWorkspaceController : ControllerBase
             ClientCenterBinding.Read(Request),
             cancellationToken);
         return ApiResponse.Success("تم حفظ فحص العظمية بنجاح.", saved);
+    }
+
+    /// <summary>يعرض فحص الأذنية الحالي كما أُدخل (FR-038 / FR-039).</summary>
+    [HttpGet("members/{memberId:guid}/ent-exam")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Members.View, OperationScope.Local)]
+    public async Task<IResult> GetEntExam(
+        Guid memberId,
+        [FromQuery][Required] Guid clinicId,
+        CancellationToken cancellationToken = default)
+    {
+        var exam = await _entExams.GetAsync(
+            memberId,
+            clinicId,
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+        return ApiResponse.Success("تم جلب فحص الأذنية بنجاح.", exam);
+    }
+
+    /// <summary>
+    /// يحفظ تفاصيل فحص الأذنية وتقييم العيادة في عملية واحدة ويحرّر القفل
+    /// (FR-038 / شريحة تعديل FR-039).
+    /// </summary>
+    [HttpPost("members/{memberId:guid}/ent-exam")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Clinical.AssessmentWrite, OperationScope.Local)]
+    public async Task<IResult> SaveEntExam(
+        Guid memberId,
+        [FromBody] SaveEntExamRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var saved = await _entExams.SaveAsync(
+            memberId,
+            request,
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+        return ApiResponse.Success("تم حفظ فحص الأذنية بنجاح.", saved);
     }
 
     /// <summary>يحرّر قفل التحرير المملوك للطبيب الحالي دون حفظ تقييم.</summary>
