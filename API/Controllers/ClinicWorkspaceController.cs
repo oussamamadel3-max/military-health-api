@@ -11,8 +11,8 @@ using Microsoft.AspNetCore.Mvc;
 namespace API.Controllers;
 
 /// <summary>
-/// مساحة عمل الطبيب: عيادات المسند، بحث/فتح الملف، حفظ التقييم، فحص العيون، وتحرير قفل الفحص
-/// (FR-032 / FR-033 / FR-034 / FR-039 / FR-040 / FR-041 / FR-045).
+/// مساحة عمل الطبيب: عيادات المسند، بحث/فتح الملف، حفظ التقييم، فحص العيون/الباطنة، وتحرير قفل الفحص
+/// (FR-032 / FR-033 / FR-034 / FR-035 / FR-039 / FR-040 / FR-041 / FR-045).
 /// </summary>
 [ApiController]
 [Authorize]
@@ -22,15 +22,18 @@ public class ClinicWorkspaceController : ControllerBase
     private readonly IClinicWorkspaceService _workspace;
     private readonly IClinicAssessmentService _assessments;
     private readonly IEyeExamService _eyeExams;
+    private readonly IInternalExamService _internalExams;
 
     public ClinicWorkspaceController(
         IClinicWorkspaceService workspace,
         IClinicAssessmentService assessments,
-        IEyeExamService eyeExams)
+        IEyeExamService eyeExams,
+        IInternalExamService internalExams)
     {
         _workspace = workspace;
         _assessments = assessments;
         _eyeExams = eyeExams;
+        _internalExams = internalExams;
     }
 
     /// <summary>عيادات الطبيب النشطة ضمن المركز النشط.</summary>
@@ -141,6 +144,41 @@ public class ClinicWorkspaceController : ControllerBase
             ClientCenterBinding.Read(Request),
             cancellationToken);
         return ApiResponse.Success("تم حفظ فحص العيون بنجاح.", saved);
+    }
+
+    /// <summary>يعرض فحص الباطنة الحالي كما أُدخل (FR-035 / FR-039).</summary>
+    [HttpGet("members/{memberId:guid}/internal-exam")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Members.View, OperationScope.Local)]
+    public async Task<IResult> GetInternalExam(
+        Guid memberId,
+        [FromQuery][Required] Guid clinicId,
+        CancellationToken cancellationToken = default)
+    {
+        var exam = await _internalExams.GetAsync(
+            memberId,
+            clinicId,
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+        return ApiResponse.Success("تم جلب فحص الباطنة بنجاح.", exam);
+    }
+
+    /// <summary>
+    /// يحفظ تفاصيل فحص الباطنة وتقييم العيادة في عملية واحدة ويحرّر القفل
+    /// (FR-035 / شريحة تعديل FR-039).
+    /// </summary>
+    [HttpPost("members/{memberId:guid}/internal-exam")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Clinical.AssessmentWrite, OperationScope.Local)]
+    public async Task<IResult> SaveInternalExam(
+        Guid memberId,
+        [FromBody] SaveInternalExamRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var saved = await _internalExams.SaveAsync(
+            memberId,
+            request,
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+        return ApiResponse.Success("تم حفظ فحص الباطنة بنجاح.", saved);
     }
 
     /// <summary>يحرّر قفل التحرير المملوك للطبيب الحالي دون حفظ تقييم.</summary>

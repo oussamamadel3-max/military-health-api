@@ -62,4 +62,9 @@ public class ClinicWorkspaceRepository : IClinicWorkspaceRepository
     public void AddEyeExamDetail(EyeExamDetail detail) => _context.EyeExamDetails.Add(detail);
 
     public void AddEyeRefractionDetail(EyeRefractionDetail detail) => _context.EyeRefractionDetails.Add(detail);
+
+    public IQueryable<InternalExamDetail> QueryInternalExamDetails(bool asNoTracking = true)
+        => asNoTracking ? _context.InternalExamDetails.AsNoTracking() : _context.InternalExamDetails;
+
+    public void AddInternalExamDetail(InternalExamDetail detail) => _context.InternalExamDetails.Add(detail);
 }
