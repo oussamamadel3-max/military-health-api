@@ -88,3 +88,21 @@ public class InternalExamNotFoundException : BusinessException
     {
     }
 }
+
+/// <summary>يُرمى عند نقص أو تعارض بيانات فحص الجراحة (FR-036).</summary>
+public class InvalidSurgeryExamDataException : BusinessException
+{
+    public InvalidSurgeryExamDataException(string message)
+        : base(message, "SURGERY_EXAM_INVALID_DATA", 400)
+    {
+    }
+}
+
+/// <summary>يُرمى عندما لا يُوجد فحص جراحة محفوظ للمنتسب في العيادة المطلوبة.</summary>
+public class SurgeryExamNotFoundException : BusinessException
+{
+    public SurgeryExamNotFoundException()
+        : base("لا يوجد فحص جراحة مسجّل لهذا المنتسب في العيادة.", "SURGERY_EXAM_NOT_FOUND", 404)
+    {
+    }
+}
