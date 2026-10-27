@@ -11,8 +11,8 @@ using Microsoft.AspNetCore.Mvc;
 namespace API.Controllers;
 
 /// <summary>
-/// مساحة عمل الطبيب: عيادات المسند، بحث/فتح الملف، حفظ التقييم، وتحرير قفل الفحص
-/// (FR-032 / FR-040 / FR-041 / FR-045).
+/// مساحة عمل الطبيب: عيادات المسند، بحث/فتح الملف، حفظ التقييم، فحص العيون، وتحرير قفل الفحص
+/// (FR-032 / FR-033 / FR-034 / FR-039 / FR-040 / FR-041 / FR-045).
 /// </summary>
 [ApiController]
 [Authorize]
@@ -21,13 +21,16 @@ public class ClinicWorkspaceController : ControllerBase
 {
     private readonly IClinicWorkspaceService _workspace;
     private readonly IClinicAssessmentService _assessments;
+    private readonly IEyeExamService _eyeExams;
 
     public ClinicWorkspaceController(
         IClinicWorkspaceService workspace,
-        IClinicAssessmentService assessments)
+        IClinicAssessmentService assessments,
+        IEyeExamService eyeExams)
     {
         _workspace = workspace;
         _assessments = assessments;
+        _eyeExams = eyeExams;
     }
 
     /// <summary>عيادات الطبيب النشطة ضمن المركز النشط.</summary>
@@ -103,6 +106,41 @@ public class ClinicWorkspaceController : ControllerBase
             ClientCenterBinding.Read(Request),
             cancellationToken);
         return ApiResponse.Success("تم حفظ تقييم العيادة بنجاح.", saved);
+    }
+
+    /// <summary>يعرض فحص العيون الحالي والانكسارات كما أُدخلت (FR-033 / FR-039).</summary>
+    [HttpGet("members/{memberId:guid}/eye-exam")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Members.View, OperationScope.Local)]
+    public async Task<IResult> GetEyeExam(
+        Guid memberId,
+        [FromQuery][Required] Guid clinicId,
+        CancellationToken cancellationToken = default)
+    {
+        var exam = await _eyeExams.GetAsync(
+            memberId,
+            clinicId,
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+        return ApiResponse.Success("تم جلب فحص العيون بنجاح.", exam);
+    }
+
+    /// <summary>
+    /// يحفظ تفاصيل فحص العيون والانكسار وتقييم العيادة في عملية واحدة ويحرّر القفل
+    /// (FR-033 / FR-034 / شريحة تعديل FR-039).
+    /// </summary>
+    [HttpPost("members/{memberId:guid}/eye-exam")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Clinical.AssessmentWrite, OperationScope.Local)]
+    public async Task<IResult> SaveEyeExam(
+        Guid memberId,
+        [FromBody] SaveEyeExamRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var saved = await _eyeExams.SaveAsync(
+            memberId,
+            request,
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+        return ApiResponse.Success("تم حفظ فحص العيون بنجاح.", saved);
     }
 
     /// <summary>يحرّر قفل التحرير المملوك للطبيب الحالي دون حفظ تقييم.</summary>

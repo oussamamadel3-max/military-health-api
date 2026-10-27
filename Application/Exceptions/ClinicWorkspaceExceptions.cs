@@ -52,3 +52,21 @@ public class DuplicateCurrentMedicalExamException : BusinessException
     {
     }
 }
+
+/// <summary>يُرمى عند نقص أو تعارض بيانات فحص العيون أو الانكسار (FR-033 / FR-034).</summary>
+public class InvalidEyeExamDataException : BusinessException
+{
+    public InvalidEyeExamDataException(string message)
+        : base(message, "EYE_EXAM_INVALID_DATA", 400)
+    {
+    }
+}
+
+/// <summary>يُرمى عندما لا يُوجد فحص عيون محفوظ للمنتسب في العيادة المطلوبة.</summary>
+public class EyeExamNotFoundException : BusinessException
+{
+    public EyeExamNotFoundException()
+        : base("لا يوجد فحص عيون مسجّل لهذا المنتسب في العيادة.", "EYE_EXAM_NOT_FOUND", 404)
+    {
+    }
+}
