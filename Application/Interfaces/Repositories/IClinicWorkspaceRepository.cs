@@ -28,4 +28,12 @@ public interface IClinicWorkspaceRepository
     void AddClinicAssessment(ClinicAssessment assessment);
 
     void AddDeferredAction(DeferredAction deferredAction);
+
+    IQueryable<EyeExamDetail> QueryEyeExamDetails(bool asNoTracking = true);
+
+    IQueryable<EyeRefractionDetail> QueryEyeRefractionDetails(bool asNoTracking = true);
+
+    void AddEyeExamDetail(EyeExamDetail detail);
+
+    void AddEyeRefractionDetail(EyeRefractionDetail detail);
 }

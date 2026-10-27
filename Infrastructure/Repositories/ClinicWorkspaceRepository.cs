@@ -52,4 +52,14 @@ public class ClinicWorkspaceRepository : IClinicWorkspaceRepository
     public void AddClinicAssessment(ClinicAssessment assessment) => _context.ClinicAssessments.Add(assessment);
 
     public void AddDeferredAction(DeferredAction deferredAction) => _context.DeferredActions.Add(deferredAction);
+
+    public IQueryable<EyeExamDetail> QueryEyeExamDetails(bool asNoTracking = true)
+        => asNoTracking ? _context.EyeExamDetails.AsNoTracking() : _context.EyeExamDetails;
+
+    public IQueryable<EyeRefractionDetail> QueryEyeRefractionDetails(bool asNoTracking = true)
+        => asNoTracking ? _context.EyeRefractionDetails.AsNoTracking() : _context.EyeRefractionDetails;
+
+    public void AddEyeExamDetail(EyeExamDetail detail) => _context.EyeExamDetails.Add(detail);
+
+    public void AddEyeRefractionDetail(EyeRefractionDetail detail) => _context.EyeRefractionDetails.Add(detail);
 }
