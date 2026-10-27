@@ -106,3 +106,21 @@ public class SurgeryExamNotFoundException : BusinessException
     {
     }
 }
+
+/// <summary>يُرمى عند نقص أو تعارض بيانات فحص العظمية (FR-037).</summary>
+public class InvalidOrthopedicExamDataException : BusinessException
+{
+    public InvalidOrthopedicExamDataException(string message)
+        : base(message, "ORTHOPEDIC_EXAM_INVALID_DATA", 400)
+    {
+    }
+}
+
+/// <summary>يُرمى عندما لا يُوجد فحص عظمية محفوظ للمنتسب في العيادة المطلوبة.</summary>
+public class OrthopedicExamNotFoundException : BusinessException
+{
+    public OrthopedicExamNotFoundException()
+        : base("لا يوجد فحص عظمية مسجّل لهذا المنتسب في العيادة.", "ORTHOPEDIC_EXAM_NOT_FOUND", 404)
+    {
+    }
+}
