@@ -694,6 +694,10 @@ public class EyeExamService : IEyeExamService
             .Where(d => d.ClinicAssessmentId == assessmentId && d.Status != "CLOSED")
             .ToListAsync(cancellationToken);
 
+        // FR-042: لا تُعاد التقييم خارج المؤجل قبل إتمام الإجراء المطلوب.
+        if (openActions.Any(a => string.Equals(a.Status, "REQUESTED", StringComparison.OrdinalIgnoreCase)))
+            throw new DeferredActionNotCompletedException();
+
         foreach (var action in openActions)
         {
             action.Status = "CLOSED";

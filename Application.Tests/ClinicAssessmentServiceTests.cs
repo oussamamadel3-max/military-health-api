@@ -212,6 +212,48 @@ public class ClinicAssessmentServiceTests
     }
 
     [Fact]
+    public async Task Leave_deferred_while_requested_is_rejected()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, "DEF-GATE1");
+        await AcquireLockAsync(db, memberId, ClinicEyes, "actor-1");
+        var service = CreateService(db, CenterA, "actor-1");
+        await service.SaveAsync(memberId, DeferredRequest(ClinicEyes));
+
+        await AcquireLockAsync(db, memberId, ClinicEyes, "actor-1");
+        await Assert.ThrowsAsync<DeferredActionNotCompletedException>(() =>
+            service.SaveAsync(memberId, AcceptedRequest(ClinicEyes)));
+
+        db.ChangeTracker.Clear();
+        Assert.Equal("REQUESTED", Assert.Single(await db.DeferredActions.AsNoTracking().ToListAsync()).Status);
+        Assert.Equal(3, Assert.Single(await db.ClinicAssessments.AsNoTracking().ToListAsync()).ResultStatusId);
+    }
+
+    [Fact]
+    public async Task Leave_deferred_after_completed_closes_action()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, "DEF-GATE2");
+        await AcquireLockAsync(db, memberId, ClinicEyes, "actor-1");
+        var service = CreateService(db, CenterA, "actor-1");
+        var deferred = await service.SaveAsync(memberId, DeferredRequest(ClinicEyes));
+
+        var action = await db.DeferredActions.SingleAsync(d => d.DeferredActionId == deferred.DeferredActionId);
+        action.Status = "COMPLETED";
+        action.CompletedByUserId = "actor-1";
+        action.CompletedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+
+        await AcquireLockAsync(db, memberId, ClinicEyes, "actor-1");
+        var accepted = await service.SaveAsync(memberId, AcceptedRequest(ClinicEyes));
+
+        Assert.Equal(1, accepted.ResultStatusId);
+        Assert.Equal("CLOSED", Assert.Single(await db.DeferredActions.ToListAsync()).Status);
+    }
+
+    [Fact]
     public async Task Release_lock_removes_owned_lock()
     {
         await using var db = MemberServiceTests.CreateDb();

@@ -142,3 +142,33 @@ public class EntExamNotFoundException : BusinessException
     {
     }
 }
+
+/// <summary>يُرمى عندما لا يُوجد إجراء مؤجّل ضمن نطاق العيادة والمركز المخوّلين.</summary>
+public class DeferredActionNotFoundException : BusinessException
+{
+    public DeferredActionNotFoundException()
+        : base("الإجراء المؤجّل غير موجود ضمن نطاق العيادة والمركز.", "DEFERRED_ACTION_NOT_FOUND", 404)
+    {
+    }
+}
+
+/// <summary>يُرمى عند محاولة إكمال إجراء ليس بحالة مطلوب أو خارج نطاق الإكمال.</summary>
+public class InvalidDeferredActionStateException : BusinessException
+{
+    public InvalidDeferredActionStateException(string message)
+        : base(message, "DEFERRED_ACTION_INVALID_STATE", 400)
+    {
+    }
+}
+
+/// <summary>يُرمى عند محاولة مغادرة تقييم مؤجّل قبل إتمام الإجراء المطلوب (FR-042).</summary>
+public class DeferredActionNotCompletedException : BusinessException
+{
+    public DeferredActionNotCompletedException()
+        : base(
+            "يجب إتمام الإجراء المطلوب قبل إعادة التقييم وتغيير نتيجة التأجيل.",
+            "DEFERRED_ACTION_NOT_COMPLETED",
+            409)
+    {
+    }
+}
