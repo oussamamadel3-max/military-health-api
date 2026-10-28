@@ -1,5 +1,6 @@
 using System.Net;
 using Application.Common.Permissions;
+using Application.Common.Results;
 using Application.Common.Security;
 using Application.Dtos.ClinicWorkspace;
 using Application.Exceptions;
@@ -14,8 +15,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Application.Services.ClinicWorkspace;
 
 /// <summary>
-/// حفظ وعرض فحص الباطنة مع تقييم العيادة في معاملة واحدة
-/// (FR-035 / شريحة FR-039 لعيادة الباطنة).
+/// حفظ وعرض وفهرسة فحص الباطنة مع تقييم العيادة
+/// (FR-035 / شريحة قائمة وعرض وتعديل FR-039 لعيادة الباطنة).
 /// </summary>
 public class InternalExamService : IInternalExamService
 {
@@ -269,6 +270,128 @@ public class InternalExamService : IInternalExamService
             throw new InternalExamNotFoundException();
 
         return await BuildDtoAsync(exam.ExamId, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<PaginatedList<InternalExamListItemDto>> ListAsync(
+        ClinicExamListQuery query,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var (fileNumber, pageNumber, pageSize) = ClinicExamListSupport.NormalizeListQuery(
+            query,
+            message => new InvalidInternalExamDataException(message));
+
+        var centerId = await _permissionGate.EnsureLocalAsync(
+            MilitaryHealthPermissions.Members.View,
+            clientCenterId,
+            cancellationToken);
+
+        var userId = RequireUserId();
+        await EnsureDoctorInternalClinicAsync(centerId, query.ClinicId, userId, cancellationToken);
+
+        var source = _clinicWorkspace.QueryInternalExamDetails()
+            .Where(d => d.Exam.CenterId == centerId
+                && d.Exam.ClinicId == query.ClinicId
+                && d.Exam.IsCurrent);
+
+        if (fileNumber.HasValue)
+            source = source.Where(d => d.Exam.Member.FileNumber == fileNumber.Value);
+
+        if (!string.IsNullOrWhiteSpace(query.RecruitmentNumber))
+        {
+            var recruitment = query.RecruitmentNumber.Trim();
+            source = source.Where(d => d.Exam.Member.RecruitmentNumber == recruitment);
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.FullName))
+        {
+            var name = query.FullName.Trim();
+            source = source.Where(d => d.Exam.Member.FullName.Contains(name));
+        }
+
+        var totalCount = await source.CountAsync(cancellationToken);
+
+        var rows = await source
+            .OrderByDescending(d => d.Exam.ExaminedAt)
+            .ThenByDescending(d => d.Exam.Member.FileNumber)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .Select(d => new
+            {
+                d.ExamId,
+                d.Exam.MemberId,
+                d.Exam.Member.FileNumber,
+                d.Exam.Member.FullName,
+                d.Cardiovascular,
+                d.Respiratory,
+                d.Digestive,
+                d.Endocrine,
+                d.Neurological,
+                d.Hematology,
+                d.Joints,
+                d.Renal,
+                d.Skin,
+                d.Exam.ExaminerUserId,
+                ExaminerUserName = d.Exam.ExaminerUser.FullName ?? d.Exam.ExaminerUser.UserName,
+                d.Exam.ExaminedAt
+            })
+            .ToListAsync(cancellationToken);
+
+        var assessments = await LoadAssessmentNamesAsync(
+            rows.Select(r => r.ExamId).ToList(),
+            cancellationToken);
+
+        var items = rows.Select(r =>
+        {
+            short? resultStatusId = null;
+            string? resultStatusNameAr = null;
+            if (assessments.TryGetValue(r.ExamId, out var assessment))
+            {
+                resultStatusId = assessment.ResultStatusId;
+                resultStatusNameAr = assessment.NameAr;
+            }
+
+            return new InternalExamListItemDto
+            {
+                ExamId = r.ExamId,
+                MemberId = r.MemberId,
+                FileNumber = r.FileNumber,
+                FullName = r.FullName,
+                Cardiovascular = r.Cardiovascular,
+                Respiratory = r.Respiratory,
+                Digestive = r.Digestive,
+                Endocrine = r.Endocrine,
+                Neurological = r.Neurological,
+                Hematology = r.Hematology,
+                Joints = r.Joints,
+                Renal = r.Renal,
+                Skin = r.Skin,
+                ResultStatusId = resultStatusId,
+                ResultStatusNameAr = resultStatusNameAr,
+                ExaminerUserId = r.ExaminerUserId,
+                ExaminerUserName = r.ExaminerUserName,
+                ExaminedAt = r.ExaminedAt
+            };
+        }).ToList();
+
+        return new PaginatedList<InternalExamListItemDto>(items, totalCount, pageNumber, pageSize);
+    }
+
+    private async Task<Dictionary<Guid, (short ResultStatusId, string NameAr)>> LoadAssessmentNamesAsync(
+        IReadOnlyList<Guid> examIds,
+        CancellationToken cancellationToken)
+    {
+        if (examIds.Count == 0)
+            return new Dictionary<Guid, (short, string)>();
+
+        return await _clinicWorkspace.QueryClinicAssessments()
+            .Where(a => examIds.Contains(a.ExamId))
+            .Select(a => new { a.ExamId, a.ResultStatusId, NameAr = a.ResultStatus.NameAr })
+            .ToDictionaryAsync(
+                a => a.ExamId,
+                a => (a.ResultStatusId, a.NameAr),
+                cancellationToken);
     }
 
     #region Internal detail

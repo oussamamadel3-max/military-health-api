@@ -258,6 +258,26 @@ public class SurgeryExamServiceTests
     }
 
     [Fact]
+    public async Task List_returns_current_surgery_exams()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, "SUR-LIST");
+        await AcquireLockAsync(db, memberId, ClinicSurgery, "actor-1");
+        var service = CreateService(db, CenterA, "actor-1");
+        await service.SaveAsync(memberId, AcceptedSurgeryRequest());
+
+        var page = await service.ListAsync(new ClinicExamListQuery { ClinicId = ClinicSurgery });
+
+        var item = Assert.Single(page.Items);
+        Assert.Equal(memberId, item.MemberId);
+        Assert.Equal("طبيعي", item.GeneralSurgery);
+        Assert.Equal("طبيعي", item.Urology);
+        Assert.Equal((short)1, item.ResultStatusId);
+        Assert.Equal("مقبول", item.ResultStatusNameAr);
+    }
+
+    [Fact]
     public async Task Save_second_pass_keeps_single_current_exam()
     {
         await using var db = MemberServiceTests.CreateDb();

@@ -19,6 +19,7 @@ namespace Application.Tests;
 public class EyeExamServiceTests
 {
     private static readonly Guid CenterA = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+    private static readonly Guid CenterB = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
     private static readonly Guid ClinicEyes = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid ClinicEnt = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid RecruitmentCenterId = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
@@ -329,6 +330,126 @@ public class EyeExamServiceTests
     }
 
     [Fact]
+    public async Task List_returns_current_eye_exams_with_assessment_columns()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, "EYE-LIST1");
+        await AcquireLockAsync(db, memberId, ClinicEyes, "actor-1");
+        var service = CreateService(db, CenterA, "actor-1");
+        await service.SaveAsync(memberId, AcceptedEyeRequest());
+
+        var page = await service.ListAsync(new EyeExamListQuery { ClinicId = ClinicEyes });
+
+        var item = Assert.Single(page.Items);
+        Assert.Equal(memberId, item.MemberId);
+        Assert.Equal("6/6", item.VisualAcuityRight);
+        Assert.Equal("6/9", item.VisualAcuityLeft);
+        Assert.Equal("طبيعي", item.ColorTestResult);
+        Assert.Equal((short)1, item.ResultStatusId);
+        Assert.Equal("مقبول", item.ResultStatusNameAr);
+        Assert.Equal("actor-1", item.ExaminerUserId);
+    }
+
+    [Fact]
+    public async Task List_filters_by_file_number_and_paginates()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var firstId = await CreateMemberAsync(db, "EYE-P1");
+        var secondId = await CreateMemberAsync(db, "EYE-P2");
+        var service = CreateService(db, CenterA, "actor-1");
+
+        await AcquireLockAsync(db, firstId, ClinicEyes, "actor-1");
+        await service.SaveAsync(firstId, AcceptedEyeRequest());
+        await AcquireLockAsync(db, secondId, ClinicEyes, "actor-1");
+        await service.SaveAsync(secondId, AcceptedEyeRequest());
+
+        var firstMember = await db.Members.AsNoTracking().SingleAsync(m => m.MemberId == firstId);
+        var filtered = await service.ListAsync(new EyeExamListQuery
+        {
+            ClinicId = ClinicEyes,
+            FileNumber = firstMember.FileNumber
+        });
+        Assert.Equal(firstId, Assert.Single(filtered.Items).MemberId);
+
+        var page = await service.ListAsync(new EyeExamListQuery
+        {
+            ClinicId = ClinicEyes,
+            PageNumber = 1,
+            PageSize = 1
+        });
+        Assert.Equal(2, page.TotalCount);
+        Assert.Single(page.Items);
+        Assert.True(page.HasNextPage);
+    }
+
+    [Fact]
+    public async Task List_rejects_non_eye_clinic()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        await SeedDoctorAssignmentAsync(db, "actor-1", CenterA, ClinicEnt);
+        var service = CreateService(db, CenterA, "actor-1");
+
+        await Assert.ThrowsAsync<InvalidEyeExamDataException>(() =>
+            service.ListAsync(new EyeExamListQuery { ClinicId = ClinicEnt }));
+    }
+
+    [Fact]
+    public async Task List_hides_exams_from_other_center()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        await SeedCenterClinicAsync(db, CenterB, ClinicEyes);
+        await SeedDoctorAssignmentAsync(db, "actor-1", CenterB, ClinicEyes);
+
+        var membersB = MemberServiceTests.CreateService(db, CenterB, allowCreate: true, allowView: true);
+        var other = await membersB.CreateAsync(new CreateMemberRequest
+        {
+            FullName = "منتسب مركز آخر",
+            MotherName = "الأم",
+            BirthDate = DateOnly.FromDateTime(DateTime.UtcNow).AddYears(-25),
+            MaritalStatusId = 1,
+            Occupation = "موظف",
+            RecruitmentNumber = "EYE-XB",
+            RecruitmentCenterId = RecruitmentCenterId,
+            BloodTypeId = 1,
+            HeightCm = 170,
+            WeightKg = 66,
+            BloodPressure = "120/80",
+            PulseBpm = 72,
+            HasTattoo = false
+        });
+
+        var serviceB = CreateService(db, CenterB, "actor-1");
+        await AcquireLockAsync(db, other.MemberId, ClinicEyes, "actor-1", CenterB);
+        await serviceB.SaveAsync(other.MemberId, AcceptedEyeRequest());
+
+        var localId = await CreateMemberAsync(db, "EYE-XA");
+        var serviceA = CreateService(db, CenterA, "actor-1");
+        await AcquireLockAsync(db, localId, ClinicEyes, "actor-1");
+        await serviceA.SaveAsync(localId, AcceptedEyeRequest());
+
+        var page = await serviceA.ListAsync(new EyeExamListQuery { ClinicId = ClinicEyes });
+
+        Assert.Equal(localId, Assert.Single(page.Items).MemberId);
+    }
+
+    [Fact]
+    public async Task List_empty_returns_no_items()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var service = CreateService(db, CenterA, "actor-1");
+
+        var page = await service.ListAsync(new EyeExamListQuery { ClinicId = ClinicEyes });
+
+        Assert.Empty(page.Items);
+        Assert.Equal(0, page.TotalCount);
+    }
+
+    [Fact]
     public async Task Save_second_pass_updates_same_current_exam()
     {
         await using var db = MemberServiceTests.CreateDb();
@@ -461,7 +582,12 @@ public class EyeExamServiceTests
         return created.MemberId;
     }
 
-    private static async Task AcquireLockAsync(AppDbContext db, Guid memberId, Guid clinicId, string userId)
+    private static async Task AcquireLockAsync(
+        AppDbContext db,
+        Guid memberId,
+        Guid clinicId,
+        string userId,
+        Guid? centerId = null)
     {
         var existing = await db.ClinicExamEditLocks
             .FirstOrDefaultAsync(l => l.MemberId == memberId && l.ClinicId == clinicId);
@@ -473,7 +599,7 @@ public class EyeExamServiceTests
         {
             LockId = Guid.NewGuid(),
             MemberId = memberId,
-            CenterId = CenterA,
+            CenterId = centerId ?? CenterA,
             ClinicId = clinicId,
             LockedByUserId = userId,
             LockedAt = now,

@@ -264,6 +264,38 @@ public class InternalExamServiceTests
     }
 
     [Fact]
+    public async Task List_returns_current_internal_exams()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, "INT-LIST");
+        await AcquireLockAsync(db, memberId, ClinicInternal, "actor-1");
+        var service = CreateService(db, CenterA, "actor-1");
+        await service.SaveAsync(memberId, AcceptedInternalRequest());
+
+        var page = await service.ListAsync(new ClinicExamListQuery { ClinicId = ClinicInternal });
+
+        var item = Assert.Single(page.Items);
+        Assert.Equal(memberId, item.MemberId);
+        Assert.Equal("طبيعي", item.Cardiovascular);
+        Assert.Equal("طبيعي", item.Neurological);
+        Assert.Equal((short)1, item.ResultStatusId);
+        Assert.Equal("مقبول", item.ResultStatusNameAr);
+    }
+
+    [Fact]
+    public async Task List_rejects_non_internal_clinic()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        await SeedDoctorAssignmentAsync(db, "actor-1", CenterA, ClinicEyes);
+        var service = CreateService(db, CenterA, "actor-1");
+
+        await Assert.ThrowsAsync<InvalidInternalExamDataException>(() =>
+            service.ListAsync(new ClinicExamListQuery { ClinicId = ClinicEyes }));
+    }
+
+    [Fact]
     public async Task Save_second_pass_keeps_single_current_exam()
     {
         await using var db = MemberServiceTests.CreateDb();

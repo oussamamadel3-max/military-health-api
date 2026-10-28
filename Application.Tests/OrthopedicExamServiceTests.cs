@@ -255,6 +255,26 @@ public class OrthopedicExamServiceTests
     }
 
     [Fact]
+    public async Task List_returns_current_orthopedic_exams()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, "ORT-LIST");
+        await AcquireLockAsync(db, memberId, ClinicOrtho, "actor-1");
+        var service = CreateService(db, CenterA, "actor-1");
+        await service.SaveAsync(memberId, AcceptedOrthopedicRequest());
+
+        var page = await service.ListAsync(new ClinicExamListQuery { ClinicId = ClinicOrtho });
+
+        var item = Assert.Single(page.Items);
+        Assert.Equal(memberId, item.MemberId);
+        Assert.Equal("أطراف وعمود فقري ومفاصل طبيعية", item.Musculoskeletal);
+        Assert.Equal("حركة وإحساس طبيعيان", item.Neurosurgery);
+        Assert.Equal((short)1, item.ResultStatusId);
+        Assert.Equal("مقبول", item.ResultStatusNameAr);
+    }
+
+    [Fact]
     public async Task Save_second_pass_keeps_single_current_exam()
     {
         await using var db = MemberServiceTests.CreateDb();

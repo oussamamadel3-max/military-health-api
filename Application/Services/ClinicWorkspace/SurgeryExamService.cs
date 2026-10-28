@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using Application.Common.Permissions;
+using Application.Common.Results;
 using Application.Common.Security;
 using Application.Dtos.ClinicWorkspace;
 using Application.Exceptions;
@@ -14,8 +15,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Application.Services.ClinicWorkspace;
 
 /// <summary>
-/// حفظ وعرض فحص الجراحة مع تقييم العيادة في معاملة واحدة
-/// (FR-036 / شريحة FR-039 لعيادة الجراحة).
+/// حفظ وعرض وفهرسة فحص الجراحة مع تقييم العيادة
+/// (FR-036 / شريحة قائمة وعرض وتعديل FR-039 لعيادة الجراحة).
 /// </summary>
 public class SurgeryExamService : ISurgeryExamService
 {
@@ -268,6 +269,104 @@ public class SurgeryExamService : ISurgeryExamService
             throw new SurgeryExamNotFoundException();
 
         return await BuildDtoAsync(exam.ExamId, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<PaginatedList<SurgeryExamListItemDto>> ListAsync(
+        ClinicExamListQuery query,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var (fileNumber, pageNumber, pageSize) = ClinicExamListSupport.NormalizeListQuery(
+            query,
+            message => new InvalidSurgeryExamDataException(message));
+
+        var centerId = await _permissionGate.EnsureLocalAsync(
+            MilitaryHealthPermissions.Members.View,
+            clientCenterId,
+            cancellationToken);
+
+        var userId = RequireUserId();
+        await EnsureDoctorSurgeryClinicAsync(centerId, query.ClinicId, userId, cancellationToken);
+
+        var source = _clinicWorkspace.QuerySurgeryExamDetails()
+            .Where(d => d.Exam.CenterId == centerId
+                && d.Exam.ClinicId == query.ClinicId
+                && d.Exam.IsCurrent);
+
+        if (fileNumber.HasValue)
+            source = source.Where(d => d.Exam.Member.FileNumber == fileNumber.Value);
+
+        if (!string.IsNullOrWhiteSpace(query.RecruitmentNumber))
+        {
+            var recruitment = query.RecruitmentNumber.Trim();
+            source = source.Where(d => d.Exam.Member.RecruitmentNumber == recruitment);
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.FullName))
+        {
+            var name = query.FullName.Trim();
+            source = source.Where(d => d.Exam.Member.FullName.Contains(name));
+        }
+
+        var totalCount = await source.CountAsync(cancellationToken);
+
+        var rows = await source
+            .OrderByDescending(d => d.Exam.ExaminedAt)
+            .ThenByDescending(d => d.Exam.Member.FileNumber)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .Select(d => new
+            {
+                d.ExamId,
+                d.Exam.MemberId,
+                d.Exam.Member.FileNumber,
+                d.Exam.Member.FullName,
+                d.GeneralSurgery,
+                d.Urology,
+                d.VascularThoracic,
+                d.Exam.ExaminerUserId,
+                ExaminerUserName = d.Exam.ExaminerUser.FullName ?? d.Exam.ExaminerUser.UserName,
+                d.Exam.ExaminedAt
+            })
+            .ToListAsync(cancellationToken);
+
+        var examIds = rows.Select(r => r.ExamId).ToList();
+        var assessments = examIds.Count == 0
+            ? new Dictionary<Guid, (short ResultStatusId, string NameAr)>()
+            : await _clinicWorkspace.QueryClinicAssessments()
+                .Where(a => examIds.Contains(a.ExamId))
+                .Select(a => new { a.ExamId, a.ResultStatusId, NameAr = a.ResultStatus.NameAr })
+                .ToDictionaryAsync(a => a.ExamId, a => (a.ResultStatusId, a.NameAr), cancellationToken);
+
+        var items = rows.Select(r =>
+        {
+            short? resultStatusId = null;
+            string? resultStatusNameAr = null;
+            if (assessments.TryGetValue(r.ExamId, out var assessment))
+            {
+                resultStatusId = assessment.ResultStatusId;
+                resultStatusNameAr = assessment.NameAr;
+            }
+
+            return new SurgeryExamListItemDto
+            {
+                ExamId = r.ExamId,
+                MemberId = r.MemberId,
+                FileNumber = r.FileNumber,
+                FullName = r.FullName,
+                GeneralSurgery = r.GeneralSurgery,
+                Urology = r.Urology,
+                VascularThoracic = r.VascularThoracic,
+                ResultStatusId = resultStatusId,
+                ResultStatusNameAr = resultStatusNameAr,
+                ExaminerUserId = r.ExaminerUserId,
+                ExaminerUserName = r.ExaminerUserName,
+                ExaminedAt = r.ExaminedAt
+            };
+        }).ToList();
+
+        return new PaginatedList<SurgeryExamListItemDto>(items, totalCount, pageNumber, pageSize);
     }
 
     #region Surgery detail
