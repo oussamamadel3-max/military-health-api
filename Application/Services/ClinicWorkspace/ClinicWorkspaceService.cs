@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using Application.Common.Options;
 using Application.Common.Permissions;
 using Application.Common.Results;
@@ -486,8 +487,8 @@ public class ClinicWorkspaceService : IClinicWorkspaceService
             EntityType = nameof(DeferredAction),
             EntityId = action.DeferredActionId.ToString(),
             ReasonText = $"إتمام إجراء مؤجّل للمنتسب {action.MemberId:D} في العيادة {clinicId:D}",
-            OldValues = DeferredStatusRequested,
-            NewValues = DeferredStatusCompleted,
+            OldValues = JsonSerializer.Serialize(DeferredStatusRequested),
+            NewValues = JsonSerializer.Serialize(DeferredStatusCompleted),
             UserAgent = _currentUser.UserAgent,
             CorrelationId = _currentUser.CorrelationId == Guid.Empty
                 ? Guid.NewGuid()
@@ -837,8 +838,9 @@ public class ClinicWorkspaceService : IClinicWorkspaceService
             EntityType = nameof(MemberGeneralNote),
             EntityId = noteId.ToString(),
             ReasonText = $"حفظ ملاحظة عامة للمنتسب {memberId:D} من العيادة {clinicId:D}",
-            OldValues = previousText,
-            NewValues = newText,
+            // jsonb يتطلب تمثيلاً JSON صالحاً؛ النص الخام (عربي/فارغ) يرفضه PostgreSQL بـ 22P02.
+            OldValues = previousText is null ? null : JsonSerializer.Serialize(previousText),
+            NewValues = JsonSerializer.Serialize(newText),
             UserAgent = _currentUser.UserAgent,
             CorrelationId = _currentUser.CorrelationId == Guid.Empty
                 ? Guid.NewGuid()

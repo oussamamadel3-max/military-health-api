@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Application.Common.Options;
 using Application.Common.Permissions;
 using Application.Dtos.ClinicWorkspace;
@@ -283,8 +284,13 @@ public class ClinicWorkspaceServiceTests
         Assert.Equal("حساسية بنسلين", saved.NoteText);
         Assert.Equal("actor-1", saved.AuthorUserId);
         Assert.Equal(ClinicEyes, saved.AuthorClinicId);
-        Assert.Equal(1, await db.AuditEvents.CountAsync(e =>
-            e.EventType == ClinicWorkspaceService.GeneralNoteSavedEventType));
+
+        var savedAudit = Assert.Single(await db.AuditEvents
+            .Where(e => e.EventType == ClinicWorkspaceService.GeneralNoteSavedEventType)
+            .OrderBy(e => e.OccurredAt)
+            .ToListAsync());
+        Assert.Null(savedAudit.OldValues);
+        Assert.Equal(JsonSerializer.Serialize("حساسية بنسلين"), savedAudit.NewValues);
 
         var open = await workspace.OpenMemberAsync(created.MemberId, ClinicEyes);
         Assert.NotNull(open.LatestGeneralNote);
@@ -297,6 +303,14 @@ public class ClinicWorkspaceServiceTests
         Assert.False(cleared.HasGeneralNotesAlert);
         Assert.Equal(string.Empty, cleared.NoteText);
         Assert.Equal(1, await db.MemberGeneralNotes.CountAsync());
+
+        var noteAudits = await db.AuditEvents
+            .Where(e => e.EventType == ClinicWorkspaceService.GeneralNoteSavedEventType)
+            .OrderBy(e => e.OccurredAt)
+            .ToListAsync();
+        Assert.Equal(2, noteAudits.Count);
+        Assert.Equal(JsonSerializer.Serialize("حساسية بنسلين"), noteAudits[1].OldValues);
+        Assert.Equal(JsonSerializer.Serialize(string.Empty), noteAudits[1].NewValues);
 
         var reopened = await workspace.OpenMemberAsync(created.MemberId, ClinicEyes);
         Assert.Null(reopened.LatestGeneralNote);
@@ -416,8 +430,10 @@ public class ClinicWorkspaceServiceTests
         var action = Assert.Single(await db.DeferredActions.ToListAsync());
         Assert.Equal("COMPLETED", action.Status);
         Assert.Equal(3, Assert.Single(await db.ClinicAssessments.ToListAsync()).ResultStatusId);
-        Assert.Equal(1, await db.AuditEvents.CountAsync(e =>
-            e.EventType == ClinicWorkspaceService.DeferredActionCompletedEventType));
+        var deferredAudit = Assert.Single(await db.AuditEvents.Where(e =>
+            e.EventType == ClinicWorkspaceService.DeferredActionCompletedEventType).ToListAsync());
+        Assert.Equal(JsonSerializer.Serialize(ClinicWorkspaceService.DeferredStatusRequested), deferredAudit.OldValues);
+        Assert.Equal(JsonSerializer.Serialize(ClinicWorkspaceService.DeferredStatusCompleted), deferredAudit.NewValues);
 
         var open = await workspace.OpenMemberAsync(created.MemberId, ClinicEyes);
         Assert.Equal(ClinicExamStatusCodes.Deferred, open.ClinicExamStatus);
