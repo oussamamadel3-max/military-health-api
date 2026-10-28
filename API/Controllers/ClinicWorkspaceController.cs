@@ -11,8 +11,8 @@ using Microsoft.AspNetCore.Mvc;
 namespace API.Controllers;
 
 /// <summary>
-/// مساحة عمل الطبيب: عيادات المسند، بحث/فتح الملف، الملاحظات العامة، متابعة المؤجلات،
-/// حفظ التقييم، فحوصات العيادات، وتحرير قفل الفحص
+/// مساحة عمل الطبيب: عيادات المسند، بحث/فتح الملف، قائمة فحوصات العيون، الملاحظات العامة،
+/// متابعة المؤجلات، حفظ التقييم، فحوصات العيادات، وتحرير قفل الفحص
 /// (FR-032…FR-045).
 /// </summary>
 [ApiController]
@@ -191,6 +191,166 @@ public class ClinicWorkspaceController : ControllerBase
             ClientCenterBinding.Read(Request),
             cancellationToken);
         return ApiResponse.Success("تم حفظ تقييم العيادة بنجاح.", saved);
+    }
+
+    /// <summary>قائمة فحوصات العيون الحالية في العيادة مع البحث والترقيم (شريحة قائمة FR-039).</summary>
+    [HttpGet("eye-exams")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Members.View, OperationScope.Local)]
+    public async Task<IResult> ListEyeExams(
+        [FromQuery][Required] Guid clinicId,
+        [FromQuery] long? fileNumber = null,
+        [FromQuery] string? barcode = null,
+        [FromQuery] string? recruitmentNumber = null,
+        [FromQuery] string? fullName = null,
+        [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
+        [FromQuery][Range(1, 500)] int pageSize = 10,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _eyeExams.ListAsync(
+            new EyeExamListQuery
+            {
+                ClinicId = clinicId,
+                FileNumber = fileNumber,
+                Barcode = barcode,
+                RecruitmentNumber = recruitmentNumber,
+                FullName = fullName,
+                PageNumber = pageNumber,
+                PageSize = pageSize
+            },
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+
+        return ApiResponse.Success(
+            result.TotalCount == 0 ? "لا توجد نتائج." : "تم جلب قائمة فحوصات العيون بنجاح.",
+            result);
+    }
+
+    /// <summary>قائمة فحوصات الباطنة الحالية مع البحث والترقيم (شريحة قائمة FR-039).</summary>
+    [HttpGet("internal-exams")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Members.View, OperationScope.Local)]
+    public async Task<IResult> ListInternalExams(
+        [FromQuery][Required] Guid clinicId,
+        [FromQuery] long? fileNumber = null,
+        [FromQuery] string? barcode = null,
+        [FromQuery] string? recruitmentNumber = null,
+        [FromQuery] string? fullName = null,
+        [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
+        [FromQuery][Range(1, 500)] int pageSize = 10,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _internalExams.ListAsync(
+            new ClinicExamListQuery
+            {
+                ClinicId = clinicId,
+                FileNumber = fileNumber,
+                Barcode = barcode,
+                RecruitmentNumber = recruitmentNumber,
+                FullName = fullName,
+                PageNumber = pageNumber,
+                PageSize = pageSize
+            },
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+
+        return ApiResponse.Success(
+            result.TotalCount == 0 ? "لا توجد نتائج." : "تم جلب قائمة فحوصات الباطنة بنجاح.",
+            result);
+    }
+
+    /// <summary>قائمة فحوصات الجراحة الحالية مع البحث والترقيم (شريحة قائمة FR-039).</summary>
+    [HttpGet("surgery-exams")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Members.View, OperationScope.Local)]
+    public async Task<IResult> ListSurgeryExams(
+        [FromQuery][Required] Guid clinicId,
+        [FromQuery] long? fileNumber = null,
+        [FromQuery] string? barcode = null,
+        [FromQuery] string? recruitmentNumber = null,
+        [FromQuery] string? fullName = null,
+        [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
+        [FromQuery][Range(1, 500)] int pageSize = 10,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _surgeryExams.ListAsync(
+            new ClinicExamListQuery
+            {
+                ClinicId = clinicId,
+                FileNumber = fileNumber,
+                Barcode = barcode,
+                RecruitmentNumber = recruitmentNumber,
+                FullName = fullName,
+                PageNumber = pageNumber,
+                PageSize = pageSize
+            },
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+
+        return ApiResponse.Success(
+            result.TotalCount == 0 ? "لا توجد نتائج." : "تم جلب قائمة فحوصات الجراحة بنجاح.",
+            result);
+    }
+
+    /// <summary>قائمة فحوصات العظمية الحالية مع البحث والترقيم (شريحة قائمة FR-039).</summary>
+    [HttpGet("orthopedic-exams")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Members.View, OperationScope.Local)]
+    public async Task<IResult> ListOrthopedicExams(
+        [FromQuery][Required] Guid clinicId,
+        [FromQuery] long? fileNumber = null,
+        [FromQuery] string? barcode = null,
+        [FromQuery] string? recruitmentNumber = null,
+        [FromQuery] string? fullName = null,
+        [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
+        [FromQuery][Range(1, 500)] int pageSize = 10,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _orthopedicExams.ListAsync(
+            new ClinicExamListQuery
+            {
+                ClinicId = clinicId,
+                FileNumber = fileNumber,
+                Barcode = barcode,
+                RecruitmentNumber = recruitmentNumber,
+                FullName = fullName,
+                PageNumber = pageNumber,
+                PageSize = pageSize
+            },
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+
+        return ApiResponse.Success(
+            result.TotalCount == 0 ? "لا توجد نتائج." : "تم جلب قائمة فحوصات العظمية بنجاح.",
+            result);
+    }
+
+    /// <summary>قائمة فحوصات الأذنية الحالية مع البحث والترقيم (شريحة قائمة FR-039).</summary>
+    [HttpGet("ent-exams")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Members.View, OperationScope.Local)]
+    public async Task<IResult> ListEntExams(
+        [FromQuery][Required] Guid clinicId,
+        [FromQuery] long? fileNumber = null,
+        [FromQuery] string? barcode = null,
+        [FromQuery] string? recruitmentNumber = null,
+        [FromQuery] string? fullName = null,
+        [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
+        [FromQuery][Range(1, 500)] int pageSize = 10,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _entExams.ListAsync(
+            new ClinicExamListQuery
+            {
+                ClinicId = clinicId,
+                FileNumber = fileNumber,
+                Barcode = barcode,
+                RecruitmentNumber = recruitmentNumber,
+                FullName = fullName,
+                PageNumber = pageNumber,
+                PageSize = pageSize
+            },
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+
+        return ApiResponse.Success(
+            result.TotalCount == 0 ? "لا توجد نتائج." : "تم جلب قائمة فحوصات الأذنية بنجاح.",
+            result);
     }
 
     /// <summary>يعرض فحص العيون الحالي والانكسارات كما أُدخلت (FR-033 / FR-039).</summary>

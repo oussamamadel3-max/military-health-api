@@ -243,6 +243,26 @@ public class EntExamServiceTests
     }
 
     [Fact]
+    public async Task List_returns_current_ent_exams()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, "ENT-LIST");
+        await AcquireLockAsync(db, memberId, ClinicEnt, "actor-1");
+        var service = CreateService(db, CenterA, "actor-1");
+        await service.SaveAsync(memberId, AcceptedEntRequest());
+
+        var page = await service.ListAsync(new ClinicExamListQuery { ClinicId = ClinicEnt });
+
+        var item = Assert.Single(page.Items);
+        Assert.Equal(memberId, item.MemberId);
+        Assert.Equal("طبيعي يمنى", item.RightEar);
+        Assert.Equal("طبيعي يسرى", item.LeftEar);
+        Assert.Equal((short)1, item.ResultStatusId);
+        Assert.Equal("مقبول", item.ResultStatusNameAr);
+    }
+
+    [Fact]
     public async Task Save_second_pass_keeps_single_current_exam()
     {
         await using var db = MemberServiceTests.CreateDb();

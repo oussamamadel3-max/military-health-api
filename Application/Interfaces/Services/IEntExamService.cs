@@ -1,10 +1,11 @@
+using Application.Common.Results;
 using Application.Dtos.ClinicWorkspace;
 
 namespace Application.Interfaces.Services;
 
 /// <summary>
-/// تسجيل وعرض فحص الأذنية مع تقييم العيادة ضمن عملية واحدة
-/// (FR-038 / شريحة عرض وتعديل FR-039 لعيادة الأذنية).
+/// تسجيل وعرض وفهرسة فحص الأذنية مع تقييم العيادة
+/// (FR-038 / شريحة عرض وتعديل وقائمة FR-039 لعيادة الأذنية).
 /// </summary>
 public interface IEntExamService
 {
@@ -22,6 +23,12 @@ public interface IEntExamService
     Task<EntExamDto> GetAsync(
         Guid memberId,
         Guid clinicId,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>يعيد قائمة فحوصات الأذنية الحالية مع البحث والترقيم (شريحة قائمة FR-039).</summary>
+    Task<PaginatedList<EntExamListItemDto>> ListAsync(
+        ClinicExamListQuery query,
         Guid? clientCenterId = null,
         CancellationToken cancellationToken = default);
 }

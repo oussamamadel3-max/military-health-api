@@ -1,5 +1,6 @@
 using System.Net;
 using Application.Common.Permissions;
+using Application.Common.Results;
 using Application.Common.Security;
 using Application.Dtos.ClinicWorkspace;
 using Application.Exceptions;
@@ -14,8 +15,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Application.Services.ClinicWorkspace;
 
 /// <summary>
-/// حفظ وعرض فحص العيون والانكسار مع تقييم العيادة في معاملة واحدة
-/// (FR-033 / FR-034 / شريحة FR-039 لعيادة العيون).
+/// حفظ وعرض وفهرسة فحص العيون والانكسار مع تقييم العيادة
+/// (FR-033 / FR-034 / شريحة قائمة وعرض وتعديل FR-039 لعيادة العيون).
 /// </summary>
 public class EyeExamService : IEyeExamService
 {
@@ -270,6 +271,136 @@ public class EyeExamService : IEyeExamService
             throw new EyeExamNotFoundException();
 
         return await BuildDtoAsync(exam.ExamId, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<PaginatedList<EyeExamListItemDto>> ListAsync(
+        EyeExamListQuery query,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (query is null)
+            throw new InvalidEyeExamDataException("معاملات قائمة فحوصات العيون مطلوبة.");
+
+        if (query.ClinicId == Guid.Empty)
+            throw new InvalidEyeExamDataException("معرّف العيادة مطلوب.");
+
+        var centerId = await _permissionGate.EnsureLocalAsync(
+            MilitaryHealthPermissions.Members.View,
+            clientCenterId,
+            cancellationToken);
+
+        var userId = RequireUserId();
+        await EnsureDoctorEyeClinicAsync(centerId, query.ClinicId, userId, cancellationToken);
+
+        var fileNumber = query.FileNumber;
+        if (!string.IsNullOrWhiteSpace(query.Barcode))
+        {
+            var raw = query.Barcode.Trim();
+            if (!long.TryParse(raw, out var fromBarcode) || fromBarcode <= 0)
+            {
+                throw new InvalidEyeExamDataException(
+                    "قيمة الباركود غير صالحة أو تالفة. أدخل رقم الملف يدوياً أو امسح رمزاً صحيحاً.");
+            }
+
+            if (fileNumber.HasValue && fileNumber.Value != fromBarcode)
+            {
+                throw new InvalidEyeExamDataException(
+                    "تعارض بين رقم الملف وقيمة الباركود. استخدم معياراً واحداً للبحث.");
+            }
+
+            fileNumber = fromBarcode;
+        }
+
+        var pageNumber = query.PageNumber < 1 ? 1 : query.PageNumber;
+        var pageSize = query.PageSize < 1 ? 10 : Math.Min(query.PageSize, 500);
+
+        var source = _clinicWorkspace.QueryEyeExamDetails()
+            .Where(d => d.Exam.CenterId == centerId
+                && d.Exam.ClinicId == query.ClinicId
+                && d.Exam.IsCurrent);
+
+        if (fileNumber.HasValue)
+            source = source.Where(d => d.Exam.Member.FileNumber == fileNumber.Value);
+
+        if (!string.IsNullOrWhiteSpace(query.RecruitmentNumber))
+        {
+            var recruitment = query.RecruitmentNumber.Trim();
+            source = source.Where(d => d.Exam.Member.RecruitmentNumber == recruitment);
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.FullName))
+        {
+            var name = query.FullName.Trim();
+            source = source.Where(d => d.Exam.Member.FullName.Contains(name));
+        }
+
+        var totalCount = await source.CountAsync(cancellationToken);
+
+        var rows = await source
+            .OrderByDescending(d => d.Exam.ExaminedAt)
+            .ThenByDescending(d => d.Exam.Member.FileNumber)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .Select(d => new
+            {
+                d.ExamId,
+                d.Exam.MemberId,
+                d.Exam.Member.FileNumber,
+                d.Exam.Member.FullName,
+                d.VisualAcuityRight,
+                d.VisualAcuityLeft,
+                d.ColorTestResult,
+                d.Exam.ExaminerUserId,
+                ExaminerUserName = d.Exam.ExaminerUser.FullName ?? d.Exam.ExaminerUser.UserName,
+                d.Exam.ExaminedAt
+            })
+            .ToListAsync(cancellationToken);
+
+        var examIds = rows.Select(r => r.ExamId).ToList();
+        var assessments = examIds.Count == 0
+            ? new Dictionary<Guid, (short ResultStatusId, string NameAr)>()
+            : await _clinicWorkspace.QueryClinicAssessments()
+                .Where(a => examIds.Contains(a.ExamId))
+                .Select(a => new
+                {
+                    a.ExamId,
+                    a.ResultStatusId,
+                    NameAr = a.ResultStatus.NameAr
+                })
+                .ToDictionaryAsync(
+                    a => a.ExamId,
+                    a => (a.ResultStatusId, a.NameAr),
+                    cancellationToken);
+
+        var items = rows.Select(r =>
+        {
+            short? resultStatusId = null;
+            string? resultStatusNameAr = null;
+            if (assessments.TryGetValue(r.ExamId, out var assessment))
+            {
+                resultStatusId = assessment.ResultStatusId;
+                resultStatusNameAr = assessment.NameAr;
+            }
+
+            return new EyeExamListItemDto
+            {
+                ExamId = r.ExamId,
+                MemberId = r.MemberId,
+                FileNumber = r.FileNumber,
+                FullName = r.FullName,
+                VisualAcuityRight = r.VisualAcuityRight,
+                VisualAcuityLeft = r.VisualAcuityLeft,
+                ColorTestResult = r.ColorTestResult,
+                ResultStatusId = resultStatusId,
+                ResultStatusNameAr = resultStatusNameAr,
+                ExaminerUserId = r.ExaminerUserId,
+                ExaminerUserName = r.ExaminerUserName,
+                ExaminedAt = r.ExaminedAt
+            };
+        }).ToList();
+
+        return new PaginatedList<EyeExamListItemDto>(items, totalCount, pageNumber, pageSize);
     }
 
     #region Eye detail / refraction
