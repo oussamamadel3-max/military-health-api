@@ -11,20 +11,28 @@ using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Domain.Entities.Audit;
 using Domain.Entities.Clinical;
+using Domain.Entities.Patient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace Application.Services.ClinicWorkspace;
 
 /// <summary>
-/// عمليات مساحة عمل طبيب العيادة: بحث/فتح ضمن الإسناد مع أقفال تحرير مؤقتة (FR-032 / شريحة فتح FR-045).
+/// عمليات مساحة عمل طبيب العيادة: بحث/فتح، ملاحظات عامة، ومتابعة مؤجلات العيادة
+/// (FR-032 / FR-042 / FR-043 / FR-044 / شريحة فتح FR-045).
 /// </summary>
 public class ClinicWorkspaceService : IClinicWorkspaceService
 {
     public const string ClinicMemberViewEventType = "ClinicMemberView";
+    public const string GeneralNoteSavedEventType = "MemberGeneralNoteSaved";
+    public const string DeferredActionCompletedEventType = "DeferredActionCompleted";
     public const short DeferredResultStatusId = 3;
+    public const string DeferredStatusRequested = "REQUESTED";
+    public const string DeferredStatusCompleted = "COMPLETED";
+    public const string DeferredStatusClosed = "CLOSED";
 
     private readonly IMemberService _members;
+    private readonly IMemberRepository _memberRepository;
     private readonly IClinicWorkspaceRepository _clinicWorkspace;
     private readonly IUserRepository _users;
     private readonly ICenterClinicRepository _centerClinics;
@@ -36,6 +44,7 @@ public class ClinicWorkspaceService : IClinicWorkspaceService
 
     public ClinicWorkspaceService(
         IMemberService members,
+        IMemberRepository memberRepository,
         IClinicWorkspaceRepository clinicWorkspace,
         IUserRepository users,
         ICenterClinicRepository centerClinics,
@@ -46,6 +55,7 @@ public class ClinicWorkspaceService : IClinicWorkspaceService
         IOptions<ClinicWorkspaceOptions> options)
     {
         _members = members;
+        _memberRepository = memberRepository;
         _clinicWorkspace = clinicWorkspace;
         _users = users;
         _centerClinics = centerClinics;
@@ -217,6 +227,287 @@ public class ClinicWorkspaceService : IClinicWorkspaceService
         };
     }
 
+    /// <inheritdoc />
+    public async Task<MemberGeneralNoteSavedDto> UpsertGeneralNoteAsync(
+        Guid memberId,
+        UpsertMemberGeneralNoteRequest request,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (request is null)
+            throw new InvalidClinicWorkspaceDataException("بيانات الملاحظة العامة مطلوبة.");
+
+        if (memberId == Guid.Empty)
+            throw new InvalidClinicWorkspaceDataException("معرّف المنتسب مطلوب.");
+
+        if (request.ClinicId == Guid.Empty)
+            throw new InvalidClinicWorkspaceDataException("معرّف العيادة مطلوب.");
+
+        var centerId = await _permissionGate.EnsureLocalAsync(
+            MilitaryHealthPermissions.Members.GeneralNotes,
+            clientCenterId,
+            cancellationToken);
+
+        var userId = RequireUserId();
+        await EnsureDoctorClinicAsync(centerId, request.ClinicId, cancellationToken);
+
+        // عزل المركز: GetById يرفض منتسب مركز آخر.
+        await _members.GetByIdAsync(memberId, clientCenterId, cancellationToken);
+
+        var normalizedText = string.IsNullOrWhiteSpace(request.NoteText)
+            ? string.Empty
+            : request.NoteText.Trim();
+        var now = DateTimeOffset.UtcNow;
+
+        var existing = await _memberRepository.GetGeneralNoteForUpdateAsync(memberId, cancellationToken);
+        var previousText = existing?.NoteText;
+
+        if (existing is null)
+        {
+            existing = new MemberGeneralNote
+            {
+                NoteId = Guid.NewGuid(),
+                MemberId = memberId,
+                CenterId = centerId,
+                NoteText = normalizedText,
+                AuthorUserId = userId,
+                AuthorClinicId = request.ClinicId,
+                IsActive = true,
+                WrittenAt = now,
+                UpdatedByUserId = userId,
+                UpdatedAt = now
+            };
+            _memberRepository.AddGeneralNote(existing);
+        }
+        else
+        {
+            if (existing.CenterId != centerId)
+                throw new InvalidClinicWorkspaceDataException("الملاحظة العامة خارج نطاق المركز النشط.");
+
+            existing.NoteText = normalizedText;
+            existing.IsActive = true;
+            existing.AuthorUserId = userId;
+            existing.AuthorClinicId = request.ClinicId;
+            existing.WrittenAt = now;
+            existing.UpdatedByUserId = userId;
+            existing.UpdatedAt = now;
+        }
+
+        RecordGeneralNoteAudit(
+            userId,
+            centerId,
+            memberId,
+            request.ClinicId,
+            existing.NoteId,
+            previousText,
+            normalizedText);
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        var clinicName = await _centerClinics.Query()
+            .Where(l => l.CenterId == centerId && l.ClinicId == request.ClinicId)
+            .Select(l => l.Clinic.NameAr)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var authorName = await _users.QueryUsers()
+            .Where(u => u.Id == userId)
+            .Select(u => u.FullName ?? u.UserName)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return new MemberGeneralNoteSavedDto
+        {
+            NoteId = existing.NoteId,
+            MemberId = memberId,
+            NoteText = existing.NoteText,
+            HasGeneralNotesAlert = !string.IsNullOrWhiteSpace(existing.NoteText),
+            AuthorUserId = existing.AuthorUserId,
+            AuthorUserName = authorName,
+            AuthorClinicId = existing.AuthorClinicId,
+            AuthorClinicNameAr = clinicName,
+            WrittenAt = existing.WrittenAt
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<PaginatedList<DeferredActionListItemDto>> ListDeferredActionsAsync(
+        DeferredActionListQuery query,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (query is null)
+            throw new InvalidClinicWorkspaceDataException("معاملات قائمة المؤجلات مطلوبة.");
+
+        if (query.ClinicId == Guid.Empty)
+            throw new InvalidClinicWorkspaceDataException("معرّف العيادة مطلوب.");
+
+        var centerId = await _permissionGate.EnsureLocalAsync(
+            MilitaryHealthPermissions.Clinical.DeferredAction,
+            clientCenterId,
+            cancellationToken);
+
+        await EnsureDoctorClinicAsync(centerId, query.ClinicId, cancellationToken);
+
+        var pageNumber = query.PageNumber < 1 ? 1 : query.PageNumber;
+        var pageSize = query.PageSize < 1 ? 10 : Math.Min(query.PageSize, 500);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var statusFilter = string.IsNullOrWhiteSpace(query.Status)
+            ? null
+            : query.Status.Trim().ToUpperInvariant();
+
+        if (statusFilter is not null
+            && statusFilter is not DeferredStatusRequested and not DeferredStatusCompleted)
+        {
+            throw new InvalidClinicWorkspaceDataException(
+                "حالة الإجراء غير صالحة. استخدم REQUESTED أو COMPLETED.");
+        }
+
+        var source = _clinicWorkspace.QueryDeferredActions()
+            .Where(d => d.CenterId == centerId
+                && d.ClinicId == query.ClinicId
+                && d.Status != DeferredStatusClosed);
+
+        if (statusFilter is not null)
+            source = source.Where(d => d.Status == statusFilter);
+
+        if (query.ActionTypeId.HasValue)
+            source = source.Where(d => d.ActionTypeId == query.ActionTypeId.Value);
+
+        if (query.FromDate.HasValue)
+        {
+            var from = query.FromDate.Value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            var fromOffset = new DateTimeOffset(from);
+            source = source.Where(d => d.RequestedAt >= fromOffset);
+        }
+
+        if (query.ToDate.HasValue)
+        {
+            var toExclusive = query.ToDate.Value.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            var toOffset = new DateTimeOffset(toExclusive);
+            source = source.Where(d => d.RequestedAt < toOffset);
+        }
+
+        if (query.FileNumber.HasValue)
+            source = source.Where(d => d.Member.FileNumber == query.FileNumber.Value);
+
+        if (!string.IsNullOrWhiteSpace(query.FullName))
+        {
+            var name = query.FullName.Trim();
+            source = source.Where(d => d.Member.FullName.Contains(name));
+        }
+
+        var totalCount = await source.CountAsync(cancellationToken);
+
+        var rows = await source
+            .OrderByDescending(d => d.RequestedAt)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .Select(d => new DeferredActionListItemDto
+            {
+                DeferredActionId = d.DeferredActionId,
+                MemberId = d.MemberId,
+                FileNumber = d.Member.FileNumber,
+                FullName = d.Member.FullName,
+                ClinicId = d.ClinicId!.Value,
+                ClinicNameAr = d.Clinic != null ? d.Clinic.NameAr : null,
+                DeferReason = d.DeferReason,
+                ActionTypeId = d.ActionTypeId,
+                ActionTypeNameAr = d.ActionType.NameAr,
+                ActionDescription = d.ActionDescription,
+                FollowupNote = d.FollowupNote,
+                Status = d.Status,
+                DeferUntil = d.DeferUntil,
+                RequestedAt = d.RequestedAt,
+                RequestedByUserId = d.RequestedByUserId,
+                RequestedByUserName = d.RequestedByUser.FullName ?? d.RequestedByUser.UserName,
+                CompletedByUserId = d.CompletedByUserId,
+                CompletedAt = d.CompletedAt,
+                IsOverdue = d.Status == DeferredStatusRequested
+                    && d.DeferUntil != null
+                    && d.DeferUntil < today
+            })
+            .ToListAsync(cancellationToken);
+
+        return new PaginatedList<DeferredActionListItemDto>(rows, totalCount, pageNumber, pageSize);
+    }
+
+    /// <inheritdoc />
+    public async Task<DeferredActionCompletedDto> CompleteDeferredActionAsync(
+        Guid deferredActionId,
+        Guid clinicId,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (deferredActionId == Guid.Empty)
+            throw new InvalidClinicWorkspaceDataException("معرّف الإجراء المؤجّل مطلوب.");
+
+        if (clinicId == Guid.Empty)
+            throw new InvalidClinicWorkspaceDataException("معرّف العيادة مطلوب.");
+
+        var centerId = await _permissionGate.EnsureLocalAsync(
+            MilitaryHealthPermissions.Clinical.DeferredAction,
+            clientCenterId,
+            cancellationToken);
+
+        var userId = RequireUserId();
+        await EnsureDoctorClinicAsync(centerId, clinicId, cancellationToken);
+
+        var action = await _clinicWorkspace.QueryDeferredActions(asNoTracking: false)
+            .FirstOrDefaultAsync(
+                d => d.DeferredActionId == deferredActionId
+                    && d.CenterId == centerId
+                    && d.ClinicId == clinicId,
+                cancellationToken);
+
+        if (action is null)
+            throw new DeferredActionNotFoundException();
+
+        if (!string.Equals(action.Status, DeferredStatusRequested, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDeferredActionStateException(
+                action.Status == DeferredStatusCompleted
+                    ? "الإجراء مكتمل مسبقاً."
+                    : "لا يمكن تعليم إجراء مغلق أو غير مطلوب كمكتمل.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        action.Status = DeferredStatusCompleted;
+        action.CompletedByUserId = userId;
+        action.CompletedAt = now;
+
+        _audit.Add(new AuditEvent
+        {
+            OccurredAt = now,
+            ActorUserId = userId,
+            ContextScope = CenterClaimTypes.Center,
+            CenterId = centerId,
+            EventType = DeferredActionCompletedEventType,
+            Result = "SUCCESS",
+            EntityType = nameof(DeferredAction),
+            EntityId = action.DeferredActionId.ToString(),
+            ReasonText = $"إتمام إجراء مؤجّل للمنتسب {action.MemberId:D} في العيادة {clinicId:D}",
+            OldValues = DeferredStatusRequested,
+            NewValues = DeferredStatusCompleted,
+            UserAgent = _currentUser.UserAgent,
+            CorrelationId = _currentUser.CorrelationId == Guid.Empty
+                ? Guid.NewGuid()
+                : _currentUser.CorrelationId,
+            IPAddress = IPAddress.TryParse(_currentUser.IPAddress, out var ip) ? ip : null
+        });
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return new DeferredActionCompletedDto
+        {
+            DeferredActionId = action.DeferredActionId,
+            MemberId = action.MemberId,
+            ClinicId = clinicId,
+            Status = action.Status,
+            CompletedByUserId = userId,
+            CompletedAt = now
+        };
+    }
+
     #region Private Helpers
 
     private async Task EnsureDoctorClinicAsync(
@@ -302,7 +593,7 @@ public class ClinicWorkspaceService : IClinicWorkspaceService
                 .Where(d => d.CenterId == centerId
                     && d.ClinicId == clinicId
                     && deferredMemberIds.Contains(d.MemberId)
-                    && d.Status == "REQUESTED")
+                    && d.Status != DeferredStatusClosed)
                 .OrderByDescending(d => d.RequestedAt)
                 .ToListAsync(cancellationToken);
 
@@ -513,11 +804,41 @@ public class ClinicWorkspaceService : IClinicWorkspaceService
             CenterId = centerId,
             EventType = ClinicMemberViewEventType,
             Result = "SUCCESS",
-            EntityType = nameof(Domain.Entities.Patient.Member),
+            EntityType = nameof(Member),
             EntityId = memberId.ToString(),
             ReasonText = $"اطلاع ملف منتسب من العيادة {clinicId:D} بحالة {statusCode}",
             OldValues = null,
             NewValues = null,
+            UserAgent = _currentUser.UserAgent,
+            CorrelationId = _currentUser.CorrelationId == Guid.Empty
+                ? Guid.NewGuid()
+                : _currentUser.CorrelationId,
+            IPAddress = IPAddress.TryParse(_currentUser.IPAddress, out var ip) ? ip : null
+        });
+    }
+
+    private void RecordGeneralNoteAudit(
+        string userId,
+        Guid centerId,
+        Guid memberId,
+        Guid clinicId,
+        Guid noteId,
+        string? previousText,
+        string newText)
+    {
+        _audit.Add(new AuditEvent
+        {
+            OccurredAt = DateTimeOffset.UtcNow,
+            ActorUserId = userId,
+            ContextScope = CenterClaimTypes.Center,
+            CenterId = centerId,
+            EventType = GeneralNoteSavedEventType,
+            Result = "SUCCESS",
+            EntityType = nameof(MemberGeneralNote),
+            EntityId = noteId.ToString(),
+            ReasonText = $"حفظ ملاحظة عامة للمنتسب {memberId:D} من العيادة {clinicId:D}",
+            OldValues = previousText,
+            NewValues = newText,
             UserAgent = _currentUser.UserAgent,
             CorrelationId = _currentUser.CorrelationId == Guid.Empty
                 ? Guid.NewGuid()

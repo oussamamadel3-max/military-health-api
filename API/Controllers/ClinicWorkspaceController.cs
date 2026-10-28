@@ -11,8 +11,9 @@ using Microsoft.AspNetCore.Mvc;
 namespace API.Controllers;
 
 /// <summary>
-/// مساحة عمل الطبيب: عيادات المسند، بحث/فتح الملف، حفظ التقييم، فحوصات العيادات، وتحرير قفل الفحص
-/// (FR-032 / FR-033 / FR-034 / FR-035 / FR-036 / FR-037 / FR-038 / FR-039 / FR-040 / FR-041 / FR-045).
+/// مساحة عمل الطبيب: عيادات المسند، بحث/فتح الملف، الملاحظات العامة، متابعة المؤجلات،
+/// حفظ التقييم، فحوصات العيادات، وتحرير قفل الفحص
+/// (FR-032…FR-045).
 /// </summary>
 [ApiController]
 [Authorize]
@@ -102,6 +103,78 @@ public class ClinicWorkspaceController : ControllerBase
             ClientCenterBinding.Read(Request),
             cancellationToken);
         return ApiResponse.Success("تم فتح ملخص ملف المنتسب في العيادة بنجاح.", summary);
+    }
+
+    /// <summary>يُدخل أو يحدّث أو يُفرغ الملاحظة العامة للمنتسب (FR-043 / تنبيه FR-044).</summary>
+    [HttpPut("members/{memberId:guid}/general-notes")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Members.GeneralNotes, OperationScope.Local)]
+    public async Task<IResult> UpsertGeneralNote(
+        Guid memberId,
+        [FromBody] UpsertMemberGeneralNoteRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var saved = await _workspace.UpsertGeneralNoteAsync(
+            memberId,
+            request,
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+        return ApiResponse.Success(
+            saved.HasGeneralNotesAlert
+                ? "تم حفظ الملاحظة العامة بنجاح."
+                : "تم إفراغ الملاحظة العامة وإيقاف التنبيه.",
+            saved);
+    }
+
+    /// <summary>قائمة الحالات المؤجلة في العيادة ضمن المركز النشط مع التصفية والترقيم (FR-042).</summary>
+    [HttpGet("deferred-actions")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Clinical.DeferredAction, OperationScope.Local)]
+    public async Task<IResult> ListDeferredActions(
+        [FromQuery][Required] Guid clinicId,
+        [FromQuery] string? status = null,
+        [FromQuery] short? actionTypeId = null,
+        [FromQuery] DateOnly? fromDate = null,
+        [FromQuery] DateOnly? toDate = null,
+        [FromQuery] long? fileNumber = null,
+        [FromQuery] string? fullName = null,
+        [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
+        [FromQuery][Range(1, 500)] int pageSize = 10,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _workspace.ListDeferredActionsAsync(
+            new DeferredActionListQuery
+            {
+                ClinicId = clinicId,
+                Status = status,
+                ActionTypeId = actionTypeId,
+                FromDate = fromDate,
+                ToDate = toDate,
+                FileNumber = fileNumber,
+                FullName = fullName,
+                PageNumber = pageNumber,
+                PageSize = pageSize
+            },
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+
+        return ApiResponse.Success(
+            result.TotalCount == 0 ? "لا توجد نتائج." : "تم جلب قائمة الحالات المؤجلة بنجاح.",
+            result);
+    }
+
+    /// <summary>يعلّم الإجراء المطلوب مكتملاً دون تغيير تقييم العيادة (FR-042).</summary>
+    [HttpPost("deferred-actions/{deferredActionId:guid}/complete")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Clinical.DeferredAction, OperationScope.Local)]
+    public async Task<IResult> CompleteDeferredAction(
+        Guid deferredActionId,
+        [FromQuery][Required] Guid clinicId,
+        CancellationToken cancellationToken = default)
+    {
+        var completed = await _workspace.CompleteDeferredActionAsync(
+            deferredActionId,
+            clinicId,
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+        return ApiResponse.Success("تم تعليم الإجراء مكتملاً بنجاح.", completed);
     }
 
     /// <summary>يحفظ هيكل الفحص الأساسي وتقييم العيادة (مع DeferredAction عند مؤجل) ويحرّر القفل.</summary>

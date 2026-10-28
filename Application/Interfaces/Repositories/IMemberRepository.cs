@@ -39,6 +39,14 @@ public interface IMemberRepository
         Guid memberId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>صف الملاحظة العامة للمنتسب للتتبع والتحديث (صف واحد لكل منتسب).</summary>
+    Task<MemberGeneralNote?> GetGeneralNoteForUpdateAsync(
+        Guid memberId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>يضيف صف ملاحظة عامة جديداً للمنتسب.</summary>
+    void AddGeneralNote(MemberGeneralNote note);
+
     /// <summary>آخر عملية نقل للمنتسب إن وُجدت.</summary>
     Task<MemberTransfer?> GetLastTransferAsync(
         Guid memberId,

@@ -108,6 +108,16 @@ public class MemberRepository : IMemberRepository
             .ToListAsync(cancellationToken);
     }
 
+    public Task<MemberGeneralNote?> GetGeneralNoteForUpdateAsync(
+        Guid memberId,
+        CancellationToken cancellationToken = default)
+    {
+        return _context.MemberGeneralNotes
+            .FirstOrDefaultAsync(n => n.MemberId == memberId, cancellationToken);
+    }
+
+    public void AddGeneralNote(MemberGeneralNote note) => _context.MemberGeneralNotes.Add(note);
+
     public Task<MemberTransfer?> GetLastTransferAsync(
         Guid memberId,
         CancellationToken cancellationToken = default)

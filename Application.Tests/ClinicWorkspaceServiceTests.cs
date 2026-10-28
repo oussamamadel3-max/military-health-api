@@ -266,11 +266,201 @@ public class ClinicWorkspaceServiceTests
         Assert.Equal(first.MemberId, Assert.Single(page.Items).MemberId);
     }
 
+    [Fact]
+    public async Task Upsert_general_note_sets_alert_and_clear_hides_it()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedWorkspaceAsync(db);
+        var members = MemberServiceTests.CreateService(db, CenterA, allowCreate: true, allowView: true);
+        var created = await members.CreateAsync(ValidCreate("NOTE-W1"));
+        var workspace = CreateWorkspace(db, CenterA, "actor-1");
+
+        var saved = await workspace.UpsertGeneralNoteAsync(
+            created.MemberId,
+            new UpsertMemberGeneralNoteRequest { ClinicId = ClinicEyes, NoteText = "حساسية بنسلين" });
+
+        Assert.True(saved.HasGeneralNotesAlert);
+        Assert.Equal("حساسية بنسلين", saved.NoteText);
+        Assert.Equal("actor-1", saved.AuthorUserId);
+        Assert.Equal(ClinicEyes, saved.AuthorClinicId);
+        Assert.Equal(1, await db.AuditEvents.CountAsync(e =>
+            e.EventType == ClinicWorkspaceService.GeneralNoteSavedEventType));
+
+        var open = await workspace.OpenMemberAsync(created.MemberId, ClinicEyes);
+        Assert.NotNull(open.LatestGeneralNote);
+        Assert.Equal("حساسية بنسلين", open.LatestGeneralNote!.NoteText);
+
+        var cleared = await workspace.UpsertGeneralNoteAsync(
+            created.MemberId,
+            new UpsertMemberGeneralNoteRequest { ClinicId = ClinicEyes, NoteText = "   " });
+
+        Assert.False(cleared.HasGeneralNotesAlert);
+        Assert.Equal(string.Empty, cleared.NoteText);
+        Assert.Equal(1, await db.MemberGeneralNotes.CountAsync());
+
+        var reopened = await workspace.OpenMemberAsync(created.MemberId, ClinicEyes);
+        Assert.Null(reopened.LatestGeneralNote);
+
+        var details = await members.GetByIdAsync(created.MemberId);
+        Assert.False(details.HasGeneralNotesAlert);
+        Assert.Empty(details.GeneralNotes);
+    }
+
+    [Fact]
+    public async Task Upsert_general_note_rejects_unassigned_clinic()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedWorkspaceAsync(db, assignDoctorToEyes: false);
+        var members = MemberServiceTests.CreateService(db, CenterA, allowCreate: true, allowView: true);
+        var created = await members.CreateAsync(ValidCreate("NOTE-DENY"));
+        var workspace = CreateWorkspace(db, CenterA, "actor-1");
+
+        await Assert.ThrowsAsync<DoctorClinicNotAssignedException>(() =>
+            workspace.UpsertGeneralNoteAsync(
+                created.MemberId,
+                new UpsertMemberGeneralNoteRequest { ClinicId = ClinicEyes, NoteText = "نص" }));
+    }
+
+    [Fact]
+    public async Task List_deferred_actions_scopes_to_clinic_and_filters_status()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedWorkspaceAsync(db);
+        await SeedDoctorAssignmentAsync(db, "actor-1", CenterA, ClinicEnt);
+        var members = MemberServiceTests.CreateService(db, CenterA, allowCreate: true, allowView: true);
+        var eyesMember = await members.CreateAsync(ValidCreate("DEF-L1"));
+        var entMember = await members.CreateAsync(ValidCreate("DEF-L2", "منتسب أذنية"));
+        var eyesAssessment = await SeedCurrentExamAsync(db, eyesMember.MemberId, CenterA, ClinicEyes, 3);
+        var entAssessment = await SeedCurrentExamAsync(db, entMember.MemberId, CenterA, ClinicEnt, 3);
+        var now = DateTimeOffset.UtcNow;
+        db.DeferredActions.AddRange(
+            new DeferredAction
+            {
+                DeferredActionId = Guid.NewGuid(),
+                MemberId = eyesMember.MemberId,
+                CenterId = CenterA,
+                ClinicId = ClinicEyes,
+                ClinicAssessmentId = eyesAssessment,
+                DeferReason = "عيون",
+                ActionTypeId = 1,
+                ActionDescription = "تقرير",
+                FollowupNote = "ملاحظة عيون",
+                Status = "REQUESTED",
+                RequestedByUserId = "actor-1",
+                RequestedAt = now,
+                DeferUntil = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-2))
+            },
+            new DeferredAction
+            {
+                DeferredActionId = Guid.NewGuid(),
+                MemberId = entMember.MemberId,
+                CenterId = CenterA,
+                ClinicId = ClinicEnt,
+                ClinicAssessmentId = entAssessment,
+                DeferReason = "أذنية",
+                ActionTypeId = 1,
+                ActionDescription = "تقرير",
+                FollowupNote = "ملاحظة أذنية",
+                Status = "REQUESTED",
+                RequestedByUserId = "actor-1",
+                RequestedAt = now
+            });
+        await db.SaveChangesAsync();
+        var workspace = CreateWorkspace(db, CenterA, "actor-1");
+
+        var page = await workspace.ListDeferredActionsAsync(new DeferredActionListQuery
+        {
+            ClinicId = ClinicEyes,
+            Status = "REQUESTED"
+        });
+
+        var item = Assert.Single(page.Items);
+        Assert.Equal(eyesMember.MemberId, item.MemberId);
+        Assert.True(item.IsOverdue);
+        Assert.Equal("REQUESTED", item.Status);
+    }
+
+    [Fact]
+    public async Task Complete_deferred_action_sets_completed_without_changing_assessment()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedWorkspaceAsync(db);
+        var members = MemberServiceTests.CreateService(db, CenterA, allowCreate: true, allowView: true);
+        var created = await members.CreateAsync(ValidCreate("DEF-C1"));
+        var assessmentId = await SeedCurrentExamAsync(db, created.MemberId, CenterA, ClinicEyes, 3);
+        var actionId = Guid.NewGuid();
+        db.DeferredActions.Add(new DeferredAction
+        {
+            DeferredActionId = actionId,
+            MemberId = created.MemberId,
+            CenterId = CenterA,
+            ClinicId = ClinicEyes,
+            ClinicAssessmentId = assessmentId,
+            DeferReason = "يحتاج تقرير",
+            ActionTypeId = 1,
+            ActionDescription = "طلب تقرير طبي",
+            FollowupNote = "ملاحظة",
+            Status = "REQUESTED",
+            RequestedByUserId = "actor-1",
+            RequestedAt = DateTimeOffset.UtcNow
+        });
+        await db.SaveChangesAsync();
+        var workspace = CreateWorkspace(db, CenterA, "actor-1");
+
+        var completed = await workspace.CompleteDeferredActionAsync(actionId, ClinicEyes);
+
+        Assert.Equal("COMPLETED", completed.Status);
+        Assert.Equal("actor-1", completed.CompletedByUserId);
+        Assert.NotEqual(default, completed.CompletedAt);
+
+        var action = Assert.Single(await db.DeferredActions.ToListAsync());
+        Assert.Equal("COMPLETED", action.Status);
+        Assert.Equal(3, Assert.Single(await db.ClinicAssessments.ToListAsync()).ResultStatusId);
+        Assert.Equal(1, await db.AuditEvents.CountAsync(e =>
+            e.EventType == ClinicWorkspaceService.DeferredActionCompletedEventType));
+
+        var open = await workspace.OpenMemberAsync(created.MemberId, ClinicEyes);
+        Assert.Equal(ClinicExamStatusCodes.Deferred, open.ClinicExamStatus);
+        Assert.Equal("COMPLETED", open.DeferredSummary!.Status);
+    }
+
+    [Fact]
+    public async Task Complete_deferred_action_rejects_other_clinic()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedWorkspaceAsync(db);
+        await SeedDoctorAssignmentAsync(db, "actor-1", CenterA, ClinicEnt);
+        var members = MemberServiceTests.CreateService(db, CenterA, allowCreate: true, allowView: true);
+        var created = await members.CreateAsync(ValidCreate("DEF-XCL"));
+        var assessmentId = await SeedCurrentExamAsync(db, created.MemberId, CenterA, ClinicEyes, 3);
+        var actionId = Guid.NewGuid();
+        db.DeferredActions.Add(new DeferredAction
+        {
+            DeferredActionId = actionId,
+            MemberId = created.MemberId,
+            CenterId = CenterA,
+            ClinicId = ClinicEyes,
+            ClinicAssessmentId = assessmentId,
+            DeferReason = "عيون",
+            ActionTypeId = 1,
+            ActionDescription = "تقرير",
+            FollowupNote = "ملاحظة",
+            Status = "REQUESTED",
+            RequestedByUserId = "actor-1",
+            RequestedAt = DateTimeOffset.UtcNow
+        });
+        await db.SaveChangesAsync();
+        var workspace = CreateWorkspace(db, CenterA, "actor-1");
+
+        await Assert.ThrowsAsync<DeferredActionNotFoundException>(() =>
+            workspace.CompleteDeferredActionAsync(actionId, ClinicEnt));
+    }
+
     private static ClinicWorkspaceService CreateWorkspace(AppDbContext db, Guid centerId, string userId)
     {
         var gate = new Mock<IPermissionGate>();
         gate.Setup(g => g.EnsureLocalAsync(
-                MilitaryHealthPermissions.Members.View,
+                It.IsAny<string>(),
                 It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(centerId);
@@ -284,6 +474,7 @@ public class ClinicWorkspaceServiceTests
         // Open/Search يستدعيان MemberService بـ actor-1؛ إسناد العيادة يعتمد على userId لمساحة العمل.
         return new ClinicWorkspaceService(
             memberService,
+            new MemberRepository(db),
             new ClinicWorkspaceRepository(db),
             new UserRepository(db),
             new CenterClinicRepository(db),

@@ -4,7 +4,10 @@ using Application.Dtos.Members;
 
 namespace Application.Interfaces.Services;
 
-/// <summary>مساحة عمل طبيب العيادة: العيادات المسندة، بحث المنتسب، وملخص فتح الملف (FR-032 / شريحة فتح FR-045).</summary>
+/// <summary>
+/// مساحة عمل طبيب العيادة: العيادات المسندة، بحث/فتح الملف، الملاحظات العامة،
+/// ومتابعة مؤجلات العيادة (FR-032 / FR-042 / FR-043 / FR-044 / شريحة فتح FR-045).
+/// </summary>
 public interface IClinicWorkspaceService
 {
     /// <summary>يعيد العيادات المسندة بفعالية للمستخدم الحالي ضمن المركز النشط.</summary>
@@ -25,6 +28,33 @@ public interface IClinicWorkspaceService
     /// </summary>
     Task<ClinicMemberSummaryDto> OpenMemberAsync(
         Guid memberId,
+        Guid clinicId,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// يُدخل أو يحدّث أو يُفرغ الملاحظة العامة للمنتسب ضمن المركز والعيادة المسندة،
+    /// ويحفظ هوية الكاتب ويُفعّل أو يوقف التنبيه حسب فراغ النص (FR-043 / FR-044).
+    /// </summary>
+    Task<MemberGeneralNoteSavedDto> UpsertGeneralNoteAsync(
+        Guid memberId,
+        UpsertMemberGeneralNoteRequest request,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// يعيد قائمة الحالات المؤجلة غير المغلقة في العيادة ضمن المركز النشط مع التصفية والترقيم (FR-042).
+    /// </summary>
+    Task<PaginatedList<DeferredActionListItemDto>> ListDeferredActionsAsync(
+        DeferredActionListQuery query,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// يعلّم الإجراء المطلوب مكتملاً مع حفظ المنفّذ والوقت دون تغيير تقييم العيادة (FR-042).
+    /// </summary>
+    Task<DeferredActionCompletedDto> CompleteDeferredActionAsync(
+        Guid deferredActionId,
         Guid clinicId,
         Guid? clientCenterId = null,
         CancellationToken cancellationToken = default);
