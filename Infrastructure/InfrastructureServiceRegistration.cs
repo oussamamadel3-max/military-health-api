@@ -46,6 +46,7 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IMemberRepository, MemberRepository>();
         services.AddScoped<IMemberImportBatchRepository, MemberImportBatchRepository>();
         services.AddScoped<IClinicWorkspaceRepository, ClinicWorkspaceRepository>();
+        services.AddScoped<IConsultationRepository, ConsultationRepository>();
         #endregion
 
         #region Auth HTTP services
@@ -91,6 +92,7 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<ISurgeryExamService, SurgeryExamService>();
         services.AddScoped<IOrthopedicExamService, OrthopedicExamService>();
         services.AddScoped<IEntExamService, EntExamService>();
+        services.AddScoped<IConsultationService, ConsultationService>();
         services.AddScoped<IReferenceCatalogHandler, RecruitmentCenterCatalogHandler>();
         services.AddScoped<IReferenceCatalogHandler, ClinicCatalogHandler>();
         services.AddScoped<IReferenceCatalogHandler, ResultStatusCatalogHandler>();

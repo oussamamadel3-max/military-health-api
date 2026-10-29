@@ -172,3 +172,30 @@ public class DeferredActionNotCompletedException : BusinessException
     {
     }
 }
+
+/// <summary>يُرمى عند نقص أو تعارض بيانات الاستشارة التخصصية (FR-046).</summary>
+public class InvalidConsultationDataException : BusinessException
+{
+    public InvalidConsultationDataException(string message)
+        : base(message, "CONSULTATION_INVALID_DATA", 400)
+    {
+    }
+}
+
+/// <summary>يُرمى عندما لا تُوجد الاستشارة ضمن نطاق المركز والعيادة المخوّلين.</summary>
+public class ConsultationNotFoundException : BusinessException
+{
+    public ConsultationNotFoundException()
+        : base("الاستشارة غير موجودة ضمن نطاق المركز.", "CONSULTATION_NOT_FOUND", 404)
+    {
+    }
+}
+
+/// <summary>يُرمى عند محاولة تسجيل نتيجة لاستشارة ليست بحالة معلّقة.</summary>
+public class InvalidConsultationStateException : BusinessException
+{
+    public InvalidConsultationStateException(string message)
+        : base(message, "CONSULTATION_INVALID_STATE", 400)
+    {
+    }
+}
