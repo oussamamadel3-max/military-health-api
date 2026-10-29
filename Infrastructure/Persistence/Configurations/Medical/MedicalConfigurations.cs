@@ -42,11 +42,13 @@ public class InvestigationConfiguration : IEntityTypeConfiguration<Investigation
         builder.HasIndex(x => new { x.MemberId, x.RequestedAt });
         builder.HasIndex(x => new { x.CenterId, x.Status });
         builder.HasIndex(x => x.InvestigationTypeId);
+        builder.HasIndex(x => x.DeferredActionId);
         builder.HasOne(x => x.Member).WithMany().HasForeignKey(x => x.MemberId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.Center).WithMany().HasForeignKey(x => x.CenterId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.Clinic).WithMany().HasForeignKey(x => x.ClinicId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.InvestigationType).WithMany().HasForeignKey(x => x.InvestigationTypeId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.RequestedByUser).WithMany().HasForeignKey(x => x.RequestedByUserId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(x => x.DeferredAction).WithMany().HasForeignKey(x => x.DeferredActionId).OnDelete(DeleteBehavior.Restrict);
         builder.ToTable(t =>
         {
             t.HasCheckConstraint("ckInvestigation1", "\"status\" IN ('PENDING','COMPLETED','CANCELLED')");

@@ -2862,6 +2862,10 @@ namespace Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("clinicId");
 
+                    b.Property<Guid?>("DeferredActionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("deferredActionId");
+
                     b.Property<short>("InvestigationTypeId")
                         .HasColumnType("smallint")
                         .HasColumnName("investigationTypeId");
@@ -2906,6 +2910,8 @@ namespace Infrastructure.Migrations
                     b.HasKey("InvestigationId");
 
                     b.HasIndex("ClinicId");
+
+                    b.HasIndex("DeferredActionId");
 
                     b.HasIndex("InvestigationTypeId");
 
@@ -4459,6 +4465,11 @@ namespace Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("Domain.Entities.Clinical.DeferredAction", "DeferredAction")
+                        .WithMany()
+                        .HasForeignKey("DeferredActionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Domain.Entities.Core.InvestigationType", "InvestigationType")
                         .WithMany()
                         .HasForeignKey("InvestigationTypeId")
@@ -4480,6 +4491,8 @@ namespace Infrastructure.Migrations
                     b.Navigation("Center");
 
                     b.Navigation("Clinic");
+
+                    b.Navigation("DeferredAction");
 
                     b.Navigation("InvestigationType");
 
