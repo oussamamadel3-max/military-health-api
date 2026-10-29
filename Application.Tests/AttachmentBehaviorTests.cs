@@ -1,5 +1,7 @@
 using System.IO.Compression;
 using System.Text;
+using System.Text.Json;
+using Application.Common.Permissions;
 using Application.Dtos;
 using Application.Exceptions;
 using Application.Interfaces;
@@ -7,6 +9,7 @@ using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Application.Services.AttachmentService;
 using Application.Services.FileStorageService;
+using Domain.Entities.Audit;
 using Domain.Entities.Auth;
 using Domain.Entities.Core;
 using Domain.Entities.Medical;
@@ -67,7 +70,7 @@ public class AttachmentBehaviorTests
 
         var service = CreateService(files, CenterId, assigned: true);
 
-        await Assert.ThrowsAsync<InvalidUserDataException>(() =>
+        await Assert.ThrowsAsync<RoleNotFoundException>(() =>
             service.LinkToEntityAsync(fileId, Guid.NewGuid().ToString(), "Consultation"));
 
         files.Verify(f => f.AddMedicalAttachment(It.IsAny<MedicalAttachment>()), Times.Never);
@@ -260,13 +263,158 @@ public class AttachmentBehaviorTests
         }
     }
 
+    [Fact]
+    public async Task Upload_medical_requires_consultations_investigations_permission()
+    {
+        var files = new Mock<IAttachmentRepository>();
+        var service = CreateService(files, CenterId, assigned: true, allowMedicalWrite: false);
+
+        await Assert.ThrowsAsync<ForbiddenPermissionException>(() =>
+            service.UploadAsync(Guid.NewGuid().ToString(), "Consultation", PdfFile(), null));
+
+        files.Verify(f => f.Add(It.IsAny<FileAsset>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Download_other_center_is_not_found()
+    {
+        var file = SampleFile(OtherCenterId);
+        var files = new Mock<IAttachmentRepository>();
+        files.Setup(f => f.FindByIdAsync(file.FileAssetId, It.IsAny<CancellationToken>())).ReturnsAsync(file);
+        files.Setup(f => f.IsProfilePhotoAsync("user-1", file.FileAssetId, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+
+        var service = CreateService(files, CenterId, assigned: true);
+        var error = await Assert.ThrowsAsync<RoleNotFoundException>(() => service.DownloadAsync(file.FileAssetId));
+        Assert.Equal(404, error.Status);
+    }
+
+    [Fact]
+    public async Task Upload_medical_writes_audit_without_storage_path_or_bytes()
+    {
+        var consultationId = Guid.NewGuid();
+        var memberId = Guid.NewGuid();
+        var files = new Mock<IAttachmentRepository>();
+        files.Setup(f => f.FindConsultationAsync(consultationId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileLinkTarget(consultationId, memberId, CenterId));
+
+        AuditEvent? audit = null;
+        var auditRepo = new Mock<IAuditLogRepository>();
+        auditRepo.Setup(a => a.Add(It.IsAny<AuditEvent>())).Callback<AuditEvent>(e => audit = e);
+
+        var service = CreateService(files, CenterId, assigned: true, audit: auditRepo.Object);
+        await service.UploadAsync(consultationId.ToString(), "Consultation", PdfFile(), null);
+
+        Assert.NotNull(audit);
+        Assert.Equal(AttachmentService.MedicalAttachmentUploadedEventType, audit!.EventType);
+        Assert.DoesNotContain("storage/", audit.NewValues ?? "", StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("%PDF", audit.NewValues ?? "", StringComparison.Ordinal);
+        using var doc = JsonDocument.Parse(audit.NewValues!);
+        Assert.True(doc.RootElement.TryGetProperty("Sha256", out _));
+        Assert.True(doc.RootElement.TryGetProperty("SizeBytes", out _));
+        Assert.False(doc.RootElement.TryGetProperty("StorageKey", out _));
+    }
+
+    [Fact]
+    public async Task Download_missing_physical_file_is_not_found()
+    {
+        var file = SampleFile(CenterId);
+        var files = new Mock<IAttachmentRepository>();
+        files.Setup(f => f.FindByIdAsync(file.FileAssetId, It.IsAny<CancellationToken>())).ReturnsAsync(file);
+        files.Setup(f => f.IsProfilePhotoAsync("user-1", file.FileAssetId, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        files.Setup(f => f.HasMedicalLinkAsync(file.FileAssetId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+
+        var storage = new Mock<IFileStorageService>();
+        storage.Setup(s => s.ReadFileBytes(file.StorageKey)).Throws(new InvalidFileException("missing"));
+
+        var service = CreateService(files, CenterId, assigned: true, storage: storage.Object);
+        var error = await Assert.ThrowsAsync<RoleNotFoundException>(() => service.DownloadAsync(file.FileAssetId));
+        Assert.Contains("تالف", error.Message);
+    }
+
+    [Fact]
+    public async Task Download_medical_writes_audit_without_file_bytes()
+    {
+        var file = SampleFile(CenterId);
+        var files = new Mock<IAttachmentRepository>();
+        files.Setup(f => f.FindByIdAsync(file.FileAssetId, It.IsAny<CancellationToken>())).ReturnsAsync(file);
+        files.Setup(f => f.IsProfilePhotoAsync("user-1", file.FileAssetId, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        files.Setup(f => f.HasMedicalLinkAsync(file.FileAssetId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+
+        AuditEvent? audit = null;
+        var auditRepo = new Mock<IAuditLogRepository>();
+        auditRepo.Setup(a => a.Add(It.IsAny<AuditEvent>())).Callback<AuditEvent>(e => audit = e);
+
+        var storage = new Mock<IFileStorageService>();
+        storage.Setup(s => s.ReadFileBytes(file.StorageKey)).Returns(Encoding.UTF8.GetBytes("SECRET-BYTES"));
+
+        var service = CreateService(files, CenterId, assigned: true, storage: storage.Object, audit: auditRepo.Object);
+        await service.DownloadAsync(file.FileAssetId);
+
+        Assert.NotNull(audit);
+        Assert.Equal(AttachmentService.MedicalAttachmentDownloadedEventType, audit!.EventType);
+        Assert.DoesNotContain("SECRET-BYTES", audit.NewValues ?? "", StringComparison.Ordinal);
+        Assert.DoesNotContain("storage/", audit.NewValues ?? "", StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ValidateFile_rejects_disallowed_extension_and_oversized_and_spoofed_signature()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "mhs-files-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var env = new Mock<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
+            env.SetupGet(e => e.ContentRootPath).Returns(root);
+            var config = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["FileStorage:MaxFileSizeInMB"] = "1",
+                    ["FileStorage:AllowedExtensions:0"] = ".pdf",
+                    ["FileStorage:AllowedExtensions:1"] = ".png"
+                })
+                .Build();
+            var storage = new FileStorageService(env.Object, config);
+
+            Assert.False(storage.ValidateFile(NamedFile("bad.exe", new byte[] { 0x4D, 0x5A }), out var extErr));
+            Assert.Contains("غير مسموح", extErr);
+
+            var oversized = new byte[2 * 1024 * 1024];
+            oversized[0] = 0x25; oversized[1] = 0x50; oversized[2] = 0x44; oversized[3] = 0x46;
+            Assert.False(storage.ValidateFile(NamedFile("big.pdf", oversized), out var sizeErr));
+            Assert.Contains("الحد المسموح", sizeErr);
+
+            Assert.False(storage.ValidateFile(NamedFile("fake.pdf", Encoding.UTF8.GetBytes("not-a-pdf")), out var sigErr));
+            Assert.Contains("الحقيقي", sigErr);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public async Task Dto_mapping_nulls_storage_path()
+    {
+        var files = new Mock<IAttachmentRepository>();
+        var service = CreateService(files, CenterId, assigned: true);
+        var file = SampleFile(CenterId);
+        files.Setup(f => f.FindByIdAsync(file.FileAssetId, It.IsAny<CancellationToken>())).ReturnsAsync(file);
+        files.Setup(f => f.IsProfilePhotoAsync("user-1", file.FileAssetId, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+
+        var dto = await service.GetByIdAsync(file.FileAssetId);
+        Assert.Null(dto.FilePath);
+        Assert.Contains("/api/attachments/download/", dto.FileUrl);
+    }
+
     private static AttachmentService CreateService(
         Mock<IAttachmentRepository> files,
         Guid? centerId,
         bool assigned,
         bool central = false,
         IFileStorageService? storage = null,
-        bool allowMedicalRead = true)
+        bool allowMedicalRead = true,
+        bool allowMedicalWrite = true,
+        IAuditLogRepository? audit = null)
     {
         var unit = new Mock<IUnitOfWork>();
         unit.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
@@ -314,18 +462,35 @@ public class AttachmentBehaviorTests
             });
 
         var permissions = new Mock<IPermissionGate>();
-        if (allowMedicalRead)
-        {
-            permissions
-                .Setup(g => g.EnsureLocalAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(centerId ?? Guid.Empty);
-        }
-        else
-        {
-            permissions
-                .Setup(g => g.EnsureLocalAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-                .ThrowsAsync(new ForbiddenPermissionException());
-        }
+        permissions
+            .Setup(g => g.EnsureLocalAsync(
+                MilitaryHealthPermissions.Medical.AttachmentsRead,
+                It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                if (!allowMedicalRead)
+                    return Task.FromException<Guid>(new ForbiddenPermissionException());
+                if (central || centerId is null)
+                    return Task.FromException<Guid>(new InvalidUserDataException("العملية المحلية تتطلب مركزاً نشطاً."));
+                return Task.FromResult(centerId.Value);
+            });
+
+        permissions
+            .Setup(g => g.EnsureLocalAsync(
+                MilitaryHealthPermissions.Medical.ConsultationsInvestigations,
+                It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                if (!allowMedicalWrite)
+                    return Task.FromException<Guid>(new ForbiddenPermissionException());
+                if (central || centerId is null)
+                    return Task.FromException<Guid>(new InvalidUserDataException("العملية المحلية تتطلب مركزاً نشطاً."));
+                return Task.FromResult(centerId.Value);
+            });
+
+        audit ??= Mock.Of<IAuditLogRepository>();
 
         return new AttachmentService(
             files.Object,
@@ -337,7 +502,8 @@ public class AttachmentBehaviorTests
             center.Object,
             access.Object,
             activeCenters.Object,
-            permissions.Object);
+            permissions.Object,
+            audit);
     }
 
     private static FileAsset SampleFile(Guid centerId, Guid? id = null) => new()
@@ -353,13 +519,15 @@ public class AttachmentBehaviorTests
     };
 
     private static FormFile PdfFile()
+        => NamedFile("note.pdf", new byte[] { 0x25, 0x50, 0x44, 0x46 }, "application/pdf");
+
+    private static FormFile NamedFile(string name, byte[] bytes, string contentType = "application/octet-stream")
     {
-        var bytes = new byte[] { 0x25, 0x50, 0x44, 0x46 };
         var stream = new MemoryStream(bytes);
-        return new FormFile(stream, 0, bytes.Length, "file", "note.pdf")
+        return new FormFile(stream, 0, bytes.Length, "file", name)
         {
             Headers = new HeaderDictionary(),
-            ContentType = "application/pdf"
+            ContentType = contentType
         };
     }
 }
