@@ -6,6 +6,12 @@ namespace Application.Interfaces.Repositories;
 
 public sealed record FileLinkTarget(Guid Id, Guid MemberId, Guid CenterId);
 
+/// <summary>رابط ملف طبي بسياق الاستشارة أو الاستقصاء للعرض المجمّع.</summary>
+public sealed record MedicalRequestFileLink(
+    Guid? ConsultationId,
+    Guid? InvestigationId,
+    FileAsset File);
+
 public interface IAttachmentRepository
 {
     void Add(FileAsset file);
@@ -26,6 +32,16 @@ public interface IAttachmentRepository
     Task<List<FileAsset>> ListMemberFilesAsync(Guid memberId, Guid centerId, CancellationToken cancellationToken = default);
     Task<List<FileAsset>> ListConsultationFilesAsync(Guid consultationId, Guid centerId, CancellationToken cancellationToken = default);
     Task<List<FileAsset>> ListInvestigationFilesAsync(Guid investigationId, Guid centerId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// يجلب روابط المرفقات الطبية للاستشارات/الاستقصاءات المحددة ضمن المركز دون تحميل محتوى الملف.
+    /// </summary>
+    Task<List<MedicalRequestFileLink>> ListFilesForMedicalRequestsAsync(
+        Guid memberId,
+        Guid centerId,
+        IEnumerable<Guid> consultationIds,
+        IEnumerable<Guid> investigationIds,
+        CancellationToken cancellationToken = default);
     Task<bool> HasMedicalLinkAsync(Guid fileAssetId, CancellationToken cancellationToken = default);
     Task<bool> IsProfilePhotoAsync(string userId, Guid fileAssetId, CancellationToken cancellationToken = default);
     Task ClearProfilePhotoAsync(Guid fileAssetId, CancellationToken cancellationToken = default);

@@ -79,6 +79,31 @@ public class AttachmentRepository : IAttachmentRepository
     public Task<List<FileAsset>> ListInvestigationFilesAsync(Guid investigationId, Guid centerId, CancellationToken cancellationToken = default)
         => ListLinkedAsync(a => a.InvestigationId == investigationId && a.CenterId == centerId, cancellationToken);
 
+    public async Task<List<MedicalRequestFileLink>> ListFilesForMedicalRequestsAsync(
+        Guid memberId,
+        Guid centerId,
+        IEnumerable<Guid> consultationIds,
+        IEnumerable<Guid> investigationIds,
+        CancellationToken cancellationToken = default)
+    {
+        var consultationIdSet = consultationIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        var investigationIdSet = investigationIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        if (consultationIdSet.Count == 0 && investigationIdSet.Count == 0)
+            return new List<MedicalRequestFileLink>();
+
+        return await _context.MedicalAttachments.AsNoTracking()
+            .Where(a => a.MemberId == memberId && a.CenterId == centerId)
+            .Where(a =>
+                (a.ConsultationId != null && consultationIdSet.Contains(a.ConsultationId.Value))
+                || (a.InvestigationId != null && investigationIdSet.Contains(a.InvestigationId.Value)))
+            .Join(
+                _context.FileAssets.AsNoTracking().Where(f => !f.IsDeleted),
+                a => a.FileAssetId,
+                f => f.FileAssetId,
+                (a, f) => new MedicalRequestFileLink(a.ConsultationId, a.InvestigationId, f))
+            .ToListAsync(cancellationToken);
+    }
+
     public Task<bool> HasMedicalLinkAsync(Guid fileAssetId, CancellationToken cancellationToken = default)
         => _context.MedicalAttachments.AnyAsync(a => a.FileAssetId == fileAssetId, cancellationToken);
 

@@ -95,6 +95,7 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IEntExamService, EntExamService>();
         services.AddScoped<IConsultationService, ConsultationService>();
         services.AddScoped<IInvestigationService, InvestigationService>();
+        services.AddScoped<IMemberMedicalRequestService, MemberMedicalRequestService>();
         services.AddScoped<IReferenceCatalogHandler, RecruitmentCenterCatalogHandler>();
         services.AddScoped<IReferenceCatalogHandler, ClinicCatalogHandler>();
         services.AddScoped<IReferenceCatalogHandler, ResultStatusCatalogHandler>();
