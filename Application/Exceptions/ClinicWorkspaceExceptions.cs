@@ -199,3 +199,30 @@ public class InvalidConsultationStateException : BusinessException
     {
     }
 }
+
+/// <summary>يُرمى عند نقص أو تعارض بيانات الاستقصاء المخبري/الشعاعي (FR-047).</summary>
+public class InvalidInvestigationDataException : BusinessException
+{
+    public InvalidInvestigationDataException(string message)
+        : base(message, "INVESTIGATION_INVALID_DATA", 400)
+    {
+    }
+}
+
+/// <summary>يُرمى عندما لا يُوجد الاستقصاء ضمن نطاق المركز والعيادة المخوّلين.</summary>
+public class InvestigationNotFoundException : BusinessException
+{
+    public InvestigationNotFoundException()
+        : base("الاستقصاء غير موجود ضمن نطاق المركز.", "INVESTIGATION_NOT_FOUND", 404)
+    {
+    }
+}
+
+/// <summary>يُرمى عند محاولة تسجيل نتيجة لاستقصاء ليس بحالة معلّقة.</summary>
+public class InvalidInvestigationStateException : BusinessException
+{
+    public InvalidInvestigationStateException(string message)
+        : base(message, "INVESTIGATION_INVALID_STATE", 400)
+    {
+    }
+}
