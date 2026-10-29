@@ -1,10 +1,14 @@
+using System.Net;
 using System.Security.Cryptography;
+using System.Text.Json;
 using Application.Common.Permissions;
+using Application.Common.Security;
 using Application.Dtos;
 using Application.Exceptions;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
+using Domain.Entities.Audit;
 using Domain.Entities.Auth;
 using Domain.Entities.Core;
 using Domain.Entities.Medical;
@@ -14,6 +18,9 @@ using System.IO.Compression;
 
 namespace Application.Services.AttachmentService
 {
+    /// <summary>
+    /// رفع وربط وتنزيل المرفقات عبر FileAsset الحالي، مع صلاحيات طبية وعزل مراكز وتدقيق بدون محتوى ثنائي (FR-048 / FR-049).
+    /// </summary>
     public class AttachmentService : IAttachmentService
     {
         public const string Member = "Member";
@@ -21,9 +28,17 @@ namespace Application.Services.AttachmentService
         public const string Investigation = "Investigation";
         public const string UserProfile = "UserProfile";
 
+        public const string MedicalAttachmentUploadedEventType = "MedicalAttachmentUploaded";
+        public const string MedicalAttachmentDownloadedEventType = "MedicalAttachmentDownloaded";
+
         private static readonly HashSet<string> Supported = new(StringComparer.OrdinalIgnoreCase)
         {
             Member, Consultation, Investigation, UserProfile
+        };
+
+        private static readonly HashSet<string> MedicalWriteTypes = new(StringComparer.OrdinalIgnoreCase)
+        {
+            Consultation, Investigation
         };
 
         private readonly IAttachmentRepository _files;
@@ -36,6 +51,7 @@ namespace Application.Services.AttachmentService
         private readonly IAccessContextRepository _access;
         private readonly IActiveCenterService _activeCenters;
         private readonly IPermissionGate _permissions;
+        private readonly IAuditLogRepository _audit;
 
         public AttachmentService(
             IAttachmentRepository files,
@@ -47,7 +63,8 @@ namespace Application.Services.AttachmentService
             ICurrentCenterService center,
             IAccessContextRepository access,
             IActiveCenterService activeCenters,
-            IPermissionGate permissions)
+            IPermissionGate permissions,
+            IAuditLogRepository audit)
         {
             _files = files;
             _unitOfWork = unitOfWork;
@@ -59,20 +76,37 @@ namespace Application.Services.AttachmentService
             _access = access;
             _activeCenters = activeCenters;
             _permissions = permissions;
+            _audit = audit;
         }
 
+        /// <inheritdoc />
         public async Task<AttachmentReadDto> UploadAsync(string entityId, string entityType, IFormFile file, string? description = null)
         {
             if (file == null || file.Length == 0)
                 throw new InvalidUserDataException("الملف فارغ.");
             RequireSupported(entityType);
-            var centerId = entityType.Equals(UserProfile, StringComparison.OrdinalIgnoreCase)
-                ? await ResolveProfilePhotoCenterAsync(entityId)
-                : await RequireActiveCenterAsync();
+
+            var isMedicalWrite = MedicalWriteTypes.Contains(entityType);
+            Guid? centerId;
+            if (entityType.Equals(UserProfile, StringComparison.OrdinalIgnoreCase))
+            {
+                centerId = await ResolveProfilePhotoCenterAsync(entityId);
+            }
+            else if (isMedicalWrite)
+            {
+                centerId = await RequireMedicalWriteAsync();
+            }
+            else
+            {
+                // Member list/upload path remains blocked in LinkCore; still requires operational center.
+                centerId = await RequireActiveCenterAsync();
+            }
+
             if (!_fileStorage.ValidateFile(file, out string err))
                 throw new InvalidUserDataException(err);
 
             var (path, size) = await _fileStorage.SaveFileAsync(file, entityType, entityId);
+            var userId = RequireUser();
             var asset = new FileAsset
             {
                 FileAssetId = Guid.NewGuid(),
@@ -83,7 +117,7 @@ namespace Application.Services.AttachmentService
                 MimeType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType,
                 SizeBytes = size,
                 Sha256 = await ComputeSha256Async(file),
-                UploadedByUserId = RequireUser(),
+                UploadedByUserId = userId,
                 CreatedAt = DateTimeOffset.UtcNow,
                 IsDeleted = false
             };
@@ -92,6 +126,31 @@ namespace Application.Services.AttachmentService
             try
             {
                 await LinkCoreAsync(asset, entityId, entityType, centerId);
+                if (isMedicalWrite && centerId.HasValue)
+                {
+                    RecordAudit(
+                        userId,
+                        centerId.Value,
+                        MedicalAttachmentUploadedEventType,
+                        "SUCCESS",
+                        asset.FileAssetId.ToString(),
+                        $"رفع مرفق طبي وربطه بـ {entityType}",
+                        oldValues: null,
+                        newValues: JsonSerializer.Serialize(new
+                        {
+                            asset.FileAssetId,
+                            EntityType = entityType,
+                            EntityId = entityId,
+                            asset.OriginalName,
+                            asset.Extension,
+                            asset.MimeType,
+                            asset.SizeBytes,
+                            asset.Sha256,
+                            asset.CenterId
+                            // لا يُسجَّل StorageKey ولا محتوى الملف.
+                        }));
+                }
+
                 await _unitOfWork.SaveChangesAsync();
             }
             catch
@@ -103,18 +162,20 @@ namespace Application.Services.AttachmentService
             return MapToDto(asset);
         }
 
+        /// <inheritdoc />
         public async Task<AttachmentReadDto> GetByIdAsync(Guid id)
         {
             var entity = await RequireReadableAsync(id);
             return MapToDto(entity);
         }
 
+        /// <inheritdoc />
         public async Task<bool> DeleteAsync(Guid id)
         {
             var entity = await _files.GetTrackedByIdAsync(id)
                 ?? throw new RoleNotFoundException("المرفق غير موجود.");
             if (!await _files.IsProfilePhotoAsync(RequireUser(), id))
-                await EnsureSameCenterAsync(entity.CenterId);
+                await EnsureSameCenterOrNotFoundAsync(entity.CenterId);
             if (await _files.HasMedicalLinkAsync(id))
                 throw new InvalidUserDataException("لا يمكن حذف ملف مرتبط بسجل طبي.");
 
@@ -126,6 +187,7 @@ namespace Application.Services.AttachmentService
             return true;
         }
 
+        /// <inheritdoc />
         public async Task<List<AttachmentReadDto>> GetAttachmentsForEntityAsync(string entityId, params string[] entityTypes)
         {
             var type = SingleType(entityTypes);
@@ -136,18 +198,24 @@ namespace Application.Services.AttachmentService
             return files.Select(MapToDto).ToList();
         }
 
+        /// <inheritdoc />
         public async Task LinkToEntityAsync(Guid attachmentId, string entityId, string entityType)
         {
             RequireSupported(entityType);
-            var centerId = await RequireActiveCenterAsync();
+            var centerId = MedicalWriteTypes.Contains(entityType)
+                ? await RequireMedicalWriteAsync()
+                : await RequireActiveCenterAsync();
+
             var asset = await _files.GetTrackedByIdAsync(attachmentId)
                 ?? throw new RoleNotFoundException("المرفق غير موجود.");
             if (asset.CenterId != centerId)
-                throw new InvalidUserDataException("لا يمكن ربط ملف من مركز بكيان في مركز آخر.");
+                throw new RoleNotFoundException("المرفق غير موجود.");
+
             await LinkCoreAsync(asset, entityId, entityType, centerId);
             await _unitOfWork.SaveChangesAsync();
         }
 
+        /// <inheritdoc />
         public async Task<(byte[] Bytes, string ContentType, string FileName)> DownloadAsync(Guid id)
         {
             var file = await RequireReadableAsync(id);
@@ -158,7 +226,29 @@ namespace Application.Services.AttachmentService
             }
             catch (InvalidFileException)
             {
-                throw new RoleNotFoundException($"الملف الفيزيائي غير موجود: {file.OriginalName}");
+                throw new RoleNotFoundException("الملف غير موجود أو تالف.");
+            }
+
+            if (await _files.HasMedicalLinkAsync(id) && file.CenterId.HasValue)
+            {
+                RecordAudit(
+                    RequireUser(),
+                    file.CenterId.Value,
+                    MedicalAttachmentDownloadedEventType,
+                    "SUCCESS",
+                    file.FileAssetId.ToString(),
+                    "تنزيل مرفق طبي عبر واجهة محمية",
+                    oldValues: null,
+                    newValues: JsonSerializer.Serialize(new
+                    {
+                        file.FileAssetId,
+                        file.OriginalName,
+                        file.Extension,
+                        file.MimeType,
+                        file.SizeBytes,
+                        file.CenterId
+                    }));
+                await _unitOfWork.SaveChangesAsync();
             }
 
             var name = string.IsNullOrWhiteSpace(file.OriginalName)
@@ -167,6 +257,7 @@ namespace Application.Services.AttachmentService
             return (bytes, file.MimeType, name);
         }
 
+        /// <inheritdoc />
         public async Task<(byte[] Bytes, string ZipName)> DownloadZipForEntityAsync(string entityId, params string[] entityTypes)
         {
             var type = SingleType(entityTypes);
@@ -190,7 +281,7 @@ namespace Application.Services.AttachmentService
                     }
                     catch (InvalidFileException)
                     {
-                        throw new InvalidUserDataException($"الملف مفقود على القرص: {file.OriginalName}");
+                        throw new RoleNotFoundException("أحد المرفقات غير موجود أو تالف.");
                     }
 
                     var entryName = UniqueName(used, file.OriginalName, file.FileAssetId);
@@ -232,8 +323,10 @@ namespace Application.Services.AttachmentService
                 : await _files.FindInvestigationAsync(id);
             if (target == null)
                 throw new RoleNotFoundException("الكيان المطلوب غير موجود.");
+
+            // FR-049: لا يُكشَف وجود سجل في مركز آخر.
             if (target.CenterId != centerId || asset.CenterId != target.CenterId)
-                throw new InvalidUserDataException("لا يمكن ربط ملف من مركز بكيان تابع لمركز آخر.");
+                throw new RoleNotFoundException("الكيان المطلوب غير موجود.");
 
             _files.AddMedicalAttachment(new MedicalAttachment
             {
@@ -264,9 +357,10 @@ namespace Application.Services.AttachmentService
 
             if (entityType.Equals(Member, StringComparison.OrdinalIgnoreCase))
             {
-                var member = await _files.FindMemberAsync(id) ?? throw new RoleNotFoundException("المنتسب غير موجود.");
+                var member = await _files.FindMemberAsync(id)
+                    ?? throw new RoleNotFoundException("المنتسب غير موجود.");
                 if (member.CenterId != centerId)
-                    throw new InvalidUserDataException("المنتسب لا يتبع المركز النشط.");
+                    throw new RoleNotFoundException("المنتسب غير موجود.");
                 return await _files.ListMemberFilesAsync(id, centerId);
             }
 
@@ -285,7 +379,8 @@ namespace Application.Services.AttachmentService
             var userId = RequireUser();
             if (await _files.IsProfilePhotoAsync(userId, id))
                 return file;
-            await EnsureSameCenterAsync(file.CenterId);
+
+            await EnsureSameCenterOrNotFoundAsync(file.CenterId);
             await RequireMedicalReadAsync();
             return file;
         }
@@ -296,6 +391,9 @@ namespace Application.Services.AttachmentService
 
         private Task RequireMedicalReadAsync()
             => _permissions.EnsureLocalAsync(MilitaryHealthPermissions.Medical.AttachmentsRead);
+
+        private Task<Guid> RequireMedicalWriteAsync()
+            => _permissions.EnsureLocalAsync(MilitaryHealthPermissions.Medical.ConsultationsInvestigations);
 
         private async Task<Guid?> ResolveProfilePhotoCenterAsync(string entityId)
         {
@@ -314,11 +412,43 @@ namespace Application.Services.AttachmentService
         private Task<Guid> RequireActiveCenterAsync()
             => _activeCenters.RequireOperationalCenterAsync();
 
-        private async Task EnsureSameCenterAsync(Guid? fileCenterId)
+        /// <summary>FR-049: مركز آخر يُعامل كغير موجود دون كشف الوجود.</summary>
+        private async Task EnsureSameCenterOrNotFoundAsync(Guid? fileCenterId)
         {
             var centerId = await RequireActiveCenterAsync();
             if (fileCenterId != centerId)
-                throw new ForbiddenPermissionException("الملف لا يتبع المركز النشط.");
+                throw new RoleNotFoundException("المرفق غير موجود أو محذوف.");
+        }
+
+        private void RecordAudit(
+            string userId,
+            Guid centerId,
+            string eventType,
+            string result,
+            string entityId,
+            string reasonText,
+            string? oldValues,
+            string? newValues)
+        {
+            _audit.Add(new AuditEvent
+            {
+                OccurredAt = DateTimeOffset.UtcNow,
+                ActorUserId = userId,
+                ContextScope = CenterClaimTypes.Center,
+                CenterId = centerId,
+                EventType = eventType,
+                Result = result,
+                EntityType = nameof(FileAsset),
+                EntityId = entityId,
+                ReasonText = reasonText,
+                OldValues = oldValues,
+                NewValues = newValues,
+                UserAgent = _currentUser.UserAgent,
+                CorrelationId = _currentUser.CorrelationId == Guid.Empty
+                    ? Guid.NewGuid()
+                    : _currentUser.CorrelationId,
+                IPAddress = IPAddress.TryParse(_currentUser.IPAddress, out var ip) ? ip : null
+            });
         }
 
         private string RequireUser()
