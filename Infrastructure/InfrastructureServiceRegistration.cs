@@ -47,6 +47,7 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IMemberRepository, MemberRepository>();
         services.AddScoped<IMemberImportBatchRepository, MemberImportBatchRepository>();
         services.AddScoped<IClinicWorkspaceRepository, ClinicWorkspaceRepository>();
+        services.AddScoped<IMemberArchiveRepository, MemberArchiveRepository>();
         services.AddScoped<IConsultationRepository, ConsultationRepository>();
         services.AddScoped<IInvestigationRepository, InvestigationRepository>();
         #endregion

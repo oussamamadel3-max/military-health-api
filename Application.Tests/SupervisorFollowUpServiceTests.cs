@@ -3,6 +3,7 @@ using Application.Dtos.Members;
 using Application.Dtos.Supervisor;
 using Application.Exceptions;
 using Application.Interfaces;
+using Application.Interfaces.Services;
 using Application.Services.Supervisor;
 using Domain.Entities.Clinical;
 using Domain.Entities.Core;

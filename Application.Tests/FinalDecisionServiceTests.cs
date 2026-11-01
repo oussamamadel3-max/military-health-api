@@ -59,14 +59,25 @@ public class FinalDecisionServiceTests
         Assert.Null(result.DisagreementJustification);
         Assert.Empty(result.DisagreeingClinicCodes);
         Assert.Equal(0, result.ObjectionCount);
-        Assert.False(result.ArchiveCreated);
+        Assert.True(result.ArchiveCreated);
+        Assert.NotNull(result.ArchiveId);
+        Assert.Equal("A-00000001", result.ArchiveNumber);
+        Assert.NotNull(result.ArchivedAt);
         Assert.Equal(2, result.MemberDataRevision);
         Assert.Equal("actor-1", result.SupervisorUserId);
 
         Assert.Equal(1, await db.FinalDecisions.CountAsync());
         Assert.Equal(0, await db.SupervisorObjections.CountAsync());
+        var archive = Assert.Single(await db.MemberArchives.ToListAsync());
+        Assert.Equal(result.FinalDecisionId, archive.FinalDecisionId);
+        Assert.Equal(memberId, archive.MemberId);
+        Assert.Equal(CenterA, archive.CenterId);
+        Assert.Equal("A-00000001", archive.ArchiveNumber);
         Assert.Equal(1, await db.AuditEvents.CountAsync(e =>
             e.EventType == FinalDecisionService.FinalDecisionIssuedEventType
+            && e.Result == "SUCCESS"));
+        Assert.Equal(1, await db.AuditEvents.CountAsync(e =>
+            e.EventType == FinalDecisionService.MemberArchiveCreatedEventType
             && e.Result == "SUCCESS"));
     }
 
@@ -405,6 +416,31 @@ public class FinalDecisionServiceTests
     }
 
     [Fact]
+    public async Task Issue_assigns_center_scoped_archive_numbers_sequentially()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberA = await CreateMemberAsync(db, CenterA, "FD-ARC-A1");
+        var memberB = await CreateMemberAsync(db, CenterA, "FD-ARC-A2");
+        var memberOtherCenter = await CreateMemberAsync(db, CenterB, "FD-ARC-B1");
+        await SeedAllAssessmentsAsync(db, memberA, CenterA, resultStatusId: 1);
+        await SeedAllAssessmentsAsync(db, memberB, CenterA, resultStatusId: 1);
+        await SeedAllAssessmentsAsync(db, memberOtherCenter, CenterB, resultStatusId: 1);
+
+        var serviceA = CreateService(db, CenterA, allow: true);
+        var first = await serviceA.IssueAsync(memberA, new IssueFinalDecisionRequest { ResultStatusId = 1 });
+        var second = await serviceA.IssueAsync(memberB, new IssueFinalDecisionRequest { ResultStatusId = 1 });
+
+        var serviceB = CreateService(db, CenterB, allow: true);
+        var other = await serviceB.IssueAsync(memberOtherCenter, new IssueFinalDecisionRequest { ResultStatusId = 1 });
+
+        Assert.Equal("A-00000001", first.ArchiveNumber);
+        Assert.Equal("A-00000002", second.ArchiveNumber);
+        Assert.Equal("B-00000001", other.ArchiveNumber);
+        Assert.Equal(3, await db.MemberArchives.CountAsync());
+    }
+
+    [Fact]
     public async Task Amend_with_reason_updates_decision_and_writes_history()
     {
         await using var db = MemberServiceTests.CreateDb();
@@ -436,8 +472,12 @@ public class FinalDecisionServiceTests
         Assert.Equal("ظهور نتائج مخبرية جديدة", amended.ChangeReason);
         Assert.True(amended.ExportResetPerformed);
         Assert.Equal(FinalDecisionService.ExportStatusExported, amended.PreviousExportStatus);
+        Assert.True(amended.ArchiveCreated);
+        Assert.Equal(issued.ArchiveId, amended.ArchiveId);
+        Assert.Equal(issued.ArchiveNumber, amended.ArchiveNumber);
         Assert.Equal(1, await db.FinalDecisions.CountAsync());
         Assert.Equal(1, await db.FinalDecisionHistories.CountAsync());
+        Assert.Equal(1, await db.MemberArchives.CountAsync());
 
         var history = await db.FinalDecisionHistories.SingleAsync();
         Assert.Equal(amended.HistoryId, history.HistoryId);
@@ -450,6 +490,10 @@ public class FinalDecisionServiceTests
         member = await db.Members.SingleAsync(m => m.MemberId == memberId);
         Assert.Equal(FinalDecisionService.ExportStatusUnexported, member.ExportStatus);
         Assert.Null(member.LastExportedAt);
+
+        Assert.Equal(1, await db.AuditEvents.CountAsync(e =>
+            e.EventType == FinalDecisionService.MemberArchiveUpdatedEventType
+            && e.Result == "SUCCESS"));
 
         Assert.Equal(1, await db.AuditEvents.CountAsync(e =>
             e.EventType == FinalDecisionService.FinalDecisionAmendedEventType
@@ -713,6 +757,8 @@ public class FinalDecisionServiceTests
             new ClinicWorkspaceRepository(db),
             new CenterClinicRepository(db),
             new ReferenceDataRepository(db),
+            new MedicalCenterRepository(db),
+            new MemberArchiveRepository(db),
             new AuditLogRepository(db),
             new FinalDecisionTestUnitOfWork(db));
     }

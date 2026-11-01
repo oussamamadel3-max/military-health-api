@@ -78,9 +78,18 @@ public class FinalDecisionDto
     public FinalDecisionDeferredActionDto? DeferredAction { get; set; }
 
     /// <summary>
-    /// نقطة ربط لأرشفة القرار (T-10 / BR-017). false لأن الأرشفة خارج نطاق بطاقات القرار الحالية.
+    /// true عند إنشاء أو تحديث سجل الأرشيف المرتبط بالقرار في هذه العملية (FR-069 / BR-017).
     /// </summary>
     public bool ArchiveCreated { get; set; }
+
+    /// <summary>معرّف سجل الأرشيف عند إنشائه أو تحديثه في هذه العملية.</summary>
+    public Guid? ArchiveId { get; set; }
+
+    /// <summary>الرقم الأرشيفي الفريد؛ يحمل رمز مركز صدور القرار.</summary>
+    public string? ArchiveNumber { get; set; }
+
+    /// <summary>وقت الأرشفة المخزَّن في سجل الأرشيف.</summary>
+    public DateTimeOffset? ArchivedAt { get; set; }
 }
 
 /// <summary>نتيجة تعديل القرار النهائي مع معرف سجل التاريخ وإعادة التصدير.</summary>

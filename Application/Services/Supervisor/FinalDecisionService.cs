@@ -8,6 +8,7 @@ using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Application.Services.ClinicWorkspace;
+using Domain.Entities.Archive;
 using Domain.Entities.Audit;
 using Domain.Entities.Clinical;
 using Domain.Entities.Core;
@@ -18,12 +19,14 @@ namespace Application.Services.Supervisor;
 
 /// <summary>
 /// إصدار وتعديل القرار الطبي النهائي المعتمد مع مبرر الاختلاف،
-/// ربط DeferredAction، وسجل تاريخ التغيّر (FR-053…FR-056).
+/// ربط DeferredAction، وسجل تاريخ التغيّر، وإنشاء/تحديث الأرشيف (FR-053…FR-056، FR-069).
 /// </summary>
 public class FinalDecisionService : IFinalDecisionService
 {
     public const string FinalDecisionIssuedEventType = "FinalDecisionIssued";
     public const string FinalDecisionAmendedEventType = "FinalDecisionAmended";
+    public const string MemberArchiveCreatedEventType = "MemberArchiveCreated";
+    public const string MemberArchiveUpdatedEventType = "MemberArchiveUpdated";
     public const string TargetScopeOneClinic = "ONE_CLINIC";
     public const string ObjectionStatusOpen = "OPEN";
     public const string DeferredStatusRequested = "REQUESTED";
@@ -41,6 +44,8 @@ public class FinalDecisionService : IFinalDecisionService
     private readonly IClinicWorkspaceRepository _clinicWorkspace;
     private readonly ICenterClinicRepository _centerClinics;
     private readonly IReferenceDataRepository _referenceData;
+    private readonly IMedicalCenterRepository _centers;
+    private readonly IMemberArchiveRepository _archives;
     private readonly IAuditLogRepository _audit;
     private readonly IUnitOfWork _unitOfWork;
 
@@ -51,6 +56,8 @@ public class FinalDecisionService : IFinalDecisionService
         IClinicWorkspaceRepository clinicWorkspace,
         ICenterClinicRepository centerClinics,
         IReferenceDataRepository referenceData,
+        IMedicalCenterRepository centers,
+        IMemberArchiveRepository archives,
         IAuditLogRepository audit,
         IUnitOfWork unitOfWork)
     {
@@ -60,6 +67,8 @@ public class FinalDecisionService : IFinalDecisionService
         _clinicWorkspace = clinicWorkspace;
         _centerClinics = centerClinics;
         _referenceData = referenceData;
+        _centers = centers;
+        _archives = archives;
         _audit = audit;
         _unitOfWork = unitOfWork;
     }
@@ -153,6 +162,9 @@ public class FinalDecisionService : IFinalDecisionService
         BumpMemberRevision(member, userId, now);
 
         var disagreeingCodes = disagreeing.Select(a => clinicCodeById[a.ClinicId]).ToList();
+        // FR-069 / BR-017: الأرشيف يُنشأ في نفس وحدة العمل قبل COMMIT لإرضاء ctFinalDecisionArchive.
+        var archive = await CreateArchiveForDecisionAsync(decision, now, cancellationToken);
+
         RecordIssuedAudit(
             userId,
             centerId,
@@ -160,9 +172,10 @@ public class FinalDecisionService : IFinalDecisionService
             decision,
             disagreeingCodes,
             objections.Count,
-            deferredAction?.DeferredActionId);
+            deferredAction?.DeferredActionId,
+            archive);
 
-        var archiveCreated = TryCreateArchiveHook(decision);
+        RecordArchiveCreatedAudit(userId, centerId, memberId, archive);
 
         try
         {
@@ -186,7 +199,8 @@ public class FinalDecisionService : IFinalDecisionService
             objections.Count,
             deferredAction,
             actionType,
-            archiveCreated,
+            archive,
+            archiveTouched: true,
             cancellationToken);
     }
 
@@ -310,6 +324,9 @@ public class FinalDecisionService : IFinalDecisionService
         _clinicWorkspace.AddFinalDecisionHistory(history);
 
         var disagreeingCodes = disagreeing.Select(a => clinicCodeById[a.ClinicId]).ToList();
+        // FR-069 / A3 وخطوة FR-056-9: تحديث سجل الأرشيف المرتبط دون فقد الربط أو التاريخ.
+        var archive = await TouchArchiveForDecisionAsync(decision, now, cancellationToken);
+
         RecordAmendedAudit(
             userId,
             centerId,
@@ -324,9 +341,11 @@ public class FinalDecisionService : IFinalDecisionService
             disagreeingCodes,
             objections.Count,
             newDeferredAction?.DeferredActionId,
-            closedDeferredCount: openFinalDeferred.Count);
+            closedDeferredCount: openFinalDeferred.Count,
+            archive);
 
-        var archiveUpdated = TryUpdateArchiveHook(decision);
+        if (archive is not null)
+            RecordArchiveUpdatedAudit(userId, centerId, memberId, archive);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -337,7 +356,8 @@ public class FinalDecisionService : IFinalDecisionService
             objections.Count,
             newDeferredAction,
             actionType,
-            archiveCreated: archiveUpdated,
+            archive,
+            archiveTouched: archive is not null,
             cancellationToken);
 
         return new AmendFinalDecisionDto
@@ -358,6 +378,9 @@ public class FinalDecisionService : IFinalDecisionService
             DeferredActionId = baseDto.DeferredActionId,
             DeferredAction = baseDto.DeferredAction,
             ArchiveCreated = baseDto.ArchiveCreated,
+            ArchiveId = baseDto.ArchiveId,
+            ArchiveNumber = baseDto.ArchiveNumber,
+            ArchivedAt = baseDto.ArchivedAt,
             HistoryId = history.HistoryId,
             OldResultStatusId = oldStatusId,
             ChangeReason = changeReason,
@@ -536,7 +559,8 @@ public class FinalDecisionService : IFinalDecisionService
         int objectionCount,
         DeferredAction? deferredAction,
         RequiredActionType? actionType,
-        bool archiveCreated,
+        MemberArchive? archive,
+        bool archiveTouched,
         CancellationToken cancellationToken)
     {
         var statusName = await _referenceData.ResultStatuses(asNoTracking: true)
@@ -577,7 +601,10 @@ public class FinalDecisionService : IFinalDecisionService
             ObjectionCount = objectionCount,
             DeferredActionId = deferredAction?.DeferredActionId,
             DeferredAction = deferredDto,
-            ArchiveCreated = archiveCreated
+            ArchiveCreated = archiveTouched,
+            ArchiveId = archive?.ArchiveId,
+            ArchiveNumber = archive?.ArchiveNumber,
+            ArchivedAt = archive?.ArchivedAt
         };
     }
 
@@ -704,21 +731,60 @@ public class FinalDecisionService : IFinalDecisionService
     }
 
     /// <summary>
-    /// خطاف أرشفة القرار النهائي عند الإصدار (BR-017). لا يُنشئ أرشيفاً هنا — يُستكمل في T-10.
+    /// ينشئ سجل أرشيف مرتبطاً بالقرار والمركز برقم فريد يحمل رمز المركز (FR-069 / BR-017 / BR-053).
+    /// يُدرج ضمن نفس وحدة العمل قبل COMMIT لأن قيد ctFinalDecisionArchive يتطلب سطراً مطابقاً واحداً.
     /// </summary>
-    private static bool TryCreateArchiveHook(FinalDecision decision)
+    private async Task<MemberArchive> CreateArchiveForDecisionAsync(
+        FinalDecision decision,
+        DateTimeOffset archivedAt,
+        CancellationToken cancellationToken)
     {
-        _ = decision;
-        return false;
+        var center = await _centers.GetByIdAsync(decision.CenterId, asNoTracking: true, cancellationToken);
+        if (center is null || string.IsNullOrWhiteSpace(center.Code))
+        {
+            throw new InvalidFinalDecisionDataException(
+                "تعذر إنشاء سجل الأرشيف: رمز مركز صدور القرار غير متوفر.");
+        }
+
+        var archiveNumber = await _archives.AllocateArchiveNumberAsync(
+            decision.CenterId,
+            center.Code,
+            cancellationToken);
+
+        var archive = new MemberArchive
+        {
+            ArchiveId = Guid.NewGuid(),
+            MemberId = decision.MemberId,
+            FinalDecisionId = decision.FinalDecisionId,
+            CenterId = decision.CenterId,
+            ArchiveNumber = archiveNumber,
+            ArchivedAt = archivedAt,
+            DigitalCopyFileId = null,
+            UpdatedAt = archivedAt
+        };
+
+        _archives.Add(archive);
+        return archive;
     }
 
     /// <summary>
-    /// خطاف تحديث الأرشيف عند تعديل القرار (FR-056 خطوة 9). لا يُحدَّث هنا — يُستكمل في T-10.
+    /// يحدّث بصمة سجل الأرشيف عند تعديل القرار (FR-069 / A3). النتيجة تُقرأ من القرار النهائي لا من صف الأرشيف.
     /// </summary>
-    private static bool TryUpdateArchiveHook(FinalDecision decision)
+    private async Task<MemberArchive?> TouchArchiveForDecisionAsync(
+        FinalDecision decision,
+        DateTimeOffset updatedAt,
+        CancellationToken cancellationToken)
     {
-        _ = decision;
-        return false;
+        var archive = await _archives.GetByFinalDecisionIdAsync(
+            decision.FinalDecisionId,
+            asNoTracking: false,
+            cancellationToken);
+
+        if (archive is null)
+            return null;
+
+        archive.UpdatedAt = updatedAt;
+        return archive;
     }
 
     private void RecordIssuedAudit(
@@ -728,7 +794,8 @@ public class FinalDecisionService : IFinalDecisionService
         FinalDecision decision,
         IReadOnlyList<string> disagreeingClinicCodes,
         int objectionCount,
-        Guid? deferredActionId)
+        Guid? deferredActionId,
+        MemberArchive archive)
     {
         _audit.Add(new AuditEvent
         {
@@ -754,8 +821,81 @@ public class FinalDecisionService : IFinalDecisionService
                 ObjectionCount = objectionCount,
                 DeferredActionId = deferredActionId,
                 DeferredStatus = deferredActionId.HasValue ? DeferredStatusRequested : null,
-                ArchiveHookInvoked = true,
-                ArchiveCreated = false
+                ArchiveCreated = true,
+                archive.ArchiveId,
+                archive.ArchiveNumber,
+                archive.ArchivedAt
+            }),
+            UserAgent = _currentUser.UserAgent,
+            CorrelationId = _currentUser.CorrelationId == Guid.Empty
+                ? Guid.NewGuid()
+                : _currentUser.CorrelationId,
+            IPAddress = IPAddress.TryParse(_currentUser.IPAddress, out var ip) ? ip : null
+        });
+    }
+
+    private void RecordArchiveCreatedAudit(
+        string userId,
+        Guid centerId,
+        Guid memberId,
+        MemberArchive archive)
+    {
+        _audit.Add(new AuditEvent
+        {
+            OccurredAt = DateTimeOffset.UtcNow,
+            ActorUserId = userId,
+            ContextScope = CenterClaimTypes.Center,
+            CenterId = centerId,
+            EventType = MemberArchiveCreatedEventType,
+            Result = "SUCCESS",
+            EntityType = nameof(MemberArchive),
+            EntityId = archive.ArchiveId.ToString(),
+            ReasonText = $"إنشاء سجل أرشيف للمنتسب {memberId:D} برقم {archive.ArchiveNumber}",
+            OldValues = null,
+            NewValues = JsonSerializer.Serialize(new
+            {
+                archive.ArchiveId,
+                archive.MemberId,
+                archive.FinalDecisionId,
+                archive.CenterId,
+                archive.ArchiveNumber,
+                archive.ArchivedAt
+            }),
+            UserAgent = _currentUser.UserAgent,
+            CorrelationId = _currentUser.CorrelationId == Guid.Empty
+                ? Guid.NewGuid()
+                : _currentUser.CorrelationId,
+            IPAddress = IPAddress.TryParse(_currentUser.IPAddress, out var ip) ? ip : null
+        });
+    }
+
+    private void RecordArchiveUpdatedAudit(
+        string userId,
+        Guid centerId,
+        Guid memberId,
+        MemberArchive archive)
+    {
+        _audit.Add(new AuditEvent
+        {
+            OccurredAt = DateTimeOffset.UtcNow,
+            ActorUserId = userId,
+            ContextScope = CenterClaimTypes.Center,
+            CenterId = centerId,
+            EventType = MemberArchiveUpdatedEventType,
+            Result = "SUCCESS",
+            EntityType = nameof(MemberArchive),
+            EntityId = archive.ArchiveId.ToString(),
+            ReasonText = $"تحديث سجل الأرشيف للمنتسب {memberId:D} بعد تعديل القرار النهائي",
+            OldValues = null,
+            NewValues = JsonSerializer.Serialize(new
+            {
+                archive.ArchiveId,
+                archive.MemberId,
+                archive.FinalDecisionId,
+                archive.CenterId,
+                archive.ArchiveNumber,
+                archive.ArchivedAt,
+                archive.UpdatedAt
             }),
             UserAgent = _currentUser.UserAgent,
             CorrelationId = _currentUser.CorrelationId == Guid.Empty
@@ -779,7 +919,8 @@ public class FinalDecisionService : IFinalDecisionService
         IReadOnlyList<string> disagreeingClinicCodes,
         int objectionCount,
         Guid? deferredActionId,
-        int closedDeferredCount)
+        int closedDeferredCount,
+        MemberArchive? archive)
     {
         _audit.Add(new AuditEvent
         {
@@ -818,8 +959,9 @@ public class FinalDecisionService : IFinalDecisionService
                 ObjectionCount = objectionCount,
                 DeferredActionId = deferredActionId,
                 ClosedDeferredCount = closedDeferredCount,
-                ArchiveHookInvoked = true,
-                ArchiveUpdated = false
+                ArchiveUpdated = archive is not null,
+                ArchiveId = archive?.ArchiveId,
+                ArchiveNumber = archive?.ArchiveNumber
             }),
             UserAgent = _currentUser.UserAgent,
             CorrelationId = _currentUser.CorrelationId == Guid.Empty
