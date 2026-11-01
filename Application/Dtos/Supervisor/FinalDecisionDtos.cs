@@ -1,16 +1,37 @@
 namespace Application.Dtos.Supervisor;
 
-/// <summary>طلب إصدار القرار النهائي المعتمد (قبول/رفض فقط في MH-P6-020).</summary>
+/// <summary>
+/// طلب إصدار القرار النهائي المعتمد (قبول/رفض/مؤجل).
+/// التأجيل يتطلب حقول الإجراء المطلوب ومدة الانتهاء (FR-055).
+/// </summary>
 public class IssueFinalDecisionRequest
 {
-    /// <summary>1=مقبول، 2=مرفوض. التأجيل (3) خارج نطاق هذه البطاقة.</summary>
+    /// <summary>1=مقبول، 2=مرفوض، 3=مؤجل.</summary>
     public short ResultStatusId { get; set; }
 
-    /// <summary>سبب الرفض إلزامي عندما ResultStatusId = 2؛ يجب أن يكون null/فارغاً عند القبول.</summary>
+    /// <summary>سبب الرفض إلزامي عندما ResultStatusId = 2؛ يجب أن يكون فارغاً لغير الرفض.</summary>
     public string? RejectionReason { get; set; }
 
     /// <summary>مبرر الاختلاف عن تقييم عيادة أو أكثر؛ إلزامي عند التعارض.</summary>
     public string? DisagreementJustification { get; set; }
+
+    /// <summary>سبب التأجيل؛ إلزامي عندما ResultStatusId = 3.</summary>
+    public string? DeferReason { get; set; }
+
+    /// <summary>تاريخ انتهاء التأجيل؛ إلزامي للقرار النهائي المؤجل.</summary>
+    public DateOnly? DeferUntil { get; set; }
+
+    /// <summary>نوع الإجراء المطلوب؛ إلزامي عند التأجيل.</summary>
+    public short? ActionTypeId { get; set; }
+
+    /// <summary>توصيف الإجراء عند الأنواع التي تتطلب وصفاً (مثل غير ذلك).</summary>
+    public string? ActionDescription { get; set; }
+
+    /// <summary>ملاحظة توضيحية إلزامية عند التأجيل.</summary>
+    public string? FollowupNote { get; set; }
+
+    /// <summary>العيادة المستهدفة عند الأنواع التي تتطلب عيادة.</summary>
+    public Guid? TargetClinicId { get; set; }
 
     /// <summary>
     /// مراجعة بيانات المنتسب المتوقعة للحماية من اعتماد متزامن.
@@ -40,8 +61,27 @@ public class FinalDecisionDto
     /// <summary>عدد سجلات اعتراض المشرف المُنشأة لهذا القرار.</summary>
     public int ObjectionCount { get; set; }
 
+    /// <summary>معرّف الإجراء المؤجل المرتبط عند النتيجة مؤجل؛ null لغير ذلك.</summary>
+    public Guid? DeferredActionId { get; set; }
+
+    /// <summary>ملخص الإجراء المؤجل للعرض في متابعة المشرف.</summary>
+    public FinalDecisionDeferredActionDto? DeferredAction { get; set; }
+
     /// <summary>
-    /// نقطة ربط لأرشفة القرار (T-10 / BR-017). false في هذه البطاقة لأن الأرشفة خارج النطاق.
+    /// نقطة ربط لأرشفة القرار (T-10 / BR-017). false لأن الأرشفة خارج نطاق بطاقات القرار الحالية.
     /// </summary>
     public bool ArchiveCreated { get; set; }
+}
+
+/// <summary>ملخص إجراء مؤجل مرتبط بقرار نهائي.</summary>
+public class FinalDecisionDeferredActionDto
+{
+    public Guid DeferredActionId { get; set; }
+    public string DeferReason { get; set; } = null!;
+    public DateOnly DeferUntil { get; set; }
+    public short ActionTypeId { get; set; }
+    public string? ActionTypeNameAr { get; set; }
+    public string? ActionDescription { get; set; }
+    public string FollowupNote { get; set; } = null!;
+    public string Status { get; set; } = null!;
 }

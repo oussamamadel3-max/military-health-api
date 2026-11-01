@@ -9,8 +9,8 @@ using Microsoft.AspNetCore.Mvc;
 namespace API.Controllers;
 
 /// <summary>
-/// إصدار القرار النهائي المعتمد ضمن مساحة عمل المشرف (FR-053 / FR-054).
-/// التأجيل والتعديل مساران لاحقان.
+/// إصدار القرار النهائي المعتمد ضمن مساحة عمل المشرف (FR-053 / FR-054 / FR-055).
+/// التعديل مسار لاحق (MH-P6-040).
 /// </summary>
 [ApiController]
 [Authorize]
@@ -25,8 +25,8 @@ public class SupervisorFinalDecisionController : ControllerBase
     }
 
     /// <summary>
-    /// يصدر قراراً نهائياً (قبول/رفض) للمنتسب بعد اكتمال العيادات الإلزامية،
-    /// مع مبرر الاختلاف عند التعارض مع تقييم عيادة.
+    /// يصدر قراراً نهائياً (قبول/رفض/مؤجل) للمنتسب بعد اكتمال العيادات الإلزامية،
+    /// مع مبرر الاختلاف عند التعارض، وربط إجراء مؤجل بحالة مطلوب عند التأجيل.
     /// </summary>
     [HttpPost("members/{memberId:guid}/final-decision")]
     [AuthorizeOperation(MilitaryHealthPermissions.Clinical.FinalDecision, OperationScope.Local)]

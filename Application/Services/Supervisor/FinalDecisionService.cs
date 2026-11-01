@@ -10,20 +10,22 @@ using Application.Interfaces.Services;
 using Application.Services.ClinicWorkspace;
 using Domain.Entities.Audit;
 using Domain.Entities.Clinical;
+using Domain.Entities.Core;
 using Domain.Entities.Patient;
 using Microsoft.EntityFrameworkCore;
 
 namespace Application.Services.Supervisor;
 
 /// <summary>
-/// إصدار القرار الطبي النهائي المعتمد (قبول/رفض) مع مبرر الاختلاف واعتراضات العيادات (FR-053 / FR-054).
-/// التأجيل (3) والتعديل خارج هذه البطاقة.
+/// إصدار القرار الطبي النهائي المعتمد (قبول/رفض/مؤجل) مع مبرر الاختلاف وربط DeferredAction (FR-053 / FR-054 / FR-055).
+/// التعديل مسار لاحق (MH-P6-040).
 /// </summary>
 public class FinalDecisionService : IFinalDecisionService
 {
     public const string FinalDecisionIssuedEventType = "FinalDecisionIssued";
     public const string TargetScopeOneClinic = "ONE_CLINIC";
     public const string ObjectionStatusOpen = "OPEN";
+    public const string DeferredStatusRequested = "REQUESTED";
 
     public const short AcceptedResultStatusId = ClinicAssessmentService.AcceptedResultStatusId;
     public const short RejectedResultStatusId = ClinicAssessmentService.RejectedResultStatusId;
@@ -77,7 +79,14 @@ public class FinalDecisionService : IFinalDecisionService
             cancellationToken);
 
         var userId = RequireUserId();
-        ValidateResultPayload(request);
+        var isDeferred = request.ResultStatusId == DeferredResultStatusId;
+        ValidateResultPayload(request, isDeferred);
+
+        RequiredActionType? actionType = null;
+        if (isDeferred)
+        {
+            actionType = await ResolveAndValidateActionTypeAsync(request, cancellationToken);
+        }
 
         var member = await _members.GetByIdInCenterAsync(
             memberId,
@@ -164,6 +173,18 @@ public class FinalDecisionService : IFinalDecisionService
 
         _clinicWorkspace.AddFinalDecision(decision);
 
+        DeferredAction? deferredAction = null;
+        if (isDeferred)
+        {
+            deferredAction = CreateFinalDeferredAction(
+                decision,
+                request,
+                actionType!,
+                userId,
+                now);
+            _clinicWorkspace.AddDeferredAction(deferredAction);
+        }
+
         var objections = new List<SupervisorObjection>(disagreeing.Count);
         foreach (var assessment in disagreeing)
         {
@@ -186,20 +207,20 @@ public class FinalDecisionService : IFinalDecisionService
             objections.Add(objection);
         }
 
-        // حماية تعارض بسيطة: رفع مراجعة المنتسب مع حفظ القرار في نفس الوحدة.
         member.DataRevision += 1;
         member.UpdatedByUserId = userId;
         member.UpdatedAt = now;
 
+        var disagreeingCodes = disagreeing.Select(a => clinicCodeById[a.ClinicId]).ToList();
         RecordIssuedAudit(
             userId,
             centerId,
             memberId,
             decision,
-            disagreeing.Select(a => clinicCodeById[a.ClinicId]).ToList(),
-            objections.Count);
+            disagreeingCodes,
+            objections.Count,
+            deferredAction?.DeferredActionId);
 
-        // نقطة ربط صريحة لأرشفة القرار (BR-017 / T-10) — خارج نطاق MH-P6-020.
         var archiveCreated = TryCreateArchiveHook(decision);
 
         try
@@ -208,7 +229,6 @@ public class FinalDecisionService : IFinalDecisionService
         }
         catch (DbUpdateException)
         {
-            // سباق جلستين على القيد الفريد MemberId.
             if (await _clinicWorkspace.QueryFinalDecisions(asNoTracking: true)
                     .AnyAsync(d => d.MemberId == memberId, cancellationToken))
             {
@@ -223,6 +243,22 @@ public class FinalDecisionService : IFinalDecisionService
             .Select(s => s.NameAr)
             .FirstOrDefaultAsync(cancellationToken);
 
+        FinalDecisionDeferredActionDto? deferredDto = null;
+        if (deferredAction is not null)
+        {
+            deferredDto = new FinalDecisionDeferredActionDto
+            {
+                DeferredActionId = deferredAction.DeferredActionId,
+                DeferReason = deferredAction.DeferReason,
+                DeferUntil = deferredAction.DeferUntil!.Value,
+                ActionTypeId = deferredAction.ActionTypeId,
+                ActionTypeNameAr = actionType!.NameAr,
+                ActionDescription = deferredAction.ActionDescription,
+                FollowupNote = deferredAction.FollowupNote,
+                Status = deferredAction.Status
+            };
+        }
+
         return new FinalDecisionDto
         {
             FinalDecisionId = decision.FinalDecisionId,
@@ -236,26 +272,24 @@ public class FinalDecisionService : IFinalDecisionService
             DecidedAt = decision.DecidedAt,
             UpdatedAt = decision.UpdatedAt,
             MemberDataRevision = member.DataRevision,
-            DisagreeingClinicCodes = disagreeing.Select(a => clinicCodeById[a.ClinicId]).ToList(),
+            DisagreeingClinicCodes = disagreeingCodes,
             ObjectionCount = objections.Count,
+            DeferredActionId = deferredAction?.DeferredActionId,
+            DeferredAction = deferredDto,
             ArchiveCreated = archiveCreated
         };
     }
 
     #region Private Helpers
 
-    private static void ValidateResultPayload(IssueFinalDecisionRequest request)
+    private static void ValidateResultPayload(IssueFinalDecisionRequest request, bool isDeferred)
     {
-        if (request.ResultStatusId == DeferredResultStatusId)
+        if (request.ResultStatusId is not AcceptedResultStatusId
+            and not RejectedResultStatusId
+            and not DeferredResultStatusId)
         {
             throw new InvalidFinalDecisionDataException(
-                "تأجيل القرار النهائي يتم عبر مسار منفصل وليس عبر إصدار القبول/الرفض.");
-        }
-
-        if (request.ResultStatusId is not AcceptedResultStatusId and not RejectedResultStatusId)
-        {
-            throw new InvalidFinalDecisionDataException(
-                "نتيجة القرار النهائي يجب أن تكون مقبول (1) أو مرفوض (2).");
+                "نتيجة القرار النهائي يجب أن تكون مقبول (1) أو مرفوض (2) أو مؤجل (3).");
         }
 
         if (request.ResultStatusId == RejectedResultStatusId)
@@ -271,6 +305,103 @@ public class FinalDecisionService : IFinalDecisionService
             throw new InvalidFinalDecisionDataException(
                 "سبب الرفض يُسمح به فقط عند نتيجة مرفوض.");
         }
+
+        if (!isDeferred)
+        {
+            if (request.ActionTypeId.HasValue
+                || request.DeferUntil.HasValue
+                || request.TargetClinicId.HasValue
+                || !string.IsNullOrWhiteSpace(request.DeferReason)
+                || !string.IsNullOrWhiteSpace(request.FollowupNote)
+                || !string.IsNullOrWhiteSpace(request.ActionDescription))
+            {
+                throw new InvalidFinalDecisionDataException(
+                    "حقول التأجيل تُسمح بها فقط عند اختيار مؤجل.");
+            }
+
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.DeferReason))
+            throw new InvalidFinalDecisionDataException("سبب التأجيل إلزامي عند اختيار مؤجل.");
+
+        if (!request.DeferUntil.HasValue)
+            throw new InvalidFinalDecisionDataException("مدة/تاريخ انتهاء التأجيل إلزامي للقرار النهائي المؤجل.");
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        if (request.DeferUntil.Value < today)
+            throw new InvalidFinalDecisionDataException("تاريخ انتهاء التأجيل لا يمكن أن يكون في الماضي.");
+
+        if (!request.ActionTypeId.HasValue || request.ActionTypeId.Value <= 0)
+            throw new InvalidFinalDecisionDataException("نوع الإجراء المطلوب إلزامي عند اختيار مؤجل.");
+
+        if (string.IsNullOrWhiteSpace(request.FollowupNote))
+            throw new InvalidFinalDecisionDataException("الملاحظة التوضيحية إلزامية عند اختيار مؤجل.");
+    }
+
+    private async Task<RequiredActionType> ResolveAndValidateActionTypeAsync(
+        IssueFinalDecisionRequest request,
+        CancellationToken cancellationToken)
+    {
+        var actionType = await _referenceData.RequiredActionTypes()
+            .FirstOrDefaultAsync(
+                a => a.ActionTypeId == request.ActionTypeId!.Value && a.IsActive,
+                cancellationToken);
+
+        if (actionType is null)
+            throw new InvalidFinalDecisionDataException("نوع الإجراء المطلوب غير موجود أو غير نشط.");
+
+        if (actionType.RequiresDescription)
+        {
+            if (string.IsNullOrWhiteSpace(request.ActionDescription))
+                throw new InvalidFinalDecisionDataException("توصيف الإجراء إلزامي لهذا النوع.");
+        }
+        else if (!string.IsNullOrWhiteSpace(request.ActionDescription))
+        {
+            throw new InvalidFinalDecisionDataException("هذا النوع من الإجراء لا يقبل توصيفاً نصياً.");
+        }
+
+        if (actionType.RequiresTargetClinic)
+        {
+            if (!request.TargetClinicId.HasValue || request.TargetClinicId.Value == Guid.Empty)
+                throw new InvalidFinalDecisionDataException("العيادة المستهدفة إلزامية لهذا النوع من الإجراء.");
+        }
+        else if (request.TargetClinicId.HasValue)
+        {
+            throw new InvalidFinalDecisionDataException("هذا النوع من الإجراء لا يقبل عيادة مستهدفة.");
+        }
+
+        return actionType;
+    }
+
+    private static DeferredAction CreateFinalDeferredAction(
+        FinalDecision decision,
+        IssueFinalDecisionRequest request,
+        RequiredActionType actionType,
+        string userId,
+        DateTimeOffset now)
+    {
+        // مسار القرار النهائي: ClinicId و ClinicAssessmentId فارغان (XOR مع FinalDecisionId).
+        return new DeferredAction
+        {
+            DeferredActionId = Guid.NewGuid(),
+            MemberId = decision.MemberId,
+            CenterId = decision.CenterId,
+            ClinicId = null,
+            ClinicAssessmentId = null,
+            FinalDecisionId = decision.FinalDecisionId,
+            DeferReason = request.DeferReason!.Trim(),
+            DeferUntil = request.DeferUntil,
+            ActionTypeId = actionType.ActionTypeId,
+            TargetClinicId = actionType.RequiresTargetClinic ? request.TargetClinicId : null,
+            ActionDescription = actionType.RequiresDescription
+                ? request.ActionDescription!.Trim()
+                : null,
+            FollowupNote = request.FollowupNote!.Trim(),
+            Status = DeferredStatusRequested,
+            RequestedByUserId = userId,
+            RequestedAt = now
+        };
     }
 
     /// <summary>
@@ -288,7 +419,8 @@ public class FinalDecisionService : IFinalDecisionService
         Guid memberId,
         FinalDecision decision,
         IReadOnlyList<string> disagreeingClinicCodes,
-        int objectionCount)
+        int objectionCount,
+        Guid? deferredActionId)
     {
         _audit.Add(new AuditEvent
         {
@@ -312,6 +444,8 @@ public class FinalDecisionService : IFinalDecisionService
                 decision.DisagreementJustification,
                 DisagreeingClinicCodes = disagreeingClinicCodes,
                 ObjectionCount = objectionCount,
+                DeferredActionId = deferredActionId,
+                DeferredStatus = deferredActionId.HasValue ? DeferredStatusRequested : null,
                 ArchiveHookInvoked = true,
                 ArchiveCreated = false
             }),

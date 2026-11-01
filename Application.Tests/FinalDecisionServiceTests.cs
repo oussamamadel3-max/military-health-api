@@ -4,11 +4,16 @@ using Application.Dtos.Supervisor;
 using Application.Exceptions;
 using Application.Interfaces;
 using Application.Interfaces.Services;
+using Application.Mappings;
+using Application.Services.ClinicWorkspace;
 using Application.Services.Supervisor;
 using Domain.Entities.Clinical;
 using Domain.Entities.Core;
+using Domain.Entities.Medical;
 using Infrastructure.Persistence;
 using Infrastructure.Repositories;
+using Mapster;
+using MapsterMapper;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Moq;
@@ -222,16 +227,145 @@ public class FinalDecisionServiceTests
     }
 
     [Fact]
-    public async Task Issue_rejects_deferred_result_in_this_card()
+    public async Task Issue_deferred_creates_requested_action_linked_to_final_decision()
     {
         await using var db = MemberServiceTests.CreateDb();
         await SeedAsync(db);
-        var memberId = await CreateMemberAsync(db, CenterA, "FD-DEF");
-        await SeedAllAssessmentsAsync(db, memberId, CenterA, resultStatusId: 1);
+        var memberId = await CreateMemberAsync(db, CenterA, "FD-DEF-OK");
+        await SeedAllAssessmentsAsync(db, memberId, CenterA, resultStatusId: 3);
 
         var service = CreateService(db, CenterA, allow: true);
+        var until = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(14);
+        var result = await service.IssueAsync(memberId, ValidDeferredRequest(until, actionTypeId: 1));
+
+        Assert.Equal((short)3, result.ResultStatusId);
+        Assert.Equal("مؤجل", result.ResultStatusNameAr);
+        Assert.NotNull(result.DeferredActionId);
+        Assert.NotNull(result.DeferredAction);
+        Assert.Equal(FinalDecisionService.DeferredStatusRequested, result.DeferredAction!.Status);
+        Assert.Equal(until, result.DeferredAction.DeferUntil);
+        Assert.Equal("يحتاج استمارة", result.DeferredAction.DeferReason);
+        Assert.Equal("متابعة بعد الاستمارة", result.DeferredAction.FollowupNote);
+        Assert.Null(result.RejectionReason);
+
+        var action = Assert.Single(await db.DeferredActions.ToListAsync());
+        Assert.Equal(result.FinalDecisionId, action.FinalDecisionId);
+        Assert.Null(action.ClinicId);
+        Assert.Null(action.ClinicAssessmentId);
+        Assert.Equal(FinalDecisionService.DeferredStatusRequested, action.Status);
+        Assert.Equal(1, await db.AuditEvents.CountAsync(e =>
+            e.EventType == FinalDecisionService.FinalDecisionIssuedEventType));
+    }
+
+    [Fact]
+    public async Task Issue_deferred_without_reason_or_until_is_rejected()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, CenterA, "FD-DEF-MISS");
+        await SeedAllAssessmentsAsync(db, memberId, CenterA, resultStatusId: 3);
+        var service = CreateService(db, CenterA, allow: true);
+
         await Assert.ThrowsAsync<InvalidFinalDecisionDataException>(() =>
-            service.IssueAsync(memberId, new IssueFinalDecisionRequest { ResultStatusId = 3 }));
+            service.IssueAsync(memberId, new IssueFinalDecisionRequest
+            {
+                ResultStatusId = 3,
+                ActionTypeId = 1,
+                FollowupNote = "ملاحظة",
+                DeferUntil = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(7)
+            }));
+
+        await Assert.ThrowsAsync<InvalidFinalDecisionDataException>(() =>
+            service.IssueAsync(memberId, new IssueFinalDecisionRequest
+            {
+                ResultStatusId = 3,
+                DeferReason = "سبب",
+                ActionTypeId = 1,
+                FollowupNote = "ملاحظة"
+            }));
+
+        Assert.Equal(0, await db.FinalDecisions.CountAsync());
+        Assert.Equal(0, await db.DeferredActions.CountAsync());
+    }
+
+    [Fact]
+    public async Task Issue_deferred_other_action_requires_description()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, CenterA, "FD-DEF-OTHER");
+        await SeedAllAssessmentsAsync(db, memberId, CenterA, resultStatusId: 3);
+        var service = CreateService(db, CenterA, allow: true);
+        var until = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(10);
+
+        await Assert.ThrowsAsync<InvalidFinalDecisionDataException>(() =>
+            service.IssueAsync(memberId, ValidDeferredRequest(until, actionTypeId: 2)));
+
+        var result = await service.IssueAsync(memberId, ValidDeferredRequest(
+            until,
+            actionTypeId: 2,
+            actionDescription: "إجراء مخصص من المشرف"));
+
+        Assert.Equal("إجراء مخصص من المشرف", result.DeferredAction!.ActionDescription);
+        Assert.Equal(2, result.DeferredAction.ActionTypeId);
+    }
+
+    [Fact]
+    public async Task Issue_deferred_appears_on_supervisor_assessment_file()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, CenterA, "FD-DEF-VIEW");
+        await SeedAllAssessmentsAsync(db, memberId, CenterA, resultStatusId: 3);
+
+        var decide = CreateService(db, CenterA, allow: true);
+        var until = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(5);
+        var issued = await decide.IssueAsync(memberId, ValidDeferredRequest(until, actionTypeId: 1));
+
+        var fileService = CreateAssessmentFileService(db, CenterA);
+        var file = await fileService.GetAssessmentFileAsync(memberId);
+
+        Assert.False(file.CanIssueFinalDecision);
+        Assert.NotNull(file.ExistingFinalDecision);
+        Assert.Equal((short)3, file.ExistingFinalDecision!.ResultStatusId);
+        Assert.Contains(file.DeferredActions, d => d.DeferredActionId == issued.DeferredActionId
+            && d.FinalDecisionId == issued.FinalDecisionId
+            && d.Status == FinalDecisionService.DeferredStatusRequested);
+        Assert.True(file.HasOpenDeferredActions);
+    }
+
+    [Fact]
+    public async Task Issue_deferred_investigation_create_does_not_close_action()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, CenterA, "FD-DEF-INV");
+        await SeedAllAssessmentsAsync(db, memberId, CenterA, resultStatusId: 3);
+
+        var decide = CreateService(db, CenterA, allow: true);
+        var until = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(7);
+        var issued = await decide.IssueAsync(memberId, ValidDeferredRequest(until, actionTypeId: 1));
+
+        db.Investigations.Add(new Domain.Entities.Medical.Investigation
+        {
+            InvestigationId = Guid.NewGuid(),
+            MemberId = memberId,
+            CenterId = CenterA,
+            ClinicId = ClinicEyes,
+            RequestedByUserId = "actor-1",
+            InvestigationTypeId = 1,
+            TestName = "CBC",
+            RequestReason = "مرتبط بتأجيل القرار",
+            Status = "PENDING",
+            DeferredActionId = issued.DeferredActionId,
+            RequestedAt = DateTimeOffset.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var action = await db.DeferredActions.SingleAsync(d => d.DeferredActionId == issued.DeferredActionId);
+        Assert.Equal(FinalDecisionService.DeferredStatusRequested, action.Status);
+        Assert.Null(action.CompletedAt);
+        Assert.Null(action.CompletedByUserId);
     }
 
     [Fact]
@@ -253,7 +387,39 @@ public class FinalDecisionServiceTests
         Assert.Null(result.DisagreementJustification);
     }
 
+    [Fact]
+    public async Task Issue_accept_rejects_defer_fields()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, CenterA, "FD-NODEFER");
+        await SeedAllAssessmentsAsync(db, memberId, CenterA, resultStatusId: 1);
+        var service = CreateService(db, CenterA, allow: true);
+
+        await Assert.ThrowsAsync<InvalidFinalDecisionDataException>(() =>
+            service.IssueAsync(memberId, new IssueFinalDecisionRequest
+            {
+                ResultStatusId = 1,
+                DeferReason = "لا يجوز"
+            }));
+    }
+
     #region Helpers
+
+    private static IssueFinalDecisionRequest ValidDeferredRequest(
+        DateOnly deferUntil,
+        short actionTypeId,
+        string? actionDescription = null)
+        => new()
+        {
+            ResultStatusId = 3,
+            DeferReason = "يحتاج استمارة",
+            DeferUntil = deferUntil,
+            ActionTypeId = actionTypeId,
+            ActionDescription = actionDescription,
+            FollowupNote = "متابعة بعد الاستمارة",
+            DisagreementJustification = null
+        };
 
     private static FinalDecisionService CreateService(AppDbContext db, Guid centerId, bool allow)
     {
@@ -287,6 +453,45 @@ public class FinalDecisionServiceTests
             new ReferenceDataRepository(db),
             new AuditLogRepository(db),
             new FinalDecisionTestUnitOfWork(db));
+    }
+
+    private static SupervisorAssessmentFileService CreateAssessmentFileService(AppDbContext db, Guid centerId)
+    {
+        var gate = new Mock<IPermissionGate>();
+        gate.Setup(g => g.EnsureLocalAsync(
+                MilitaryHealthPermissions.Clinical.FinalDecision,
+                It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(centerId);
+        gate.Setup(g => g.Has(MilitaryHealthPermissions.Medical.AttachmentsRead)).Returns(true);
+
+        var currentUser = new TestCurrentUser();
+        currentUser.SetUser("actor-1", "actor", "127.0.0.1");
+
+        var config = new TypeAdapterConfig();
+        new MemberProfile().Register(config);
+
+        var medicalRequests = new MemberMedicalRequestService(
+            new ConsultationRepository(db),
+            new InvestigationRepository(db),
+            new AttachmentRepository(db),
+            new MemberRepository(db),
+            new ReferenceDataRepository(db),
+            new UserRepository(db),
+            gate.Object);
+
+        return new SupervisorAssessmentFileService(
+            gate.Object,
+            currentUser,
+            new MemberRepository(db),
+            new ClinicWorkspaceRepository(db),
+            new CenterClinicRepository(db),
+            new ReferenceDataRepository(db),
+            new UserRepository(db),
+            medicalRequests,
+            new AuditLogRepository(db),
+            new FinalDecisionTestUnitOfWork(db),
+            new Mapper(config));
     }
 
     private static async Task<Guid> CreateMemberAsync(AppDbContext db, Guid centerId, string recruitment)
@@ -397,6 +602,46 @@ public class FinalDecisionServiceTests
                 new ResultStatus { StatusId = 1, Code = "ACCEPTED", NameAr = "مقبول", IsActive = true },
                 new ResultStatus { StatusId = 2, Code = "REJECTED", NameAr = "مرفوض", IsActive = true },
                 new ResultStatus { StatusId = 3, Code = "DEFERRED", NameAr = "مؤجل", IsActive = true });
+        }
+
+        if (!await db.RequiredActionTypes.AnyAsync(t => t.ActionTypeId == 1))
+        {
+            db.RequiredActionTypes.Add(new RequiredActionType
+            {
+                ActionTypeId = 1,
+                Code = "FORM",
+                NameAr = "طلب استمارة",
+                RequiresDescription = false,
+                RequiresTargetClinic = false,
+                IsActive = true
+            });
+        }
+
+        if (!await db.RequiredActionTypes.AnyAsync(t => t.ActionTypeId == 2))
+        {
+            db.RequiredActionTypes.Add(new RequiredActionType
+            {
+                ActionTypeId = 2,
+                Code = "OTHER",
+                NameAr = "غير ذلك",
+                RequiresDescription = true,
+                RequiresTargetClinic = false,
+                IsActive = true
+            });
+        }
+
+        if (!await db.InvestigationTypes.AnyAsync(t => t.InvestigationTypeId == 1))
+        {
+            db.InvestigationTypes.Add(new InvestigationType
+            {
+                InvestigationTypeId = 1,
+                Code = "LAB",
+                NameAr = "مخبري",
+                SortOrder = 1,
+                IsActive = true,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            });
         }
 
         await db.SaveChangesAsync();
