@@ -60,3 +60,27 @@ public class FinalDecisionConcurrencyException : BusinessException
     {
     }
 }
+
+/// <summary>يُرمى عند محاولة تعديل قرار نهائي غير موجود للمنتسب في المركز النشط (FR-056).</summary>
+public class FinalDecisionNotFoundException : BusinessException
+{
+    public FinalDecisionNotFoundException()
+        : base(
+            "لا يوجد قرار نهائي محفوظ لهذا المنتسب في المركز النشط.",
+            "FINAL_DECISION_NOT_FOUND",
+            404)
+    {
+    }
+}
+
+/// <summary>يُرمى عند محاولة تعديل القرار بنفس النتيجة دون تغيير فعلي (قيد التاريخ old≠new).</summary>
+public class FinalDecisionUnchangedException : BusinessException
+{
+    public FinalDecisionUnchangedException()
+        : base(
+            "النتيجة الجديدة مطابقة للنتيجة الحالية؛ اختر نتيجة مختلفة مع سبب التعديل.",
+            "FINAL_DECISION_UNCHANGED",
+            400)
+    {
+    }
+}

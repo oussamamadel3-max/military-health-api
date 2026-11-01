@@ -3,8 +3,8 @@ using Application.Dtos.Supervisor;
 namespace Application.Interfaces.Services;
 
 /// <summary>
-/// إصدار القرار النهائي المعتمد للمنتسب ضمن المركز النشط (FR-053 / FR-054 / FR-055).
-/// التعديل مسار لاحق (MH-P6-040).
+/// إصدار وتعديل القرار النهائي المعتمد للمنتسب ضمن المركز النشط
+/// (FR-053 / FR-054 / FR-055 / FR-056).
 /// </summary>
 public interface IFinalDecisionService
 {
@@ -15,6 +15,24 @@ public interface IFinalDecisionService
     Task<FinalDecisionDto> IssueAsync(
         Guid memberId,
         IssueFinalDecisionRequest request,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// يعدّل القرار النهائي القائم دون إنشاء قرار ثانٍ، مع سجل تاريخي
+    /// وإعادة حالة التصدير إلى غير مصدَّر (FR-056 / BR-016 / BR-021 / BR-022).
+    /// </summary>
+    Task<AmendFinalDecisionDto> AmendAsync(
+        Guid memberId,
+        AmendFinalDecisionRequest request,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// يعيد سجل تغيّر النتيجة النهائية للمنتسب ضمن المركز النشط (الأحدث أولاً).
+    /// </summary>
+    Task<IReadOnlyList<FinalDecisionHistoryItemDto>> GetHistoryAsync(
+        Guid memberId,
         Guid? clientCenterId = null,
         CancellationToken cancellationToken = default);
 }

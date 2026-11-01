@@ -28,6 +28,14 @@ public class ClinicWorkspaceRepository : IClinicWorkspaceRepository
 
     public void AddFinalDecision(FinalDecision decision) => _context.FinalDecisions.Add(decision);
 
+    public IQueryable<FinalDecisionHistory> QueryFinalDecisionHistories(bool asNoTracking = true)
+        => asNoTracking
+            ? _context.FinalDecisionHistories.AsNoTracking()
+            : _context.FinalDecisionHistories;
+
+    public void AddFinalDecisionHistory(FinalDecisionHistory history)
+        => _context.FinalDecisionHistories.Add(history);
+
     public void AddSupervisorObjection(SupervisorObjection objection)
         => _context.SupervisorObjections.Add(objection);
 

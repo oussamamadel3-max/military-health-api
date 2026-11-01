@@ -16,6 +16,11 @@ public interface IClinicWorkspaceRepository
 
     void AddFinalDecision(FinalDecision decision);
 
+    /// <summary>قراءة سجل تغيّر النتيجة النهائية (FR-056 / BR-022).</summary>
+    IQueryable<FinalDecisionHistory> QueryFinalDecisionHistories(bool asNoTracking = true);
+
+    void AddFinalDecisionHistory(FinalDecisionHistory history);
+
     void AddSupervisorObjection(SupervisorObjection objection);
 
     IQueryable<ClinicExamEditLock> QueryEditLocks(bool asNoTracking = true);

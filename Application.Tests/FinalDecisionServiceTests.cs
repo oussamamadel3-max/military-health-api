@@ -404,6 +404,268 @@ public class FinalDecisionServiceTests
             }));
     }
 
+    [Fact]
+    public async Task Amend_with_reason_updates_decision_and_writes_history()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, CenterA, "FD-AMD-OK");
+        await SeedAllAssessmentsAsync(db, memberId, CenterA, resultStatusId: 1);
+
+        var service = CreateService(db, CenterA, allow: true);
+        var issued = await service.IssueAsync(memberId, new IssueFinalDecisionRequest { ResultStatusId = 1 });
+
+        var member = await db.Members.SingleAsync(m => m.MemberId == memberId);
+        member.ExportStatus = FinalDecisionService.ExportStatusExported;
+        member.LastExportedAt = DateTimeOffset.UtcNow.AddDays(-1);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var amended = await service.AmendAsync(memberId, new AmendFinalDecisionRequest
+        {
+            ResultStatusId = 2,
+            RejectionReason = "رفض بعد نتائج جديدة",
+            DisagreementJustification = "اختلاف مع العيادات بعد مراجعة إضافية",
+            ChangeReason = "ظهور نتائج مخبرية جديدة",
+            ExpectedDataRevision = issued.MemberDataRevision
+        });
+
+        Assert.Equal(issued.FinalDecisionId, amended.FinalDecisionId);
+        Assert.Equal((short)2, amended.ResultStatusId);
+        Assert.Equal((short)1, amended.OldResultStatusId);
+        Assert.Equal("ظهور نتائج مخبرية جديدة", amended.ChangeReason);
+        Assert.True(amended.ExportResetPerformed);
+        Assert.Equal(FinalDecisionService.ExportStatusExported, amended.PreviousExportStatus);
+        Assert.Equal(1, await db.FinalDecisions.CountAsync());
+        Assert.Equal(1, await db.FinalDecisionHistories.CountAsync());
+
+        var history = await db.FinalDecisionHistories.SingleAsync();
+        Assert.Equal(amended.HistoryId, history.HistoryId);
+        Assert.Equal((short)1, history.OldStatusId);
+        Assert.Equal((short)2, history.NewStatusId);
+        Assert.Equal("ظهور نتائج مخبرية جديدة", history.ChangeReason);
+        Assert.True(history.ExportResetPerformed);
+        Assert.Equal("actor-1", history.ChangedByUserId);
+
+        member = await db.Members.SingleAsync(m => m.MemberId == memberId);
+        Assert.Equal(FinalDecisionService.ExportStatusUnexported, member.ExportStatus);
+        Assert.Null(member.LastExportedAt);
+
+        Assert.Equal(1, await db.AuditEvents.CountAsync(e =>
+            e.EventType == FinalDecisionService.FinalDecisionAmendedEventType
+            && e.Result == "SUCCESS"));
+    }
+
+    [Fact]
+    public async Task Amend_without_change_reason_is_rejected()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, CenterA, "FD-AMD-NOREASON");
+        await SeedAllAssessmentsAsync(db, memberId, CenterA, resultStatusId: 1);
+
+        var service = CreateService(db, CenterA, allow: true);
+        await service.IssueAsync(memberId, new IssueFinalDecisionRequest { ResultStatusId = 1 });
+
+        await Assert.ThrowsAsync<InvalidFinalDecisionDataException>(() =>
+            service.AmendAsync(memberId, new AmendFinalDecisionRequest
+            {
+                ResultStatusId = 2,
+                RejectionReason = "رفض",
+                DisagreementJustification = "مبرر",
+                ChangeReason = "   "
+            }));
+
+        Assert.Equal(0, await db.FinalDecisionHistories.CountAsync());
+        Assert.Equal((short)1, (await db.FinalDecisions.SingleAsync()).ResultStatusId);
+    }
+
+    [Fact]
+    public async Task Amend_same_result_is_rejected()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, CenterA, "FD-AMD-SAME");
+        await SeedAllAssessmentsAsync(db, memberId, CenterA, resultStatusId: 1);
+
+        var service = CreateService(db, CenterA, allow: true);
+        await service.IssueAsync(memberId, new IssueFinalDecisionRequest { ResultStatusId = 1 });
+
+        await Assert.ThrowsAsync<FinalDecisionUnchangedException>(() =>
+            service.AmendAsync(memberId, new AmendFinalDecisionRequest
+            {
+                ResultStatusId = 1,
+                ChangeReason = "لا تغيير فعلي"
+            }));
+
+        Assert.Equal(0, await db.FinalDecisionHistories.CountAsync());
+    }
+
+    [Fact]
+    public async Task Amend_deferred_to_accepted_keeps_prior_deferred_row_closed()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, CenterA, "FD-AMD-DEF2ACC");
+        await SeedAllAssessmentsAsync(db, memberId, CenterA, resultStatusId: 3);
+
+        var service = CreateService(db, CenterA, allow: true);
+        var until = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(7);
+        var issued = await service.IssueAsync(memberId, ValidDeferredRequest(until, actionTypeId: 1));
+
+        // عيادات مقبولة بعد النتائج الجديدة — تعديل إلى مقبول يتطلب مبرر اختلاف مع تقييمات مؤجلة.
+        var amended = await service.AmendAsync(memberId, new AmendFinalDecisionRequest
+        {
+            ResultStatusId = 1,
+            DisagreementJustification = "اكتمال الإجراء المطلوب وقبول الملف",
+            ChangeReason = "إنجاز الإجراء المؤجل وظهور نتيجة نهائية",
+            ExpectedDataRevision = issued.MemberDataRevision
+        });
+
+        Assert.Equal((short)1, amended.ResultStatusId);
+        Assert.Equal((short)3, amended.OldResultStatusId);
+        Assert.Null(amended.DeferredActionId);
+
+        var actions = await db.DeferredActions.Where(d => d.FinalDecisionId == issued.FinalDecisionId).ToListAsync();
+        Assert.Single(actions);
+        Assert.Equal(issued.DeferredActionId, actions[0].DeferredActionId);
+        Assert.Equal(FinalDecisionService.DeferredStatusClosed, actions[0].Status);
+        Assert.Equal(1, await db.FinalDecisionHistories.CountAsync());
+    }
+
+    [Fact]
+    public async Task Amend_rejects_stale_data_revision()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, CenterA, "FD-AMD-REV");
+        await SeedAllAssessmentsAsync(db, memberId, CenterA, resultStatusId: 1);
+
+        var service = CreateService(db, CenterA, allow: true);
+        await service.IssueAsync(memberId, new IssueFinalDecisionRequest { ResultStatusId = 1 });
+
+        await Assert.ThrowsAsync<FinalDecisionConcurrencyException>(() =>
+            service.AmendAsync(memberId, new AmendFinalDecisionRequest
+            {
+                ResultStatusId = 2,
+                RejectionReason = "رفض",
+                DisagreementJustification = "مبرر",
+                ChangeReason = "تعديل متزامن",
+                ExpectedDataRevision = 99
+            }));
+
+        Assert.Equal(0, await db.FinalDecisionHistories.CountAsync());
+    }
+
+    [Fact]
+    public async Task Amend_rejects_member_from_other_center()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, CenterA, "FD-AMD-XCTR");
+        await SeedAllAssessmentsAsync(db, memberId, CenterA, resultStatusId: 1);
+
+        var serviceA = CreateService(db, CenterA, allow: true);
+        await serviceA.IssueAsync(memberId, new IssueFinalDecisionRequest { ResultStatusId = 1 });
+
+        var serviceB = CreateService(db, CenterB, allow: true);
+        await Assert.ThrowsAsync<MemberNotFoundException>(() =>
+            serviceB.AmendAsync(memberId, new AmendFinalDecisionRequest
+            {
+                ResultStatusId = 2,
+                RejectionReason = "رفض",
+                DisagreementJustification = "مبرر",
+                ChangeReason = "محاولة من مركز آخر"
+            }));
+
+        Assert.Equal(0, await db.FinalDecisionHistories.CountAsync());
+    }
+
+    [Fact]
+    public async Task Amend_without_existing_decision_is_not_found()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, CenterA, "FD-AMD-NONE");
+        await SeedAllAssessmentsAsync(db, memberId, CenterA, resultStatusId: 1);
+
+        var service = CreateService(db, CenterA, allow: true);
+        await Assert.ThrowsAsync<FinalDecisionNotFoundException>(() =>
+            service.AmendAsync(memberId, new AmendFinalDecisionRequest
+            {
+                ResultStatusId = 1,
+                ChangeReason = "لا يوجد قرار"
+            }));
+    }
+
+    [Fact]
+    public async Task GetHistory_returns_rows_newest_first_for_center()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, CenterA, "FD-HIST");
+        await SeedAllAssessmentsAsync(db, memberId, CenterA, resultStatusId: 1);
+
+        var service = CreateService(db, CenterA, allow: true);
+        var issued = await service.IssueAsync(memberId, new IssueFinalDecisionRequest { ResultStatusId = 1 });
+
+        var first = await service.AmendAsync(memberId, new AmendFinalDecisionRequest
+        {
+            ResultStatusId = 2,
+            RejectionReason = "رفض أولي",
+            DisagreementJustification = "مبرر أول",
+            ChangeReason = "تعديل أول",
+            ExpectedDataRevision = issued.MemberDataRevision
+        });
+
+        var second = await service.AmendAsync(memberId, new AmendFinalDecisionRequest
+        {
+            ResultStatusId = 1,
+            DisagreementJustification = null,
+            ChangeReason = "تعديل ثانٍ إلى قبول",
+            ExpectedDataRevision = first.MemberDataRevision
+        });
+
+        // التعديل الثاني من مرفوض إلى مقبول يحتاج مبرر لأن العيادات مقبولة؟ العيادات كلها 1، القرار الجديد 1 → لا اختلاف.
+        var history = await service.GetHistoryAsync(memberId);
+
+        Assert.Equal(2, history.Count);
+        Assert.Equal(second.HistoryId, history[0].HistoryId);
+        Assert.Equal((short)2, history[0].OldStatusId);
+        Assert.Equal((short)1, history[0].NewStatusId);
+        Assert.Equal("تعديل ثانٍ إلى قبول", history[0].ChangeReason);
+        Assert.Equal("مرفوض", history[0].OldStatusNameAr);
+        Assert.Equal("مقبول", history[0].NewStatusNameAr);
+        Assert.Equal(first.HistoryId, history[1].HistoryId);
+        Assert.Equal((short)1, history[1].OldStatusId);
+        Assert.Equal((short)2, history[1].NewStatusId);
+        Assert.Equal("مقبول", history[1].OldStatusNameAr);
+        Assert.Equal("مرفوض", history[1].NewStatusNameAr);
+    }
+
+    [Fact]
+    public async Task Amend_reapplies_disagreement_justification_rule()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, CenterA, "FD-AMD-DIS");
+        await SeedAllAssessmentsAsync(db, memberId, CenterA, resultStatusId: 1);
+
+        var service = CreateService(db, CenterA, allow: true);
+        var issued = await service.IssueAsync(memberId, new IssueFinalDecisionRequest { ResultStatusId = 1 });
+
+        await Assert.ThrowsAsync<FinalDecisionDisagreementJustificationRequiredException>(() =>
+            service.AmendAsync(memberId, new AmendFinalDecisionRequest
+            {
+                ResultStatusId = 2,
+                RejectionReason = "رفض",
+                ChangeReason = "بدون مبرر اختلاف",
+                ExpectedDataRevision = issued.MemberDataRevision
+            }));
+
+        Assert.Equal(0, await db.FinalDecisionHistories.CountAsync());
+    }
+
     #region Helpers
 
     private static IssueFinalDecisionRequest ValidDeferredRequest(

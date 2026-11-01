@@ -9,8 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace API.Controllers;
 
 /// <summary>
-/// إصدار القرار النهائي المعتمد ضمن مساحة عمل المشرف (FR-053 / FR-054 / FR-055).
-/// التعديل مسار لاحق (MH-P6-040).
+/// إصدار وتعديل القرار النهائي المعتمد ضمن مساحة عمل المشرف (FR-053…FR-056).
 /// </summary>
 [ApiController]
 [Authorize]
@@ -42,5 +41,41 @@ public class SupervisorFinalDecisionController : ControllerBase
             cancellationToken);
 
         return ApiResponse.Success("تم إصدار القرار النهائي المعتمد بنجاح.", created);
+    }
+
+    /// <summary>
+    /// يعدّل القرار النهائي القائم مع سبب إلزامي وسجل تاريخي وإعادة حالة التصدير (FR-056).
+    /// </summary>
+    [HttpPut("members/{memberId:guid}/final-decision")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Clinical.FinalDecision, OperationScope.Local)]
+    public async Task<IResult> Amend(
+        Guid memberId,
+        [FromBody] AmendFinalDecisionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var amended = await _finalDecisions.AmendAsync(
+            memberId,
+            request,
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+
+        return ApiResponse.Success("تم تعديل القرار النهائي وتسجيل التغير بنجاح.", amended);
+    }
+
+    /// <summary>
+    /// يعيد سجل تغيّر النتيجة النهائية للمنتسب في المركز النشط (الأحدث أولاً).
+    /// </summary>
+    [HttpGet("members/{memberId:guid}/final-decision/history")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Clinical.FinalDecision, OperationScope.Local)]
+    public async Task<IResult> GetHistory(
+        Guid memberId,
+        CancellationToken cancellationToken = default)
+    {
+        var history = await _finalDecisions.GetHistoryAsync(
+            memberId,
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+
+        return ApiResponse.Success("تم جلب سجل تغيّر القرار النهائي بنجاح.", history);
     }
 }
