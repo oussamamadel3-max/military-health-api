@@ -26,6 +26,11 @@ public class ClinicWorkspaceRepository : IClinicWorkspaceRepository
     public IQueryable<FinalDecision> QueryFinalDecisions(bool asNoTracking = true)
         => asNoTracking ? _context.FinalDecisions.AsNoTracking() : _context.FinalDecisions;
 
+    public void AddFinalDecision(FinalDecision decision) => _context.FinalDecisions.Add(decision);
+
+    public void AddSupervisorObjection(SupervisorObjection objection)
+        => _context.SupervisorObjections.Add(objection);
+
     public IQueryable<ClinicExamEditLock> QueryEditLocks(bool asNoTracking = true)
         => asNoTracking
             ? _context.ClinicExamEditLocks.AsNoTracking().Include(x => x.LockedByUser)

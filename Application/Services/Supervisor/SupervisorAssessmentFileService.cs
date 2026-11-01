@@ -110,7 +110,11 @@ public class SupervisorAssessmentFileService : ISupervisorAssessmentFileService
             centerId,
             cancellationToken);
 
-        var mandatoryClinics = await LoadMandatoryClinicsAsync(centerId, cancellationToken);
+        var mandatoryClinics = await SupervisorMandatoryClinicLoader.LoadAsync(
+            centerId,
+            _centerClinics,
+            _referenceData,
+            cancellationToken);
         var clinicIds = mandatoryClinics.Select(c => c.ClinicId).ToList();
 
         var currentExams = clinicIds.Count == 0
@@ -355,28 +359,6 @@ public class SupervisorAssessmentFileService : ISupervisorAssessmentFileService
 
     #region Private Helpers
 
-    private async Task<IReadOnlyList<MandatoryClinicInfo>> LoadMandatoryClinicsAsync(
-        Guid centerId,
-        CancellationToken cancellationToken)
-    {
-        var linkedClinicIds = await _centerClinics.Query(asNoTracking: true)
-            .Where(l => l.CenterId == centerId && l.IsActive)
-            .Select(l => l.ClinicId)
-            .ToListAsync(cancellationToken);
-
-        if (linkedClinicIds.Count == 0)
-            return Array.Empty<MandatoryClinicInfo>();
-
-        return await _referenceData.Clinics(asNoTracking: true)
-            .Where(c => linkedClinicIds.Contains(c.ClinicId)
-                && c.IsActive
-                && c.CountsForFinal)
-            .OrderBy(c => c.SortOrder)
-            .ThenBy(c => c.NameAr)
-            .Select(c => new MandatoryClinicInfo(c.ClinicId, c.Code, c.NameAr, c.SortOrder))
-            .ToListAsync(cancellationToken);
-    }
-
     private async Task<MemberDetailsDto> MapMemberDetailsAsync(
         Member member,
         CancellationToken cancellationToken)
@@ -463,8 +445,6 @@ public class SupervisorAssessmentFileService : ISupervisorAssessmentFileService
             throw new UnauthenticatedUserException();
         return _currentUser.UserId;
     }
-
-    private sealed record MandatoryClinicInfo(Guid ClinicId, string Code, string NameAr, short SortOrder);
 
     private sealed record ExamSnapshot(Guid ClinicId, Guid ExamId);
 

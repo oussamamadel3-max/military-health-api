@@ -14,6 +14,10 @@ public interface IClinicWorkspaceRepository
     /// <summary>قراءة القرارات النهائية الموجودة (ملف المشرف / إصدار القرار).</summary>
     IQueryable<FinalDecision> QueryFinalDecisions(bool asNoTracking = true);
 
+    void AddFinalDecision(FinalDecision decision);
+
+    void AddSupervisorObjection(SupervisorObjection objection);
+
     IQueryable<ClinicExamEditLock> QueryEditLocks(bool asNoTracking = true);
 
     Task<ClinicExamEditLock?> GetEditLockAsync(
