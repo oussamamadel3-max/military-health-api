@@ -99,6 +99,7 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IMemberMedicalRequestService, MemberMedicalRequestService>();
         services.AddScoped<ISupervisorAssessmentFileService, SupervisorAssessmentFileService>();
         services.AddScoped<IFinalDecisionService, FinalDecisionService>();
+        services.AddScoped<ISupervisorFollowUpService, SupervisorFollowUpService>();
         services.AddScoped<IReferenceCatalogHandler, RecruitmentCenterCatalogHandler>();
         services.AddScoped<IReferenceCatalogHandler, ClinicCatalogHandler>();
         services.AddScoped<IReferenceCatalogHandler, ResultStatusCatalogHandler>();
