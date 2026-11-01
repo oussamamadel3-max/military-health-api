@@ -23,6 +23,9 @@ public class ClinicWorkspaceRepository : IClinicWorkspaceRepository
             ? _context.DeferredActions.AsNoTracking().Include(x => x.ActionType)
             : _context.DeferredActions.Include(x => x.ActionType);
 
+    public IQueryable<FinalDecision> QueryFinalDecisions(bool asNoTracking = true)
+        => asNoTracking ? _context.FinalDecisions.AsNoTracking() : _context.FinalDecisions;
+
     public IQueryable<ClinicExamEditLock> QueryEditLocks(bool asNoTracking = true)
         => asNoTracking
             ? _context.ClinicExamEditLocks.AsNoTracking().Include(x => x.LockedByUser)

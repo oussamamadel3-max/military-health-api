@@ -61,6 +61,31 @@ public class MemberMedicalRequestService : IMemberMedicalRequestService
             clientCenterId,
             cancellationToken);
 
+        return await LoadForMemberInCenterAsync(memberId, centerId, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<MemberMedicalRequestsDto> GetForMemberInAuthorizedCenterAsync(
+        Guid memberId,
+        Guid authorizedCenterId,
+        CancellationToken cancellationToken = default)
+    {
+        if (memberId == Guid.Empty)
+            throw new InvalidUserDataException("معرّف المنتسب مطلوب.");
+
+        if (authorizedCenterId == Guid.Empty)
+            throw new InvalidUserDataException("معرّف المركز مطلوب.");
+
+        return await LoadForMemberInCenterAsync(memberId, authorizedCenterId, cancellationToken);
+    }
+
+    #region Private Helpers
+
+    private async Task<MemberMedicalRequestsDto> LoadForMemberInCenterAsync(
+        Guid memberId,
+        Guid centerId,
+        CancellationToken cancellationToken)
+    {
         var member = await _members.GetByIdInCenterAsync(
             memberId,
             centerId,
@@ -251,8 +276,6 @@ public class MemberMedicalRequestService : IMemberMedicalRequestService
             Items = items
         };
     }
-
-    #region Private Helpers
 
     private static bool IsPendingStatus(string status)
         => string.Equals(status, StatusPending, StringComparison.OrdinalIgnoreCase);

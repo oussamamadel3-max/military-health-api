@@ -11,6 +11,9 @@ public interface IClinicWorkspaceRepository
 
     IQueryable<DeferredAction> QueryDeferredActions(bool asNoTracking = true);
 
+    /// <summary>قراءة القرارات النهائية الموجودة (ملف المشرف / إصدار القرار).</summary>
+    IQueryable<FinalDecision> QueryFinalDecisions(bool asNoTracking = true);
+
     IQueryable<ClinicExamEditLock> QueryEditLocks(bool asNoTracking = true);
 
     Task<ClinicExamEditLock?> GetEditLockAsync(

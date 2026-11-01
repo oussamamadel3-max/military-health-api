@@ -15,6 +15,7 @@ using Application.Services.ReferenceData.Handlers;
 using Application.Services.FileStorageService;
 using Application.Services.Reports;
 using Application.Services.Sanitization;
+using Application.Services.Supervisor;
 using Infrastructure.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -96,6 +97,7 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IConsultationService, ConsultationService>();
         services.AddScoped<IInvestigationService, InvestigationService>();
         services.AddScoped<IMemberMedicalRequestService, MemberMedicalRequestService>();
+        services.AddScoped<ISupervisorAssessmentFileService, SupervisorAssessmentFileService>();
         services.AddScoped<IReferenceCatalogHandler, RecruitmentCenterCatalogHandler>();
         services.AddScoped<IReferenceCatalogHandler, ClinicCatalogHandler>();
         services.AddScoped<IReferenceCatalogHandler, ResultStatusCatalogHandler>();
