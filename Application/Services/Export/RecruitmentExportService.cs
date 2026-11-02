@@ -141,15 +141,7 @@ public class RecruitmentExportService : IRecruitmentExportService
                 new { selectedIds.Count, MaxBatchMembers });
         }
 
-        var eligible = await LoadEligibleAsync(centerId, selectedIds, cancellationToken);
-        foreach (var id in selectedIds.Where(id => eligible.All(e => e.Member.MemberId != id)))
-        {
-            exclusions.Add(new RecruitmentExportExclusionDto
-            {
-                MemberId = id,
-                ReasonAr = "الملف لم يعد مؤهلاً للتصدير (قرار ناقص/مؤجل أو سبق تصديره)."
-            });
-        }
+        var eligible = await LoadEligibleAsync(centerId, selectedIds, exclusions, cancellationToken);
 
         if (eligible.Count == 0)
             throw new RecruitmentExportEmptyException("لا توجد ملفات مؤهلة بعد التحقق النهائي.");
@@ -774,6 +766,7 @@ public class RecruitmentExportService : IRecruitmentExportService
     private async Task<List<EligibleRow>> LoadEligibleAsync(
         Guid centerId,
         IReadOnlyList<Guid> memberIds,
+        List<RecruitmentExportExclusionDto> exclusions,
         CancellationToken cancellationToken)
     {
         var members = await _members.Query(asNoTracking: false)
@@ -786,22 +779,47 @@ public class RecruitmentExportService : IRecruitmentExportService
             .ToListAsync(cancellationToken);
 
         var decisionByMember = decisions.ToDictionary(d => d.MemberId);
+        var memberById = members.ToDictionary(m => m.MemberId);
         var result = new List<EligibleRow>();
 
-        foreach (var member in members)
+        foreach (var id in memberIds)
         {
-            if (!decisionByMember.TryGetValue(member.MemberId, out var decision))
+            if (!memberById.TryGetValue(id, out var member))
+            {
+                exclusions.Add(new RecruitmentExportExclusionDto
+                {
+                    MemberId = id,
+                    ReasonAr = "الملف غير موجود ضمن المركز النشط."
+                });
                 continue;
+            }
 
-            if (!FinalDecisionService.IsEligibleForRecruitmentExport(
+            if (!decisionByMember.TryGetValue(member.MemberId, out var decision)
+                || !FinalDecisionService.IsEligibleForRecruitmentExport(
                     decision.ResultStatusId,
-                    member.ExportStatus))
+                    member.ExportStatus)
+                || (decision.ResultStatusId == FinalDecisionService.RejectedResultStatusId
+                    && string.IsNullOrWhiteSpace(decision.RejectionReason)))
+            {
+                exclusions.Add(new RecruitmentExportExclusionDto
+                {
+                    MemberId = id,
+                    ReasonAr = "الملف لم يعد مؤهلاً للتصدير (قرار ناقص/مؤجل أو سبق تصديره)."
+                });
                 continue;
+            }
 
-            // رفض السبب الفارغ للرفض وفق قيد العنصر.
-            if (decision.ResultStatusId == FinalDecisionService.RejectedResultStatusId
-                && string.IsNullOrWhiteSpace(decision.RejectionReason))
+            if (!FinalDecisionService.IsCurrentRevisionReviewed(
+                    member.DataRevision,
+                    member.ReviewedRevision))
+            {
+                exclusions.Add(new RecruitmentExportExclusionDto
+                {
+                    MemberId = id,
+                    ReasonAr = "النسخة الحالية من الملف غير مُراجَعة؛ تُسجَّل المراجعة عند اعتماد/تعديل القرار النهائي."
+                });
                 continue;
+            }
 
             result.Add(new EligibleRow(member, decision, member.RecruitmentCenter));
         }
@@ -822,10 +840,13 @@ public class RecruitmentExportService : IRecruitmentExportService
                 "تصفية النتيجة للتصدير تقتصر على مقبول أو مرفوض.");
         }
 
+        // FR-058: الجاهز للتصدير = قرار نهائي غير مصدَّر + النسخة الحالية مُراجَعة (reviewedRevision = dataRevision).
         var membersQ = _members.Query(asNoTracking: true)
             .Where(m =>
                 m.CurrentMedicalCenterId == centerId
-                && m.ExportStatus == FinalDecisionService.ExportStatusUnexported);
+                && m.ExportStatus == FinalDecisionService.ExportStatusUnexported
+                && m.ReviewedRevision != null
+                && m.ReviewedRevision == m.DataRevision);
 
         if (query.FileNumber.HasValue)
             membersQ = membersQ.Where(m => m.FileNumber == query.FileNumber.Value);

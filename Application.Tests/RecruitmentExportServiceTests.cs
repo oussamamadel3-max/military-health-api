@@ -47,6 +47,51 @@ public class RecruitmentExportServiceTests
     }
 
     [Fact]
+    public async Task ListPending_excludes_unreviewed_current_revision()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var reviewed = await CreateMemberWithDecisionAsync(db, CenterA, "EXP-REV", 1);
+        var unreviewed = await CreateMemberWithDecisionAsync(db, CenterA, "EXP-UNREV", 1);
+        var member = await db.Members.SingleAsync(m => m.MemberId == unreviewed);
+        member.ReviewedRevision = null;
+        member.ReviewedAt = null;
+        member.ReviewedByUserId = null;
+        await db.SaveChangesAsync();
+
+        var page = await CreateService(db, CenterA).ListPendingAsync(new RecruitmentExportPendingQuery());
+
+        Assert.Equal(1, page.TotalCount);
+        Assert.Equal(reviewed, page.Items.Single().MemberId);
+    }
+
+    [Fact]
+    public async Task CreateBatch_excludes_unreviewed_current_revision()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var reviewed = await CreateMemberWithDecisionAsync(db, CenterA, "EXP-OK", 1);
+        var unreviewed = await CreateMemberWithDecisionAsync(db, CenterA, "EXP-NEED-REV", 1);
+        var member = await db.Members.SingleAsync(m => m.MemberId == unreviewed);
+        member.ReviewedRevision = null;
+        member.ReviewedAt = null;
+        member.ReviewedByUserId = null;
+        await db.SaveChangesAsync();
+
+        var result = await CreateService(db, CenterA).CreateBatchAsync(
+            new CreateRecruitmentExportBatchRequest { MemberIds = [reviewed, unreviewed] });
+
+        Assert.Equal(1, result.RecordCount);
+        Assert.Contains(result.Exclusions, e => e.MemberId == unreviewed && e.ReasonAr.Contains("مُراجَعة"));
+        Assert.Equal(
+            FinalDecisionService.ExportStatusExported,
+            (await db.Members.SingleAsync(m => m.MemberId == reviewed)).ExportStatus);
+        Assert.Equal(
+            FinalDecisionService.ExportStatusUnexported,
+            (await db.Members.SingleAsync(m => m.MemberId == unreviewed)).ExportStatus);
+    }
+
+    [Fact]
     public async Task ListPending_includes_accept_reject_unexported_only()
     {
         await using var db = MemberServiceTests.CreateDb();
@@ -440,6 +485,13 @@ public class RecruitmentExportServiceTests
             UpdatedByUserId = "actor-1",
             UpdatedAt = now
         });
+
+        // يحاكي اعتماد القرار النهائي: النسخة الحالية مُراجَعة قبل الظهور في قائمة التصدير.
+        var member = await db.Members.SingleAsync(m => m.MemberId == memberId);
+        member.ReviewedRevision = member.DataRevision;
+        member.ReviewedAt = now;
+        member.ReviewedByUserId = "actor-1";
+
         await db.SaveChangesAsync();
         return memberId;
     }

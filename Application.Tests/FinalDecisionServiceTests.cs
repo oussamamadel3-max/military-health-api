@@ -66,6 +66,14 @@ public class FinalDecisionServiceTests
         Assert.Equal(2, result.MemberDataRevision);
         Assert.Equal("actor-1", result.SupervisorUserId);
 
+        var member = await db.Members.SingleAsync(m => m.MemberId == memberId);
+        Assert.Equal(member.DataRevision, member.ReviewedRevision);
+        Assert.Equal("actor-1", member.ReviewedByUserId);
+        Assert.NotNull(member.ReviewedAt);
+        Assert.True(FinalDecisionService.IsCurrentRevisionReviewed(
+            member.DataRevision,
+            member.ReviewedRevision));
+
         Assert.Equal(1, await db.FinalDecisions.CountAsync());
         Assert.Equal(0, await db.SupervisorObjections.CountAsync());
         var archive = Assert.Single(await db.MemberArchives.ToListAsync());
@@ -490,6 +498,11 @@ public class FinalDecisionServiceTests
         member = await db.Members.SingleAsync(m => m.MemberId == memberId);
         Assert.Equal(FinalDecisionService.ExportStatusUnexported, member.ExportStatus);
         Assert.Null(member.LastExportedAt);
+        Assert.Equal(member.DataRevision, member.ReviewedRevision);
+        Assert.Equal("actor-1", member.ReviewedByUserId);
+        Assert.True(FinalDecisionService.IsCurrentRevisionReviewed(
+            member.DataRevision,
+            member.ReviewedRevision));
         Assert.True(FinalDecisionService.IsEligibleForRecruitmentExport(
             amended.ResultStatusId,
             member.ExportStatus));

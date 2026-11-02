@@ -53,6 +53,13 @@ public class FinalDecisionService : IFinalDecisionService
             StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// هل النسخة الحالية من ملف المنتسب مُعلَّمة كمراجَعة؟
+    /// قيد PostgreSQL يمنع التحويل إلى EXPORTED ما لم يساوِ <c>reviewedRevision</c> قيمة <c>dataRevision</c>.
+    /// </summary>
+    public static bool IsCurrentRevisionReviewed(long dataRevision, long? reviewedRevision)
+        => reviewedRevision.HasValue && reviewedRevision.Value == dataRevision;
+
     private readonly IPermissionGate _permissionGate;
     private readonly ICurrentUserService _currentUser;
     private readonly IMemberRepository _members;
@@ -175,6 +182,8 @@ public class FinalDecisionService : IFinalDecisionService
             now);
 
         BumpMemberRevision(member, userId, now);
+        // اعتماد القرار النهائي يُعدّ مراجعة للنسخة الحالية تمهيداً للتصدير (FR-058/059 + قيد reviewedRevision).
+        MarkMemberReviewed(member, userId, now);
 
         var disagreeingCodes = disagreeing.Select(a => clinicCodeById[a.ClinicId]).ToList();
         // FR-069 / BR-017: الأرشيف يُنشأ في نفس وحدة العمل قبل COMMIT لإرضاء ctFinalDecisionArchive.
@@ -323,6 +332,8 @@ public class FinalDecisionService : IFinalDecisionService
         member.ExportStatus = ExportStatusUnexported;
         member.LastExportedAt = null;
         BumpMemberRevision(member, userId, now);
+        // إعادة وضع علامة المراجعة على النسخة بعد التعديل حتى يظهر الملف مجدداً في قائمة التصدير عند القبول/الرفض.
+        MarkMemberReviewed(member, userId, now);
 
         var history = new FinalDecisionHistory
         {
@@ -475,6 +486,16 @@ public class FinalDecisionService : IFinalDecisionService
         member.DataRevision += 1;
         member.UpdatedByUserId = userId;
         member.UpdatedAt = now;
+    }
+
+    /// <summary>
+    /// يعلّم النسخة الحالية من الملف كمراجَعة من المشرف (متوافقة مع قيد التصدير في قاعدة البيانات).
+    /// </summary>
+    private static void MarkMemberReviewed(Member member, string userId, DateTimeOffset now)
+    {
+        member.ReviewedRevision = member.DataRevision;
+        member.ReviewedAt = now;
+        member.ReviewedByUserId = userId;
     }
 
     private async Task<(List<ClinicAssessment> Disagreeing, Dictionary<Guid, string> ClinicCodeById)>
