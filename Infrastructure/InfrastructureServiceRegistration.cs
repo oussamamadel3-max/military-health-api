@@ -9,6 +9,7 @@ using Application.Services.AuthServices;
 using Application.Services.Centers;
 using Application.Services.ClinicWorkspace;
 using Application.Services.Dashboard;
+using Application.Services.Export;
 using Application.Services.Members;
 using Application.Services.ReferenceData;
 using Application.Services.ReferenceData.Handlers;
@@ -50,6 +51,7 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IMemberArchiveRepository, MemberArchiveRepository>();
         services.AddScoped<IConsultationRepository, ConsultationRepository>();
         services.AddScoped<IInvestigationRepository, InvestigationRepository>();
+        services.AddScoped<IRecruitmentExportRepository, RecruitmentExportRepository>();
         #endregion
 
         #region Auth HTTP services
@@ -101,8 +103,8 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<ISupervisorAssessmentFileService, SupervisorAssessmentFileService>();
         services.AddScoped<IFinalDecisionService, FinalDecisionService>();
         services.AddScoped<ISupervisorFollowUpService, SupervisorFollowUpService>();
-        services.AddScoped<IReferenceCatalogHandler, RecruitmentCenterCatalogHandler>();
-        services.AddScoped<IReferenceCatalogHandler, ClinicCatalogHandler>();
+        services.AddScoped<IRecruitmentExportService, RecruitmentExportService>();
+        services.AddScoped<IReferenceCatalogHandler, RecruitmentCenterCatalogHandler>();        services.AddScoped<IReferenceCatalogHandler, ClinicCatalogHandler>();
         services.AddScoped<IReferenceCatalogHandler, ResultStatusCatalogHandler>();
         services.AddScoped<IReferenceCatalogHandler, RequiredActionTypeCatalogHandler>();
         services.AddScoped<IReferenceCatalogHandler, MaritalStatusCatalogHandler>();
