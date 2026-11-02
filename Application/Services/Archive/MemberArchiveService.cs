@@ -126,12 +126,10 @@ public class MemberArchiveService : IMemberArchiveService
         var criteria = BuildSearchCriteria(query);
         foreach (var centerId in centersToAudit)
         {
-            await _crossCenterAccess.RecordAsync(
+            await RecordCrossCenterAccessAsync(
                 centerId,
                 accessReason.Trim(),
-                CrossCenterDataType,
                 criteria,
-                nameof(MemberArchive),
                 entityId: null,
                 cancellationToken);
         }
@@ -170,16 +168,14 @@ public class MemberArchiveService : IMemberArchiveService
 
         var report = await BuildReportAsync(archiveId, requiredCenterId: null, cancellationToken);
 
-        await _crossCenterAccess.RecordAsync(
+        await RecordCrossCenterAccessAsync(
             report.ArchiveCenterId,
             accessReason.Trim(),
-            CrossCenterDataType,
             JsonSerializer.Serialize(new Dictionary<string, string?>
             {
                 ["archiveId"] = archiveId.ToString("D"),
                 ["archiveNumber"] = report.ArchiveNumber
             }),
-            nameof(MemberArchive),
             archiveId.ToString("D"),
             cancellationToken);
 
@@ -219,16 +215,14 @@ public class MemberArchiveService : IMemberArchiveService
 
         var report = await BuildReportAsync(archiveId, requiredCenterId: null, cancellationToken);
 
-        await _crossCenterAccess.RecordAsync(
+        await RecordCrossCenterAccessAsync(
             report.ArchiveCenterId,
             accessReason.Trim(),
-            CrossCenterDataType,
             JsonSerializer.Serialize(new Dictionary<string, string?>
             {
                 ["archiveId"] = archiveId.ToString("D"),
                 ["action"] = "print"
             }),
-            nameof(MemberArchive),
             archiveId.ToString("D"),
             cancellationToken);
 
@@ -238,6 +232,33 @@ public class MemberArchiveService : IMemberArchiveService
     }
 
     #region Private Helpers
+
+    /// <summary>
+    /// يسجّل اطلاعاً عابراً؛ يتجاهل بهدوء حالة المركز النشط نفسه (ليست عبوراً).
+    /// </summary>
+    private async Task RecordCrossCenterAccessAsync(
+        Guid targetCenterId,
+        string accessReason,
+        string? queryCriteria,
+        string? entityId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _crossCenterAccess.RecordAsync(
+                targetCenterId,
+                accessReason,
+                CrossCenterDataType,
+                queryCriteria,
+                nameof(MemberArchive),
+                entityId,
+                cancellationToken);
+        }
+        catch (InvalidUserDataException)
+        {
+            // الاطلاع ضمن نفس المركز النشط ليس عابراً — يُتجاهل بهدوء (نفس نمط التقارير التشغيلية).
+        }
+    }
 
     private async Task<PaginatedList<ArchiveSearchItemDto>> ExecuteSearchAsync(
         ArchiveSearchQuery query,

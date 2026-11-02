@@ -125,6 +125,31 @@ public class MemberArchiveServiceTests
     }
 
     [Fact]
+    public async Task SearchCentral_ignores_same_center_cross_access_rejection()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        await CreateArchivedMemberAsync(db, CenterA, "SAME-CEN", 1);
+
+        var cross = new Mock<ICrossCenterAccessService>();
+        cross.Setup(c => c.RecordAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidUserDataException("الاطلاع ضمن المركز النشط ليس اطلاعاً عابراً."));
+
+        var page = await CreateService(db, CenterA, allowLocal: true, allowCentral: true, crossCenter: cross.Object)
+            .SearchCentralAsync(new ArchiveSearchQuery(), "مراجعة مركزية");
+
+        Assert.Equal(1, page.TotalCount);
+        Assert.Equal(CenterA, Assert.Single(page.Items).CenterId);
+    }
+
+    [Fact]
     public async Task GetFullReportLocal_returns_sections_without_storage_key()
     {
         await using var db = MemberServiceTests.CreateDb();
