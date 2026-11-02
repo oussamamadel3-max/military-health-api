@@ -53,7 +53,7 @@ public class CrossCenterAccessService : ICrossCenterAccessService
             ActorUserId = actor,
             ContextScope = sourceCenter.HasValue ? CenterClaimTypes.Center : CenterClaimTypes.Central,
             CenterId = sourceCenter,
-            EventType = "READ",
+            EventType = "VIEW",
             Result = "SUCCESS",
             EntityType = entityType,
             EntityId = entityId,

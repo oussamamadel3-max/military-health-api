@@ -619,7 +619,7 @@ public class MemberServiceTests
             Assert.True(doc.RootElement.TryGetProperty("pageNumber", out _));
             Assert.True(doc.RootElement.TryGetProperty("pageSize", out _));
         });
-        Assert.Equal(2, await db.AuditEvents.CountAsync(e => e.EventType == "READ"));
+        Assert.Equal(2, await db.AuditEvents.CountAsync(e => e.EventType == "VIEW"));
     }
 
     [Fact]
@@ -694,7 +694,7 @@ public class MemberServiceTests
         }
 
         Assert.Equal(created.MemberId.ToString(), await db.AuditEvents
-            .Where(e => e.EventType == "READ")
+            .Where(e => e.EventType == "VIEW")
             .Select(e => e.EntityId)
             .SingleAsync());
     }
