@@ -11,6 +11,7 @@ using Application.Services.ClinicWorkspace;
 using Application.Services.Dashboard;
 using Application.Services.Export;
 using Application.Services.Members;
+using Application.Services.Archive;
 using Application.Services.OperationalReports;
 using Application.Services.ReferenceData;
 using Application.Services.ReferenceData.Handlers;
@@ -106,6 +107,7 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<ISupervisorFollowUpService, SupervisorFollowUpService>();
         services.AddScoped<IRecruitmentExportService, RecruitmentExportService>();
         services.AddScoped<IOperationalReportsService, OperationalReportsService>();
+        services.AddScoped<IMemberArchiveService, MemberArchiveService>();
         services.AddScoped<IReferenceCatalogHandler, RecruitmentCenterCatalogHandler>();
         services.AddScoped<IReferenceCatalogHandler, ClinicCatalogHandler>();
         services.AddScoped<IReferenceCatalogHandler, ResultStatusCatalogHandler>();
