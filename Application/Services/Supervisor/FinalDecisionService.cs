@@ -70,6 +70,7 @@ public class FinalDecisionService : IFinalDecisionService
     private readonly IMemberArchiveRepository _archives;
     private readonly IAuditLogRepository _audit;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IPostgresSessionGuard _postgresSession;
 
     public FinalDecisionService(
         IPermissionGate permissionGate,
@@ -81,7 +82,8 @@ public class FinalDecisionService : IFinalDecisionService
         IMedicalCenterRepository centers,
         IMemberArchiveRepository archives,
         IAuditLogRepository audit,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IPostgresSessionGuard postgresSession)
     {
         _permissionGate = permissionGate;
         _currentUser = currentUser;
@@ -93,6 +95,7 @@ public class FinalDecisionService : IFinalDecisionService
         _archives = archives;
         _audit = audit;
         _unitOfWork = unitOfWork;
+        _postgresSession = postgresSession;
     }
 
     /// <inheritdoc />
@@ -201,18 +204,34 @@ public class FinalDecisionService : IFinalDecisionService
 
         RecordArchiveCreatedAudit(userId, centerId, memberId, archive);
 
+        // معاملة واحدة + suppressRevision: يمنع trgFinalDecisionRevision من زيادة dataRevision
+        // بعد أن طبع التطبيق reviewedRevision = dataRevision (وإلا يظهر الفرق 19/18 في التصدير).
+        await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
         try
         {
+            await _postgresSession.ApplyForFinalDecisionWriteAsync(
+                userId,
+                changeReason: null,
+                suppressRevision: true,
+                cancellationToken);
+
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
         }
         catch (DbUpdateException)
         {
+            await tx.RollbackAsync(cancellationToken);
             if (await _clinicWorkspace.QueryFinalDecisions(asNoTracking: true)
                     .AnyAsync(d => d.MemberId == memberId, cancellationToken))
             {
                 throw new FinalDecisionAlreadyExistsException();
             }
 
+            throw;
+        }
+        catch
+        {
+            await tx.RollbackAsync(cancellationToken);
             throw;
         }
 
@@ -335,6 +354,7 @@ public class FinalDecisionService : IFinalDecisionService
         // إعادة وضع علامة المراجعة على النسخة بعد التعديل حتى يظهر الملف مجدداً في قائمة التصدير عند القبول/الرفض.
         MarkMemberReviewed(member, userId, now);
 
+        // على PostgreSQL يكتب trgFinalDecisionHistory السجل بشرط app.changeReason؛ إدراج موازٍ يكرّر الصف.
         var history = new FinalDecisionHistory
         {
             HistoryId = Guid.NewGuid(),
@@ -348,7 +368,9 @@ public class FinalDecisionService : IFinalDecisionService
             ChangedAt = now,
             ExportResetPerformed = true
         };
-        _clinicWorkspace.AddFinalDecisionHistory(history);
+        var historyOwnedByDatabase = _postgresSession.DefersFinalDecisionHistoryToDatabase;
+        if (!historyOwnedByDatabase)
+            _clinicWorkspace.AddFinalDecisionHistory(history);
 
         var disagreeingCodes = disagreeing.Select(a => clinicCodeById[a.ClinicId]).ToList();
         // FR-069 / A3 وخطوة FR-056-9: تحديث سجل الأرشيف المرتبط دون فقد الربط أو التاريخ.
@@ -374,7 +396,39 @@ public class FinalDecisionService : IFinalDecisionService
         if (archive is not null)
             RecordArchiveUpdatedAudit(userId, centerId, memberId, archive);
 
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            await _postgresSession.ApplyForFinalDecisionWriteAsync(
+                userId,
+                changeReason,
+                suppressRevision: true,
+                cancellationToken);
+
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            if (historyOwnedByDatabase)
+            {
+                var persistedHistory = await _clinicWorkspace.QueryFinalDecisionHistories(asNoTracking: true)
+                    .Where(h => h.FinalDecisionId == decision.FinalDecisionId)
+                    .OrderByDescending(h => h.ChangedAt)
+                    .FirstOrDefaultAsync(cancellationToken);
+                if (persistedHistory is null)
+                {
+                    throw new InvalidFinalDecisionDataException(
+                        "تعذر قراءة سجل تاريخ القرار بعد التعديل.");
+                }
+
+                history = persistedHistory;
+            }
+
+            await tx.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await tx.RollbackAsync(cancellationToken);
+            throw;
+        }
 
         var baseDto = await MapDecisionDtoAsync(
             decision,

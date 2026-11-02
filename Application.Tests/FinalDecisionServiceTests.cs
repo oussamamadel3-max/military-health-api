@@ -517,6 +517,47 @@ public class FinalDecisionServiceTests
     }
 
     [Fact]
+    public async Task Amend_applies_postgres_session_guards_with_change_reason()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, CenterA, "FD-AMD-GUC");
+        await SeedAllAssessmentsAsync(db, memberId, CenterA, resultStatusId: 3);
+
+        var postgresSession = new Mock<IPostgresSessionGuard>();
+        postgresSession.SetupGet(s => s.DefersFinalDecisionHistoryToDatabase).Returns(false);
+        postgresSession.Setup(s => s.ApplyForFinalDecisionWriteAsync(
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<bool>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var service = CreateService(db, CenterA, allow: true, postgresSession: postgresSession.Object);
+        var issued = await service.IssueAsync(
+            memberId,
+            ValidDeferredRequest(DateOnly.FromDateTime(DateTime.UtcNow.AddDays(7)), actionTypeId: 1));
+
+        await service.AmendAsync(memberId, new AmendFinalDecisionRequest
+        {
+            ResultStatusId = 1,
+            DisagreementJustification = "اكتمال الإجراء المطلوب وقبول الملف",
+            ChangeReason = "حسم التأجيل بالقبول",
+            ExpectedDataRevision = issued.MemberDataRevision
+        });
+
+        postgresSession.Verify(s => s.ApplyForFinalDecisionWriteAsync(
+            "actor-1",
+            "حسم التأجيل بالقبول",
+            true,
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        Assert.Equal(1, await db.FinalDecisionHistories.CountAsync());
+        var member = await db.Members.SingleAsync(m => m.MemberId == memberId);
+        Assert.Equal(member.DataRevision, member.ReviewedRevision);
+    }
+
+    [Fact]
     public async Task Amend_without_change_reason_is_rejected()
     {
         await using var db = MemberServiceTests.CreateDb();
@@ -861,7 +902,11 @@ public class FinalDecisionServiceTests
             DisagreementJustification = null
         };
 
-    private static FinalDecisionService CreateService(AppDbContext db, Guid centerId, bool allow)
+    private static FinalDecisionService CreateService(
+        AppDbContext db,
+        Guid centerId,
+        bool allow,
+        IPostgresSessionGuard? postgresSession = null)
     {
         var gate = new Mock<IPermissionGate>();
         if (allow)
@@ -884,6 +929,19 @@ public class FinalDecisionServiceTests
         var currentUser = new TestCurrentUser();
         currentUser.SetUser("actor-1", "actor", "127.0.0.1");
 
+        if (postgresSession is null)
+        {
+            var session = new Mock<IPostgresSessionGuard>();
+            session.SetupGet(s => s.DefersFinalDecisionHistoryToDatabase).Returns(false);
+            session.Setup(s => s.ApplyForFinalDecisionWriteAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<bool>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            postgresSession = session.Object;
+        }
+
         return new FinalDecisionService(
             gate.Object,
             currentUser,
@@ -894,7 +952,8 @@ public class FinalDecisionServiceTests
             new MedicalCenterRepository(db),
             new MemberArchiveRepository(db),
             new AuditLogRepository(db),
-            new FinalDecisionTestUnitOfWork(db));
+            new FinalDecisionTestUnitOfWork(db),
+            postgresSession);
     }
 
     private static SupervisorAssessmentFileService CreateAssessmentFileService(AppDbContext db, Guid centerId)

@@ -19,6 +19,7 @@ using Application.Services.FileStorageService;
 using Application.Services.Reports;
 using Application.Services.Sanitization;
 using Application.Services.Supervisor;
+using Infrastructure.Persistence;
 using Infrastructure.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -34,6 +35,7 @@ public static class InfrastructureServiceRegistration
 
         #region Repositories
         services.AddScoped<IUnitOfWork, UnitOfWork>();
+        services.AddScoped<IPostgresSessionGuard, PostgresSessionGuard>();
         services.AddScoped<IActorScopeProvider, ActorScopeProvider>();
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IRoleRepository, RoleRepository>();
