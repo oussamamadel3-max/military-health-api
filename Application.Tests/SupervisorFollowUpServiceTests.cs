@@ -4,12 +4,15 @@ using Application.Dtos.Supervisor;
 using Application.Exceptions;
 using Application.Interfaces;
 using Application.Interfaces.Services;
+using Application.Services;
 using Application.Services.Supervisor;
+using ClosedXML.Excel;
 using Domain.Entities.Clinical;
 using Domain.Entities.Core;
 using Infrastructure.Persistence;
 using Infrastructure.Repositories;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Moq;
 
 namespace Application.Tests;
@@ -333,7 +336,7 @@ public class SupervisorFollowUpServiceTests
         var memberId = await CreateMemberAsync(db, CenterA, "FU-SAFE", "آمن");
         await SeedAllAssessmentsAsync(db, memberId, CenterA, 1);
 
-        var service = CreateService(db, CenterA, allow: true);
+        var service = CreateService(db, CenterA, allowList: true);
         await Assert.ThrowsAsync<InvalidSupervisorFollowUpDataException>(() =>
             service.ListAsync(new SupervisorFollowUpQuery { Status = "UNKNOWN" }));
 
@@ -345,12 +348,206 @@ public class SupervisorFollowUpServiceTests
         Assert.False(string.IsNullOrWhiteSpace(item.FollowUpStatus));
     }
 
+    [Fact]
+    public async Task List_filters_by_export_status()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var unexportedId = await CreateMemberAsync(db, CenterA, "FU-UNEX", "غير مصدّر");
+        var exportedId = await CreateMemberAsync(db, CenterA, "FU-EX", "مصدّر");
+
+        var exported = await db.Members.SingleAsync(m => m.MemberId == exportedId);
+        exported.ExportStatus = FinalDecisionService.ExportStatusExported;
+        exported.LastExportedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, CenterA, allowList: true);
+        var unexported = await service.ListAsync(new SupervisorFollowUpQuery
+        {
+            ExportStatus = FinalDecisionService.ExportStatusUnexported
+        });
+        Assert.Equal(unexportedId, Assert.Single(unexported.Items).MemberId);
+
+        var exportedPage = await service.ListAsync(new SupervisorFollowUpQuery
+        {
+            ExportStatus = FinalDecisionService.ExportStatusExported
+        });
+        Assert.Equal(exportedId, Assert.Single(exportedPage.Items).MemberId);
+    }
+
+    [Fact]
+    public async Task Export_without_filters_matches_list_and_writes_audit()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var first = await CreateMemberAsync(db, CenterA, "FU-X1", "تصدير واحد");
+        var second = await CreateMemberAsync(db, CenterA, "FU-X2", "تصدير اثنان");
+        await SeedAllAssessmentsAsync(db, first, CenterA, 1);
+
+        var service = CreateService(db, CenterA, allowList: true, allowExport: true);
+        var list = await service.ListAsync(new SupervisorFollowUpQuery
+        {
+            SortBy = SupervisorFollowUpService.SortFileNumberAsc,
+            PageSize = 200
+        });
+        var file = await service.ExportAsync(new SupervisorFollowUpQuery
+        {
+            SortBy = SupervisorFollowUpService.SortFileNumberAsc
+        });
+
+        Assert.Equal(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            file.ContentType);
+        Assert.True(file.FileContents.Length > 100);
+        Assert.Equal(2, list.TotalCount);
+        Assert.Equal(new[] { first, second }.OrderBy(id => id).ToArray(),
+            list.Items.Select(i => i.MemberId).OrderBy(id => id).ToArray());
+
+        using var workbook = new XLWorkbook(new MemoryStream(file.FileContents));
+        var sheet = workbook.Worksheets.First();
+        // ExportService: title rows 1-4, headers row 5, data from row 6.
+        const int dataStartRow = 6;
+        var listItems = list.Items.ToList();
+        Assert.Equal(listItems[0].FileNumber, sheet.Cell(dataStartRow, 2).GetValue<long>());
+        Assert.Equal(listItems[0].FullName, sheet.Cell(dataStartRow, 3).GetString());
+        Assert.Equal(listItems[1].FileNumber, sheet.Cell(dataStartRow + 1, 2).GetValue<long>());
+        Assert.Equal(listItems[1].FullName, sheet.Cell(dataStartRow + 1, 3).GetString());
+        Assert.Equal("رقم الدور", sheet.Cell(5, 1).GetString());
+        Assert.Equal("رقم الملف", sheet.Cell(5, 2).GetString());
+
+        var audit = Assert.Single(await db.AuditEvents
+            .Where(e => e.EventType == SupervisorFollowUpService.ExportEventType)
+            .ToListAsync());
+        Assert.Equal("SUCCESS", audit.Result);
+        Assert.Equal(CenterA, audit.CenterId);
+        Assert.DoesNotContain("تصدير واحد", audit.NewValues ?? string.Empty);
+        Assert.Contains("\"RecordCount\":2", audit.NewValues ?? string.Empty);
+    }
+
+    [Fact]
+    public async Task Export_applies_result_and_date_filters_like_list()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var acceptedId = await CreateMemberAsync(db, CenterA, "FU-XR1", "مقبول للتصدير");
+        await SeedAllAssessmentsAsync(db, acceptedId, CenterA, 1);
+        var now = DateTimeOffset.UtcNow;
+        db.FinalDecisions.Add(new FinalDecision
+        {
+            FinalDecisionId = Guid.NewGuid(),
+            MemberId = acceptedId,
+            CenterId = CenterA,
+            SupervisorUserId = "actor-1",
+            ResultStatusId = 1,
+            DecidedAt = now,
+            UpdatedByUserId = "actor-1",
+            UpdatedAt = now
+        });
+
+        var rejectedId = await CreateMemberAsync(db, CenterA, "FU-XR2", "مرفوض للتصدير");
+        await SeedAllAssessmentsAsync(db, rejectedId, CenterA, 2);
+        db.FinalDecisions.Add(new FinalDecision
+        {
+            FinalDecisionId = Guid.NewGuid(),
+            MemberId = rejectedId,
+            CenterId = CenterA,
+            SupervisorUserId = "actor-1",
+            ResultStatusId = 2,
+            RejectionReason = "سبب رفض",
+            DecidedAt = now,
+            UpdatedByUserId = "actor-1",
+            UpdatedAt = now
+        });
+        await db.SaveChangesAsync();
+
+        var acceptedMember = await db.Members.SingleAsync(m => m.MemberId == acceptedId);
+        acceptedMember.CreatedAt = DateTimeOffset.UtcNow.AddDays(-1);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, CenterA, allowList: true, allowExport: true);
+        var query = new SupervisorFollowUpQuery
+        {
+            ResultStatusId = 1,
+            FromDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-2)),
+            ToDate = DateOnly.FromDateTime(DateTime.UtcNow)
+        };
+
+        var list = await service.ListAsync(query);
+        Assert.Equal(acceptedId, Assert.Single(list.Items).MemberId);
+
+        var file = await service.ExportAsync(query);
+        using var workbook = new XLWorkbook(new MemoryStream(file.FileContents));
+        var text = string.Join(
+            " ",
+            workbook.Worksheet(1).CellsUsed().Select(c => c.GetString()));
+        Assert.Contains(acceptedMember.FileNumber.ToString(), text);
+        Assert.DoesNotContain("مرفوض للتصدير", text);
+    }
+
+    [Fact]
+    public async Task Export_rejects_without_permission_and_isolates_centers()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        await CreateMemberAsync(db, CenterA, "FU-XP-A", "مركز أ");
+        await CreateMemberAsync(db, CenterB, "FU-XP-B", "مركز ب");
+
+        var denied = CreateService(db, CenterA, allowList: true, allowExport: false);
+        await Assert.ThrowsAsync<ForbiddenPermissionException>(() =>
+            denied.ExportAsync(new SupervisorFollowUpQuery()));
+
+        var exportA = await CreateService(db, CenterA, allowList: true, allowExport: true)
+            .ExportAsync(new SupervisorFollowUpQuery());
+        using (var workbook = new XLWorkbook(new MemoryStream(exportA.FileContents)))
+        {
+            var text = string.Join(" ", workbook.Worksheet(1).CellsUsed().Select(c => c.GetString()));
+            Assert.Contains("مركز أ", text);
+            Assert.DoesNotContain("مركز ب", text);
+        }
+
+        var exportB = await CreateService(db, CenterB, allowList: true, allowExport: true)
+            .ExportAsync(new SupervisorFollowUpQuery());
+        using (var workbook = new XLWorkbook(new MemoryStream(exportB.FileContents)))
+        {
+            var text = string.Join(" ", workbook.Worksheet(1).CellsUsed().Select(c => c.GetString()));
+            Assert.Contains("مركز ب", text);
+            Assert.DoesNotContain("مركز أ", text);
+        }
+    }
+
+    [Fact]
+    public async Task Export_empty_results_returns_clear_message()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        await CreateMemberAsync(db, CenterA, "FU-EMPTY", "موجود");
+
+        var service = CreateService(db, CenterA, allowList: true, allowExport: true);
+        var error = await Assert.ThrowsAsync<SupervisorFollowUpExportEmptyException>(() =>
+            service.ExportAsync(new SupervisorFollowUpQuery
+            {
+                FullName = "لا يوجد بهذا الاسم"
+            }));
+        Assert.Equal("لا توجد نتائج ضمن التصفية الحالية.", error.Message);
+        Assert.Equal(0, await db.AuditEvents.CountAsync(e =>
+            e.EventType == SupervisorFollowUpService.ExportEventType));
+    }
+
     #region Helpers
 
-    private static SupervisorFollowUpService CreateService(AppDbContext db, Guid centerId, bool allow)
+    private static SupervisorFollowUpService CreateService(
+        AppDbContext db,
+        Guid centerId,
+        bool allow = true,
+        bool allowList = true,
+        bool allowExport = false)
     {
+        // Preserve older call sites that pass allow: true/false for list permission.
+        if (!allow)
+            allowList = false;
+
         var gate = new Mock<IPermissionGate>();
-        if (allow)
+        if (allowList)
         {
             gate.Setup(g => g.EnsureLocalAsync(
                     MilitaryHealthPermissions.Clinical.FinalDecision,
@@ -367,12 +564,55 @@ public class SupervisorFollowUpServiceTests
                 .ThrowsAsync(new ForbiddenPermissionException());
         }
 
+        if (allowExport)
+        {
+            gate.Setup(g => g.EnsureLocalAsync(
+                    MilitaryHealthPermissions.Members.Export,
+                    It.IsAny<Guid?>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(centerId);
+        }
+        else
+        {
+            gate.Setup(g => g.EnsureLocalAsync(
+                    MilitaryHealthPermissions.Members.Export,
+                    It.IsAny<Guid?>(),
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new ForbiddenPermissionException());
+        }
+
         return new SupervisorFollowUpService(
             gate.Object,
+            new TestCurrentUser(),
             new MemberRepository(db),
             new ClinicWorkspaceRepository(db),
             new CenterClinicRepository(db),
-            new ReferenceDataRepository(db));
+            new ReferenceDataRepository(db),
+            new MedicalCenterRepository(db),
+            new ExportService(),
+            new AuditLogRepository(db),
+            new FollowUpTestUnitOfWork(db));
+    }
+
+    private sealed class FollowUpTestUnitOfWork : IUnitOfWork
+    {
+        private readonly AppDbContext _db;
+        public FollowUpTestUnitOfWork(AppDbContext db) => _db = db;
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+            => _db.SaveChangesAsync(cancellationToken);
+        public Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IDbContextTransaction>(new FollowUpNoopTransaction());
+    }
+
+    private sealed class FollowUpNoopTransaction : IDbContextTransaction
+    {
+        public Guid TransactionId { get; } = Guid.NewGuid();
+        public void Commit() { }
+        public Task CommitAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public void Rollback() { }
+        public Task RollbackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public void Dispose() { }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     private static async Task<Guid> CreateMemberAsync(

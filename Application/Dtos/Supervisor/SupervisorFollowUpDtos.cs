@@ -40,6 +40,11 @@ public class SupervisorFollowUpQuery
     /// <summary>تصفية بالنتيجة النهائية (1/2/3).</summary>
     public short? ResultStatusId { get; set; }
 
+    /// <summary>
+    /// تصفية بحالة التصدير: UNEXPORTED | EXPORTED.
+    /// </summary>
+    public string? ExportStatus { get; set; }
+
     /// <summary>تصفية بالعيادة الناقصة (لا يوجد تقييم إلزامي لهذه العيادة).</summary>
     public Guid? MissingClinicId { get; set; }
 
@@ -101,5 +106,20 @@ public class SupervisorFollowUpItemDto
     public short? OpenDeferredActionTypeId { get; set; }
     public string? OpenDeferredActionTypeNameAr { get; set; }
     public string? OpenDeferredStatus { get; set; }
+    public string? OpenDeferReason { get; set; }
     public DateOnly? OpenDeferUntil { get; set; }
+}
+
+/// <summary>صف تصدير Excel لقائمة متابعة المشرف (FR-057).</summary>
+public class SupervisorFollowUpExportRowDto
+{
+    public int QueueNumber { get; set; }
+    public long FileNumber { get; set; }
+    public string FullName { get; set; } = null!;
+    public DateTimeOffset CreatedAt { get; set; }
+    public string ClinicsCompletionStatusAr { get; set; } = null!;
+    public string? FinalResultStatusNameAr { get; set; }
+    public string? ResultReason { get; set; }
+    public string ExportStatus { get; set; } = null!;
+    public string? DeferredActionSummary { get; set; }
 }

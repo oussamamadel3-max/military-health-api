@@ -38,6 +38,21 @@ public class FinalDecisionService : IFinalDecisionService
     public const short RejectedResultStatusId = ClinicAssessmentService.RejectedResultStatusId;
     public const short DeferredResultStatusId = ClinicAssessmentService.DeferredResultStatusId;
 
+    /// <summary>
+    /// يحدد أهلية الملف لقائمة التصدير للتجنيد: قبول/رفض نهائي غير مصدَّر فقط.
+    /// القرار المؤجل لا يُدرج قبل حسمه (FR-055 A5 / FR-056 / BR-018).
+    /// </summary>
+    public static bool IsEligibleForRecruitmentExport(short? resultStatusId, string? exportStatus)
+    {
+        if (resultStatusId is not AcceptedResultStatusId and not RejectedResultStatusId)
+            return false;
+
+        return string.Equals(
+            exportStatus,
+            ExportStatusUnexported,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
     private readonly IPermissionGate _permissionGate;
     private readonly ICurrentUserService _currentUser;
     private readonly IMemberRepository _members;
@@ -303,7 +318,8 @@ public class FinalDecisionService : IFinalDecisionService
             justification,
             now);
 
-        // BR-021: إعادة حالة التصدير دائماً عند التعديل.
+        // BR-021 / FR-056: إعادة حالة التصدير دائماً عند التعديل ومسح تاريخ التصدير السابق.
+        // القرار المؤجل يبقى غير مصدَّر لكنه غير مؤهل لقائمة التصدير حتى الحسم.
         member.ExportStatus = ExportStatusUnexported;
         member.LastExportedAt = null;
         BumpMemberRevision(member, userId, now);

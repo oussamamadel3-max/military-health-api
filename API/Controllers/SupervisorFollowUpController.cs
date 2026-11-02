@@ -1,15 +1,17 @@
 using API.Infrastructure;
+using API.RateLimiting;
 using Application.Common.Permissions;
 using Application.Common.Security;
 using Application.Dtos.Supervisor;
 using Application.Interfaces.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace API.Controllers;
 
 /// <summary>
-/// قائمة متابعة المشرف المحلية مع البحث والتصفية (FR-057).
+/// قائمة متابعة المشرف المحلية مع البحث والتصفية وتصدير Excel (FR-057).
 /// </summary>
 [ApiController]
 [Authorize]
@@ -43,5 +45,23 @@ public class SupervisorFollowUpController : ControllerBase
             : "تم جلب قائمة متابعة المشرف بنجاح.";
 
         return ApiResponse.Success(message, page);
+    }
+
+    /// <summary>
+    /// يصدّر قائمة متابعة المشرف إلى Excel بنفس فلاتر الشاشة ضمن المركز النشط،
+    /// باستخدام صلاحية Members.Export دون تخزين دائم للملف.
+    /// </summary>
+    [HttpGet("members/export")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Members.Export, OperationScope.Local)]
+    [EnableRateLimiting(RateLimitPolicies.Reports)]
+    public async Task<IActionResult> Export(
+        [FromQuery] SupervisorFollowUpQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        var file = await _followUp.ExportAsync(
+            query,
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+        return File(file.FileContents, file.ContentType, file.FileName);
     }
 }

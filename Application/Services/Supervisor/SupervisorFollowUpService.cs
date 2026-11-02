@@ -1,12 +1,17 @@
+using System.Net;
+using System.Text.Json;
 using Application.Common.Permissions;
 using Application.Common.Results;
 using Application.Common.Security;
+using Application.Dtos.ExportDtos;
 using Application.Dtos.Members;
 using Application.Dtos.Supervisor;
 using Application.Exceptions;
+using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Application.Services.Members;
+using Domain.Entities.Audit;
 using Domain.Entities.Clinical;
 using Domain.Entities.Patient;
 using Microsoft.EntityFrameworkCore;
@@ -14,7 +19,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Application.Services.Supervisor;
 
 /// <summary>
-/// قائمة متابعة المشرف المحلية مع البحث والتصفية والترقيم (FR-057).
+/// قائمة متابعة المشرف المحلية مع البحث والتصفية والترقيم وتصدير Excel (FR-057).
 /// </summary>
 public class SupervisorFollowUpService : ISupervisorFollowUpService
 {
@@ -25,25 +30,42 @@ public class SupervisorFollowUpService : ISupervisorFollowUpService
     public const string SortDecidedAtDesc = "DecidedAtDesc";
 
     public const string DeferredStatusClosed = "CLOSED";
+    public const string ExportEventType = "SupervisorFollowUpExport";
+    public const int MaxExportRows = MemberService.MaxExportRows;
 
     private readonly IPermissionGate _permissionGate;
+    private readonly ICurrentUserService _currentUser;
     private readonly IMemberRepository _members;
     private readonly IClinicWorkspaceRepository _clinicWorkspace;
     private readonly ICenterClinicRepository _centerClinics;
     private readonly IReferenceDataRepository _referenceData;
+    private readonly IMedicalCenterRepository _centers;
+    private readonly IExportService _export;
+    private readonly IAuditLogRepository _audit;
+    private readonly IUnitOfWork _unitOfWork;
 
     public SupervisorFollowUpService(
         IPermissionGate permissionGate,
+        ICurrentUserService currentUser,
         IMemberRepository members,
         IClinicWorkspaceRepository clinicWorkspace,
         ICenterClinicRepository centerClinics,
-        IReferenceDataRepository referenceData)
+        IReferenceDataRepository referenceData,
+        IMedicalCenterRepository centers,
+        IExportService export,
+        IAuditLogRepository audit,
+        IUnitOfWork unitOfWork)
     {
         _permissionGate = permissionGate;
+        _currentUser = currentUser;
         _members = members;
         _clinicWorkspace = clinicWorkspace;
         _centerClinics = centerClinics;
         _referenceData = referenceData;
+        _centers = centers;
+        _export = export;
+        _audit = audit;
+        _unitOfWork = unitOfWork;
     }
 
     /// <inheritdoc />
@@ -61,6 +83,139 @@ public class SupervisorFollowUpService : ISupervisorFollowUpService
 
         NormalizeAndValidateQuery(query);
 
+        var (membersQuery, mandatoryPairs, mandatoryIds, mandatoryCount) =
+            await BuildFilteredQueryAsync(centerId, query, cancellationToken);
+
+        var pageNumber = query.PageNumber;
+        var pageSize = query.PageSize;
+        var totalCount = await membersQuery.CountAsync(cancellationToken);
+        var pageMembers = await membersQuery
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        var items = await MaterializeItemsAsync(
+            centerId,
+            pageMembers,
+            mandatoryPairs,
+            mandatoryIds,
+            mandatoryCount,
+            cancellationToken);
+
+        return new PaginatedList<SupervisorFollowUpItemDto>(items, totalCount, pageNumber, pageSize);
+    }
+
+    /// <inheritdoc />
+    public async Task<ExportFileDto> ExportAsync(
+        SupervisorFollowUpQuery query,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default)
+    {
+        query ??= new SupervisorFollowUpQuery();
+
+        var centerId = await _permissionGate.EnsureLocalAsync(
+            MilitaryHealthPermissions.Members.Export,
+            clientCenterId,
+            cancellationToken);
+
+        var userId = RequireUserId();
+        NormalizeAndValidateQuery(query);
+
+        var (membersQuery, mandatoryPairs, mandatoryIds, mandatoryCount) =
+            await BuildFilteredQueryAsync(centerId, query, cancellationToken);
+
+        var totalCount = await membersQuery.CountAsync(cancellationToken);
+        if (totalCount == 0)
+            throw new SupervisorFollowUpExportEmptyException();
+        if (totalCount > MaxExportRows)
+            throw new SupervisorFollowUpExportTooLargeException(totalCount, MaxExportRows);
+
+        var members = await membersQuery.Take(MaxExportRows).ToListAsync(cancellationToken);
+        var items = await MaterializeItemsAsync(
+            centerId,
+            members,
+            mandatoryPairs,
+            mandatoryIds,
+            mandatoryCount,
+            cancellationToken);
+
+        var rows = items.Select(ToExportRow).ToList();
+        var center = await _centers.GetByIdAsync(centerId, asNoTracking: true, cancellationToken);
+
+        var file = await _export.ExportToExcelAsync(rows, new ExportOptions
+        {
+            ReportName = "متابعة-المشرف",
+            SheetName = "قائمة المتابعة",
+            CustomTitle = "تصدير قائمة متابعة المشرف",
+            BranchName = center?.NameAr,
+            IncludeSummary = false,
+            ColumnMappings = new Dictionary<string, string>
+            {
+                [nameof(SupervisorFollowUpExportRowDto.QueueNumber)] = "رقم الدور",
+                [nameof(SupervisorFollowUpExportRowDto.FileNumber)] = "رقم الملف",
+                [nameof(SupervisorFollowUpExportRowDto.FullName)] = "اسم المنتسب",
+                [nameof(SupervisorFollowUpExportRowDto.CreatedAt)] = "تاريخ التسجيل",
+                [nameof(SupervisorFollowUpExportRowDto.ClinicsCompletionStatusAr)] = "حالة اكتمال العيادات",
+                [nameof(SupervisorFollowUpExportRowDto.FinalResultStatusNameAr)] = "النتيجة النهائية",
+                [nameof(SupervisorFollowUpExportRowDto.ResultReason)] = "سبب النتيجة",
+                [nameof(SupervisorFollowUpExportRowDto.ExportStatus)] = "حالة التصدير",
+                [nameof(SupervisorFollowUpExportRowDto.DeferredActionSummary)] = "الإجراء المطلوب وحالته"
+            }
+        });
+
+        // تدقيق عملية التصدير دون محتوى الملف أو صفوفه.
+        _audit.Add(new AuditEvent
+        {
+            OccurredAt = DateTimeOffset.UtcNow,
+            ActorUserId = userId,
+            ContextScope = CenterClaimTypes.Center,
+            CenterId = centerId,
+            EventType = ExportEventType,
+            Result = "SUCCESS",
+            EntityType = "SupervisorFollowUp",
+            EntityId = centerId.ToString(),
+            ReasonText = "تم تصدير قائمة متابعة المشرف إلى Excel",
+            OldValues = null,
+            NewValues = JsonSerializer.Serialize(new
+            {
+                RecordCount = rows.Count,
+                query.FileNumber,
+                query.RecruitmentNumber,
+                query.FullName,
+                query.Status,
+                query.ResultStatusId,
+                query.ExportStatus,
+                query.MissingClinicId,
+                query.ActionTypeId,
+                query.ActionStatus,
+                query.Date,
+                query.FromDate,
+                query.ToDate,
+                query.SortBy
+            }),
+            UserAgent = _currentUser.UserAgent,
+            CorrelationId = _currentUser.CorrelationId == Guid.Empty
+                ? Guid.NewGuid()
+                : _currentUser.CorrelationId,
+            IPAddress = IPAddress.TryParse(_currentUser.IPAddress, out var ip) ? ip : null
+        });
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return file;
+    }
+
+    #region Query building
+
+    private async Task<(
+            IQueryable<Member> MembersQuery,
+            List<(Guid ClinicId, string Code)> MandatoryPairs,
+            List<Guid> MandatoryIds,
+            int MandatoryCount)>
+        BuildFilteredQueryAsync(
+            Guid centerId,
+            SupervisorFollowUpQuery query,
+            CancellationToken cancellationToken)
+    {
         var mandatoryClinics = await SupervisorMandatoryClinicLoader.LoadAsync(
             centerId,
             _centerClinics,
@@ -78,25 +233,21 @@ public class SupervisorFollowUpService : ISupervisorFollowUpService
             query,
             mandatoryIds,
             mandatoryCount);
-
         membersQuery = ApplySort(membersQuery, centerId, query.SortBy);
 
-        var pageNumber = query.PageNumber;
-        var pageSize = query.PageSize;
-        var totalCount = await membersQuery.CountAsync(cancellationToken);
-        var pageMembers = await membersQuery
-            .Skip((pageNumber - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync(cancellationToken);
+        return (membersQuery, mandatoryPairs, mandatoryIds, mandatoryCount);
+    }
 
+    private async Task<List<SupervisorFollowUpItemDto>> MaterializeItemsAsync(
+        Guid centerId,
+        IReadOnlyList<Member> pageMembers,
+        IReadOnlyList<(Guid ClinicId, string Code)> mandatoryPairs,
+        IReadOnlyList<Guid> mandatoryIds,
+        int mandatoryCount,
+        CancellationToken cancellationToken)
+    {
         if (pageMembers.Count == 0)
-        {
-            return new PaginatedList<SupervisorFollowUpItemDto>(
-                Array.Empty<SupervisorFollowUpItemDto>(),
-                totalCount,
-                pageNumber,
-                pageSize);
-        }
+            return new List<SupervisorFollowUpItemDto>();
 
         var memberIds = pageMembers.Select(m => m.MemberId).ToList();
 
@@ -151,7 +302,7 @@ public class SupervisorFollowUpService : ISupervisorFollowUpService
                 .Where(a => actionTypeIds.Contains(a.ActionTypeId))
                 .ToDictionaryAsync(a => a.ActionTypeId, a => a.NameAr, cancellationToken);
 
-        var items = pageMembers.Select(m =>
+        return pageMembers.Select(m =>
         {
             assessedByMember.TryGetValue(m.MemberId, out var assessedSet);
             assessedSet ??= new HashSet<Guid>();
@@ -198,14 +349,38 @@ public class SupervisorFollowUpService : ISupervisorFollowUpService
                     ? null
                     : actionTypeNames.GetValueOrDefault(deferred.ActionTypeId),
                 OpenDeferredStatus = deferred?.Status,
+                OpenDeferReason = deferred?.DeferReason,
                 OpenDeferUntil = deferred?.DeferUntil
             };
         }).ToList();
-
-        return new PaginatedList<SupervisorFollowUpItemDto>(items, totalCount, pageNumber, pageSize);
     }
 
-    #region Query building
+    private static SupervisorFollowUpExportRowDto ToExportRow(SupervisorFollowUpItemDto item)
+    {
+        string? resultReason = item.RejectionReason;
+        if (string.IsNullOrWhiteSpace(resultReason) && item.IsDeferred)
+            resultReason = item.OpenDeferReason;
+
+        string? deferredSummary = null;
+        if (item.OpenDeferredActionId.HasValue)
+        {
+            var actionName = item.OpenDeferredActionTypeNameAr ?? item.OpenDeferredActionTypeId?.ToString();
+            deferredSummary = $"{actionName} — {item.OpenDeferredStatus}";
+        }
+
+        return new SupervisorFollowUpExportRowDto
+        {
+            QueueNumber = item.QueueNumber,
+            FileNumber = item.FileNumber,
+            FullName = item.FullName,
+            CreatedAt = item.CreatedAt,
+            ClinicsCompletionStatusAr = item.AreMandatoryClinicsComplete ? "مكتمل" : "غير مكتمل",
+            FinalResultStatusNameAr = item.FinalResultStatusNameAr,
+            ResultReason = resultReason,
+            ExportStatus = item.ExportStatus,
+            DeferredActionSummary = deferredSummary
+        };
+    }
 
     private static void NormalizeAndValidateQuery(SupervisorFollowUpQuery query)
     {
@@ -258,6 +433,23 @@ public class SupervisorFollowUpService : ISupervisorFollowUpService
         {
             throw new InvalidSupervisorFollowUpDataException(
                 "نتيجة القرار النهائي للتصفية يجب أن تكون 1 أو 2 أو 3.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.ExportStatus))
+        {
+            var exportStatus = query.ExportStatus.Trim().ToUpperInvariant();
+            if (exportStatus is not FinalDecisionService.ExportStatusUnexported
+                and not FinalDecisionService.ExportStatusExported)
+            {
+                throw new InvalidSupervisorFollowUpDataException(
+                    "حالة التصدير غير صالحة. استخدم UNEXPORTED أو EXPORTED.");
+            }
+
+            query.ExportStatus = exportStatus;
+        }
+        else
+        {
+            query.ExportStatus = null;
         }
 
         if (query.MissingClinicId.HasValue && query.MissingClinicId.Value == Guid.Empty)
@@ -318,6 +510,12 @@ public class SupervisorFollowUpService : ISupervisorFollowUpService
         {
             var term = query.FullName.Trim().ToLower();
             q = q.Where(m => m.FullName.ToLower().Contains(term));
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.ExportStatus))
+        {
+            var exportStatus = query.ExportStatus;
+            q = q.Where(m => m.ExportStatus == exportStatus);
         }
 
         q = ApplyCreatedAtFilter(q, query.Date, query.FromDate, query.ToDate);
@@ -500,6 +698,13 @@ public class SupervisorFollowUpService : ISupervisorFollowUpService
         return isAmended
             ? SupervisorFollowUpStatuses.Amended
             : SupervisorFollowUpStatuses.Decided;
+    }
+
+    private string RequireUserId()
+    {
+        if (string.IsNullOrWhiteSpace(_currentUser.UserId) || _currentUser.UserId == "0")
+            throw new UnauthenticatedUserException();
+        return _currentUser.UserId;
     }
 
     #endregion

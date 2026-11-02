@@ -490,6 +490,9 @@ public class FinalDecisionServiceTests
         member = await db.Members.SingleAsync(m => m.MemberId == memberId);
         Assert.Equal(FinalDecisionService.ExportStatusUnexported, member.ExportStatus);
         Assert.Null(member.LastExportedAt);
+        Assert.True(FinalDecisionService.IsEligibleForRecruitmentExport(
+            amended.ResultStatusId,
+            member.ExportStatus));
 
         Assert.Equal(1, await db.AuditEvents.CountAsync(e =>
             e.EventType == FinalDecisionService.MemberArchiveUpdatedEventType
@@ -522,6 +525,124 @@ public class FinalDecisionServiceTests
 
         Assert.Equal(0, await db.FinalDecisionHistories.CountAsync());
         Assert.Equal((short)1, (await db.FinalDecisions.SingleAsync()).ResultStatusId);
+    }
+
+    [Fact]
+    public async Task Amend_unexported_decision_still_resets_export_markers_and_keeps_history()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, CenterA, "FD-AMD-UNEX");
+        await SeedAllAssessmentsAsync(db, memberId, CenterA, resultStatusId: 1);
+
+        var service = CreateService(db, CenterA, allow: true);
+        var issued = await service.IssueAsync(memberId, new IssueFinalDecisionRequest { ResultStatusId = 1 });
+
+        var member = await db.Members.SingleAsync(m => m.MemberId == memberId);
+        Assert.Equal(FinalDecisionService.ExportStatusUnexported, member.ExportStatus);
+        Assert.Null(member.LastExportedAt);
+
+        var amended = await service.AmendAsync(memberId, new AmendFinalDecisionRequest
+        {
+            ResultStatusId = 2,
+            RejectionReason = "رفض بعد مراجعة",
+            DisagreementJustification = "اختلاف مع العيادات",
+            ChangeReason = "تعديل قرار غير مصدّر",
+            ExpectedDataRevision = issued.MemberDataRevision
+        });
+
+        Assert.True(amended.ExportResetPerformed);
+        Assert.Equal(FinalDecisionService.ExportStatusUnexported, amended.PreviousExportStatus);
+        Assert.Equal(1, await db.FinalDecisionHistories.CountAsync());
+        Assert.Equal(1, await db.MemberArchives.CountAsync());
+
+        member = await db.Members.SingleAsync(m => m.MemberId == memberId);
+        Assert.Equal(FinalDecisionService.ExportStatusUnexported, member.ExportStatus);
+        Assert.Null(member.LastExportedAt);
+        Assert.True(FinalDecisionService.IsEligibleForRecruitmentExport(
+            amended.ResultStatusId,
+            member.ExportStatus));
+    }
+
+    [Fact]
+    public async Task Amend_exported_to_deferred_resets_export_but_is_not_recruitment_eligible()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, CenterA, "FD-AMD-EX2DEF");
+        await SeedAllAssessmentsAsync(db, memberId, CenterA, resultStatusId: 1);
+
+        var service = CreateService(db, CenterA, allow: true);
+        var issued = await service.IssueAsync(memberId, new IssueFinalDecisionRequest { ResultStatusId = 1 });
+
+        var member = await db.Members.SingleAsync(m => m.MemberId == memberId);
+        member.ExportStatus = FinalDecisionService.ExportStatusExported;
+        member.LastExportedAt = DateTimeOffset.UtcNow.AddHours(-3);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var until = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(10);
+        var amended = await service.AmendAsync(memberId, new AmendFinalDecisionRequest
+        {
+            ResultStatusId = 3,
+            DeferReason = "يحتاج استمارة إضافية",
+            DeferUntil = until,
+            ActionTypeId = 1,
+            FollowupNote = "متابعة بعد الاستمارة",
+            DisagreementJustification = "اختلاف عن تقييمات القبول المؤقت",
+            ChangeReason = "إعادة التأجيل بعد التصدير السابق",
+            ExpectedDataRevision = issued.MemberDataRevision
+        });
+
+        Assert.True(amended.ExportResetPerformed);
+        Assert.Equal(FinalDecisionService.ExportStatusExported, amended.PreviousExportStatus);
+        Assert.Equal((short)3, amended.ResultStatusId);
+        Assert.NotNull(amended.DeferredActionId);
+        Assert.Equal(1, await db.FinalDecisionHistories.CountAsync());
+        Assert.Equal(1, await db.MemberArchives.CountAsync());
+
+        member = await db.Members.SingleAsync(m => m.MemberId == memberId);
+        Assert.Equal(FinalDecisionService.ExportStatusUnexported, member.ExportStatus);
+        Assert.Null(member.LastExportedAt);
+        Assert.False(FinalDecisionService.IsEligibleForRecruitmentExport(
+            amended.ResultStatusId,
+            member.ExportStatus));
+    }
+
+    [Fact]
+    public async Task Amend_exported_accept_returns_to_recruitment_export_ready_list()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, CenterA, "FD-AMD-READY");
+        await SeedAllAssessmentsAsync(db, memberId, CenterA, resultStatusId: 1);
+
+        var service = CreateService(db, CenterA, allow: true);
+        var issued = await service.IssueAsync(memberId, new IssueFinalDecisionRequest { ResultStatusId = 1 });
+
+        var member = await db.Members.SingleAsync(m => m.MemberId == memberId);
+        member.ExportStatus = FinalDecisionService.ExportStatusExported;
+        member.LastExportedAt = DateTimeOffset.UtcNow.AddDays(-2);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        Assert.False(FinalDecisionService.IsEligibleForRecruitmentExport(1, member.ExportStatus));
+
+        var amended = await service.AmendAsync(memberId, new AmendFinalDecisionRequest
+        {
+            ResultStatusId = 2,
+            RejectionReason = "رفض محدّث",
+            DisagreementJustification = "اختلاف مع العيادات",
+            ChangeReason = "تصحيح النتيجة بعد التصدير",
+            ExpectedDataRevision = issued.MemberDataRevision
+        });
+
+        member = await db.Members.SingleAsync(m => m.MemberId == memberId);
+        Assert.Equal(FinalDecisionService.ExportStatusUnexported, member.ExportStatus);
+        Assert.Null(member.LastExportedAt);
+        Assert.True(FinalDecisionService.IsEligibleForRecruitmentExport(
+            amended.ResultStatusId,
+            member.ExportStatus));
     }
 
     [Fact]
