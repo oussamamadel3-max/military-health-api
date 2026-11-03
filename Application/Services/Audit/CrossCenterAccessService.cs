@@ -39,8 +39,12 @@ public class CrossCenterAccessService : ICrossCenterAccessService
             throw new InvalidUserDataException("سبب الاطلاع العابر مطلوب.");
         if (string.IsNullOrWhiteSpace(dataType))
             throw new InvalidUserDataException("نوع البيانات مطلوب.");
-        if (_currentCenter.CenterId == targetCenterId)
-            throw new InvalidUserDataException("الاطلاع ضمن المركز النشط ليس اطلاعاً عابراً.");
+
+        // FR-078 A1: الاطلاع ضمن المركز النشط المحلي ليس عبوراً — لا سجل ولا استثناء.
+        if (!_currentCenter.IsCentralContext
+            && _currentCenter.CenterId is Guid activeCenter
+            && activeCenter == targetCenterId)
+            return;
 
         var actor = string.IsNullOrWhiteSpace(_currentUser.UserId) || _currentUser.UserId == "0"
             ? null
