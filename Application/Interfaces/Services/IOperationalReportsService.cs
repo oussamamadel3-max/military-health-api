@@ -32,6 +32,17 @@ public interface IOperationalReportsService
         Guid? clientCenterId = null,
         CancellationToken cancellationToken = default);
 
+    /// <summary>قائمة قيد الانتظار (تفصيل waitingCount — FR-062).</summary>
+    Task<PaginatedList<FinalMemberListItemDto>> ListWaitingMembersAsync(
+        WaitingMembersQuery query,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default);
+
+    Task<ExportFileDto> ExportWaitingMembersAsync(
+        WaitingMembersQuery query,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default);
+
     Task<DeferredReportResponseDto> GetDeferredReportAsync(
         DeferredReportQuery query,
         Guid? clientCenterId = null,

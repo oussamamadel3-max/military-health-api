@@ -82,6 +82,20 @@ public class FinalMembersQuery : OperationalDateRangeQuery
     public int PageSize { get; set; } = 20;
 }
 
+/// <summary>
+/// فلاتر قائمة قيد الانتظار (تفصيل <c>waitingCount</c> من FR-062).
+/// الفترة على <c>Member.CreatedAt</c>؛ المنتسب في المركز الحالي بلا قرار نهائي لنفس المركز.
+/// </summary>
+public class WaitingMembersQuery : OperationalDateRangeQuery
+{
+    public Guid? ClinicId { get; set; }
+    public string? ExportStatus { get; set; }
+    public bool? IsArchived { get; set; }
+    public string? Search { get; set; }
+    public int PageNumber { get; set; } = 1;
+    public int PageSize { get; set; } = 20;
+}
+
 public class FinalMemberListItemDto
 {
     public Guid MemberId { get; set; }

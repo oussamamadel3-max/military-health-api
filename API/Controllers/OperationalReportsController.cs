@@ -89,6 +89,32 @@ public class OperationalReportsController : ControllerBase
         return File(file.FileContents, file.ContentType, file.FileName);
     }
 
+    /// <summary>قائمة قيد الانتظار — تفصيل waitingCount (FR-062).</summary>
+    [HttpGet("local/waiting-members")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Reports.Local, OperationScope.Local)]
+    public async Task<IResult> WaitingMembers(
+        [FromQuery] WaitingMembersQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        var page = await _reports.ListWaitingMembersAsync(query, ClientCenterBinding.Read(Request), cancellationToken);
+        var message = page.TotalCount == 0
+            ? "لا توجد نتائج ضمن التصفية الحالية."
+            : "تم جلب قائمة قيد الانتظار بنجاح.";
+        return ApiResponse.Success(message, page);
+    }
+
+    /// <summary>تصدير قائمة قيد الانتظار إلى Excel (FR-062).</summary>
+    [HttpGet("local/waiting-members/export")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Reports.Local, OperationScope.Local)]
+    [EnableRateLimiting(RateLimitPolicies.Reports)]
+    public async Task<IActionResult> ExportWaitingMembers(
+        [FromQuery] WaitingMembersQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        var file = await _reports.ExportWaitingMembersAsync(query, ClientCenterBinding.Read(Request), cancellationToken);
+        return File(file.FileContents, file.ContentType, file.FileName);
+    }
+
     /// <summary>تقرير الحالات المؤجلة المحلي (FR-065).</summary>
     [HttpGet("local/deferred")]
     [AuthorizeOperation(MilitaryHealthPermissions.Reports.Local, OperationScope.Local)]

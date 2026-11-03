@@ -570,6 +570,112 @@ public class OperationalReportsServiceTests
         Assert.False(string.IsNullOrWhiteSpace(filtered.FinalResultNameAr));
     }
 
+    [Fact]
+    public async Task WaitingMembers_rejects_missing_permission()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var service = CreateService(db, CenterA, allowLocal: false);
+
+        await Assert.ThrowsAsync<ForbiddenPermissionException>(() =>
+            service.ListWaitingMembersAsync(new WaitingMembersQuery()));
+    }
+
+    [Fact]
+    public async Task WaitingMembers_matches_waitingCount_and_excludes_decided()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+
+        await CreateMemberWithDecisionAsync(db, CenterA, "WAIT-ACC", 1);
+        var waitingId = await CreateMemberAsync(db, CenterA, "WAIT-ONLY");
+        await CreateMemberAsync(db, CenterB, "WAIT-B");
+
+        var service = CreateService(db, CenterA);
+        var kpi = await service.GetLocalKpisAsync(new LocalKpiQuery());
+        var page = await service.ListWaitingMembersAsync(new WaitingMembersQuery
+        {
+            PageNumber = 1,
+            PageSize = 20
+        });
+
+        Assert.Equal(kpi.WaitingCount, page.TotalCount);
+        Assert.Equal(1, page.TotalCount);
+        var item = Assert.Single(page.Items);
+        Assert.Equal(waitingId, item.MemberId);
+        Assert.Null(item.FinalResultStatusId);
+        Assert.Null(item.DecidedAt);
+        Assert.Null(item.FinalResultNameAr);
+    }
+
+    [Fact]
+    public async Task WaitingMembers_period_filters_by_createdAt()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+
+        var inRange = await CreateMemberAsync(db, CenterA, "WAIT-IN");
+        var mIn = await db.Members.SingleAsync(x => x.MemberId == inRange);
+        mIn.CreatedAt = DateTimeOffset.Parse("2026-11-01T10:00:00Z");
+
+        var outOfRange = await CreateMemberAsync(db, CenterA, "WAIT-OUT");
+        var mOut = await db.Members.SingleAsync(x => x.MemberId == outOfRange);
+        mOut.CreatedAt = DateTimeOffset.Parse("2026-10-01T10:00:00Z");
+
+        // قرار في الفترة على DecidedAt لا يُدخل المنتسب في قائمة الانتظار
+        var decided = await CreateMemberWithDecisionAsync(db, CenterA, "WAIT-DEC", 1);
+        var mDec = await db.Members.SingleAsync(x => x.MemberId == decided);
+        mDec.CreatedAt = DateTimeOffset.Parse("2026-11-01T09:00:00Z");
+        var d = await db.FinalDecisions.SingleAsync(x => x.MemberId == decided);
+        d.DecidedAt = DateTimeOffset.Parse("2026-11-02T08:00:00Z");
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, CenterA);
+        var range = new WaitingMembersQuery
+        {
+            FromDate = new DateOnly(2026, 10, 30),
+            ToDate = new DateOnly(2026, 11, 3),
+            PageNumber = 1,
+            PageSize = 20
+        };
+        var page = await service.ListWaitingMembersAsync(range);
+        var kpi = await service.GetLocalKpisAsync(new LocalKpiQuery
+        {
+            FromDate = range.FromDate,
+            ToDate = range.ToDate
+        });
+
+        Assert.Equal(kpi.WaitingCount, page.TotalCount);
+        Assert.Equal(1, page.TotalCount);
+        Assert.Equal(inRange, Assert.Single(page.Items).MemberId);
+    }
+
+    [Fact]
+    public async Task WaitingMembers_paginates_and_filters_clinic()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+
+        var withEyes = await CreateMemberAsync(db, CenterA, "WAIT-EYE");
+        await SeedAssessmentAsync(db, withEyes, CenterA, ClinicEyes, 1);
+
+        var withEntOnly = await CreateMemberAsync(db, CenterA, "WAIT-ENT");
+        await SeedAssessmentAsync(db, withEntOnly, CenterA, ClinicEnt, 1);
+
+        await CreateMemberAsync(db, CenterA, "WAIT-NONE");
+
+        var page1 = await CreateService(db, CenterA).ListWaitingMembersAsync(new WaitingMembersQuery
+        {
+            ClinicId = ClinicEyes,
+            PageNumber = 1,
+            PageSize = 1
+        });
+
+        Assert.Equal(1, page1.TotalCount);
+        Assert.Equal(withEyes, Assert.Single(page1.Items).MemberId);
+        Assert.Equal(1, page1.Items.Count);
+    }
+
     private static OperationalReportsService CreateService(
         AppDbContext db,
         Guid centerId,
