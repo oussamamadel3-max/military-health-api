@@ -94,6 +94,7 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IMedicalCenterService, MedicalCenterService>();
         services.AddScoped<ICenterClinicService, CenterClinicService>();
         services.AddScoped<IMemberService, MemberService>();
+        services.AddScoped<IMemberTransferService, MemberTransferService>();
         services.AddScoped<IClinicWorkspaceService, ClinicWorkspaceService>();
         services.AddScoped<IClinicAssessmentService, ClinicAssessmentService>();
         services.AddScoped<IEyeExamService, EyeExamService>();
