@@ -233,6 +233,8 @@ public class OperationalReportsServiceTests
         var oldAccepted = await CreateMemberWithDecisionAsync(db, CenterA, "FLT-OLD", 1);
         var old = await db.Members.SingleAsync(m => m.MemberId == oldAccepted);
         old.CreatedAt = DateTimeOffset.Parse("2025-01-10T00:00:00Z");
+        var oldDecision = await db.FinalDecisions.SingleAsync(d => d.MemberId == oldAccepted);
+        oldDecision.DecidedAt = DateTimeOffset.Parse("2025-01-10T12:00:00Z");
         await db.SaveChangesAsync();
 
         var accepted = await CreateMemberWithDecisionAsync(db, CenterA, "FLT-ACC", 1);
@@ -469,7 +471,9 @@ public class OperationalReportsServiceTests
         await SeedAsync(db);
         var memberId = await CreateMemberWithDecisionAsync(db, CenterA, "INC-1", 1);
         var member = await db.Members.SingleAsync(m => m.MemberId == memberId);
-        member.CreatedAt = DateTimeOffset.Parse("2026-03-15T12:00:00Z");
+        member.CreatedAt = DateTimeOffset.Parse("2026-01-01T12:00:00Z");
+        var decision = await db.FinalDecisions.SingleAsync(d => d.MemberId == memberId);
+        decision.DecidedAt = DateTimeOffset.Parse("2026-03-15T12:00:00Z");
         await db.SaveChangesAsync();
 
         var onDay = await CreateService(db, CenterA).GetLocalKpisAsync(new LocalKpiQuery
@@ -478,6 +482,7 @@ public class OperationalReportsServiceTests
             ToDate = new DateOnly(2026, 3, 15)
         });
         Assert.Equal(1, onDay.TotalMembers);
+        Assert.Equal(1, onDay.AcceptedCount);
 
         var outside = await CreateService(db, CenterA).GetLocalKpisAsync(new LocalKpiQuery
         {
@@ -485,6 +490,84 @@ public class OperationalReportsServiceTests
             ToDate = new DateOnly(2026, 3, 16)
         });
         Assert.Equal(0, outside.TotalMembers);
+    }
+
+    [Fact]
+    public async Task FinalMembers_period_filters_by_decidedAt_not_createdAt()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+
+        var earlyCreateLateDecide = await CreateMemberWithDecisionAsync(db, CenterA, "DEC-1", 1);
+        var m1 = await db.Members.SingleAsync(x => x.MemberId == earlyCreateLateDecide);
+        m1.CreatedAt = DateTimeOffset.Parse("2025-01-01T00:00:00Z");
+        var d1 = await db.FinalDecisions.SingleAsync(x => x.MemberId == earlyCreateLateDecide);
+        d1.DecidedAt = DateTimeOffset.Parse("2026-11-01T10:00:00Z");
+
+        var otherCenter = await CreateMemberWithDecisionAsync(db, CenterB, "DEC-B", 1);
+        var dB = await db.FinalDecisions.SingleAsync(x => x.MemberId == otherCenter);
+        dB.DecidedAt = DateTimeOffset.Parse("2026-11-01T11:00:00Z");
+
+        var outOfRange = await CreateMemberWithDecisionAsync(db, CenterA, "DEC-2", 1);
+        var d2 = await db.FinalDecisions.SingleAsync(x => x.MemberId == outOfRange);
+        d2.DecidedAt = DateTimeOffset.Parse("2026-10-01T10:00:00Z");
+        await db.SaveChangesAsync();
+
+        var page = await CreateService(db, CenterA).ListFinalMembersAsync(new FinalMembersQuery
+        {
+            FromDate = new DateOnly(2026, 10, 30),
+            ToDate = new DateOnly(2026, 11, 3),
+            PageNumber = 1,
+            PageSize = 20
+        });
+
+        Assert.Equal(1, page.TotalCount);
+        Assert.Equal(earlyCreateLateDecide, Assert.Single(page.Items).MemberId);
+        Assert.Equal(DateTimeOffset.Parse("2026-11-01T10:00:00Z"), page.Items.Single().DecidedAt);
+    }
+
+    [Fact]
+    public async Task LocalSummary_period_aligns_decision_counts_with_decidedAt()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+
+        var decided = await CreateMemberWithDecisionAsync(db, CenterA, "SUM-DEC", 1);
+        var m = await db.Members.SingleAsync(x => x.MemberId == decided);
+        m.CreatedAt = DateTimeOffset.Parse("2025-06-01T00:00:00Z");
+        var d = await db.FinalDecisions.SingleAsync(x => x.MemberId == decided);
+        d.DecidedAt = DateTimeOffset.Parse("2026-11-02T08:00:00Z");
+        await db.SaveChangesAsync();
+
+        var summary = await CreateService(db, CenterA).GetLocalSummaryAsync(new LocalSummaryQuery
+        {
+            FromDate = new DateOnly(2026, 10, 30),
+            ToDate = new DateOnly(2026, 11, 3)
+        });
+
+        Assert.Equal(1, summary.TotalMembers);
+        Assert.Equal(1, summary.AcceptedCount);
+        Assert.Equal(0, summary.WaitingCount);
+    }
+
+    [Fact]
+    public async Task DoctorLinkage_returns_final_decision_and_filters_clinic_result()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberWithDecisionAsync(db, CenterA, "DOC-FIN", 2, "رفض");
+
+        var acceptedClinicOnly = await CreateService(db, CenterA).ListDoctorLinkageByMemberAsync(
+            new DoctorLinkageQuery { ResultStatusId = 1, ViewMode = DoctorLinkageViewModes.ByMember });
+        Assert.DoesNotContain(acceptedClinicOnly.Items, i => i.MemberId == memberId);
+
+        var rejectedClinic = await CreateService(db, CenterA).ListDoctorLinkageByMemberAsync(
+            new DoctorLinkageQuery { ResultStatusId = 2, ViewMode = DoctorLinkageViewModes.ByMember });
+        var filtered = Assert.Single(rejectedClinic.Items.Where(i => i.MemberId == memberId));
+        Assert.All(filtered.Exams, e => Assert.Equal((short)2, e.ResultStatusId));
+        Assert.Equal((short)2, filtered.FinalResultStatusId);
+        Assert.NotNull(filtered.DecidedAt);
+        Assert.False(string.IsNullOrWhiteSpace(filtered.FinalResultNameAr));
     }
 
     private static OperationalReportsService CreateService(

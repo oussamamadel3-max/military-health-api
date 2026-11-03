@@ -24,6 +24,7 @@ namespace Application.Services.OperationalReports;
 /// لا يستخدم DashboardService/ReportsService القالبيين.
 /// منع الازدواج (BR-059 مؤقتاً قبل T-11): احتساب عبر CurrentMedicalCenterId مرة واحدة لكل منتسب.
 /// «متأخر» قيمة محسوبة من DeferUntil وليست حالة مخزّنة.
+/// الفترة الزمنية: القائمة النهائية على DecidedAt؛ مؤشرات القرار على DecidedAt والانتظار على CreatedAt؛ العيادات على AssessedAt؛ ربط الأطباء على ExaminedAt.
 /// </summary>
 public class OperationalReportsService : IOperationalReportsService
 {
@@ -547,15 +548,102 @@ public class OperationalReportsService : IOperationalReportsService
         Guid? clinicId,
         CancellationToken cancellationToken)
     {
-        var membersQ = MembersInCenter(center.CenterId, range);
-        if (!string.IsNullOrWhiteSpace(exportStatus))
-            membersQ = membersQ.Where(m => m.ExportStatus == exportStatus);
+        // فترة محددة: نتائج القرار على DecidedAt؛ الانتظار على CreatedAt لمن بلا قرار.
+        // بلا فترة: كل منتسبي المركز الحالي (سلوك سابق عبر CreatedAt غير مقيّد).
+        var hasPeriod = range.From.HasValue || range.ToExclusive.HasValue;
 
-        var members = await membersQ.Select(m => new
+        List<(Guid MemberId, string ExportStatus)> members;
+        List<(Guid MemberId, short ResultStatusId)> decisionRows;
+
+        if (hasPeriod)
         {
-            m.MemberId,
-            m.ExportStatus
-        }).ToListAsync(cancellationToken);
+            var decided = await FinalDecisionsInCenter(center.CenterId, range)
+                .Select(d => new { d.MemberId, d.ResultStatusId })
+                .ToListAsync(cancellationToken);
+
+            var currentInCenter = await MembersCurrentlyInCenter(center.CenterId)
+                .Select(m => new { m.MemberId, m.ExportStatus })
+                .ToListAsync(cancellationToken);
+            var currentMap = currentInCenter.ToDictionary(m => m.MemberId, m => m.ExportStatus);
+            decided = decided.Where(d => currentMap.ContainsKey(d.MemberId)).ToList();
+
+            if (resultFilter.HasValue)
+                decided = decided.Where(d => d.ResultStatusId == resultFilter.Value).ToList();
+
+            var decidedMembers = decided
+                .Select(d => (d.MemberId, ExportStatus: currentMap[d.MemberId]))
+                .GroupBy(x => x.MemberId)
+                .Select(g => g.First())
+                .ToList();
+
+            var registeredWaiting = await ApplyCreatedAtRange(MembersCurrentlyInCenter(center.CenterId), range)
+                .Select(m => new { m.MemberId, m.ExportStatus })
+                .ToListAsync(cancellationToken);
+            var waitingCandidateIds = registeredWaiting.Select(r => r.MemberId).ToList();
+            var anyDecisionIds = waitingCandidateIds.Count == 0
+                ? new List<Guid>()
+                : await _clinicWorkspace.QueryFinalDecisions(asNoTracking: true)
+                    .Where(d => d.CenterId == center.CenterId && waitingCandidateIds.Contains(d.MemberId))
+                    .Select(d => d.MemberId)
+                    .Distinct()
+                    .ToListAsync(cancellationToken);
+            var anyDecisionSet = anyDecisionIds.ToHashSet();
+            var waitingMembers = registeredWaiting
+                .Where(m => !anyDecisionSet.Contains(m.MemberId))
+                .Select(m => (m.MemberId, m.ExportStatus))
+                .ToList();
+
+            if (resultFilter.HasValue)
+                waitingMembers = new List<(Guid MemberId, string ExportStatus)>();
+
+            members = decidedMembers
+                .Concat(waitingMembers)
+                .GroupBy(m => m.MemberId)
+                .Select(g => g.First())
+                .ToList();
+            decisionRows = decided
+                .GroupBy(d => d.MemberId)
+                .Select(g => (g.Key, g.First().ResultStatusId))
+                .ToList();
+        }
+        else
+        {
+            var membersQ = MembersCurrentlyInCenter(center.CenterId);
+            if (!string.IsNullOrWhiteSpace(exportStatus))
+                membersQ = membersQ.Where(m => m.ExportStatus == exportStatus);
+
+            members = (await membersQ.Select(m => new { m.MemberId, m.ExportStatus })
+                    .ToListAsync(cancellationToken))
+                .Select(m => (m.MemberId, m.ExportStatus))
+                .ToList();
+
+            var memberIdsNoPeriod = members.Select(m => m.MemberId).ToList();
+            decisionRows = (await _clinicWorkspace.QueryFinalDecisions(asNoTracking: true)
+                    .Where(d => d.CenterId == center.CenterId && memberIdsNoPeriod.Contains(d.MemberId))
+                    .Select(d => new { d.MemberId, d.ResultStatusId })
+                    .ToListAsync(cancellationToken))
+                .Select(d => (d.MemberId, d.ResultStatusId))
+                .ToList();
+
+            if (resultFilter.HasValue)
+            {
+                var matching = decisionRows
+                    .Where(d => d.ResultStatusId == resultFilter.Value)
+                    .Select(d => d.MemberId)
+                    .ToHashSet();
+                members = members.Where(m => matching.Contains(m.MemberId)).ToList();
+                decisionRows = decisionRows.Where(d => matching.Contains(d.MemberId)).ToList();
+            }
+        }
+
+            if (!string.IsNullOrWhiteSpace(exportStatus) && hasPeriod)
+        {
+            members = members
+                .Where(m => string.Equals(m.ExportStatus, exportStatus, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            var keep = members.Select(m => m.MemberId).ToHashSet();
+            decisionRows = decisionRows.Where(d => keep.Contains(d.MemberId)).ToList();
+        }
 
         var memberIds = members.Select(m => m.MemberId).ToList();
 
@@ -571,25 +659,10 @@ public class OperationalReportsService : IOperationalReportsService
             var clinicSet = inClinic.ToHashSet();
             members = members.Where(m => clinicSet.Contains(m.MemberId)).ToList();
             memberIds = members.Select(m => m.MemberId).ToList();
+            decisionRows = decisionRows.Where(d => clinicSet.Contains(d.MemberId)).ToList();
         }
 
-        var decisions = await _clinicWorkspace.QueryFinalDecisions(asNoTracking: true)
-            .Where(d => d.CenterId == center.CenterId && memberIds.Contains(d.MemberId))
-            .Select(d => new { d.MemberId, d.ResultStatusId })
-            .ToListAsync(cancellationToken);
-
-        if (resultFilter.HasValue)
-        {
-            var matching = decisions
-                .Where(d => d.ResultStatusId == resultFilter.Value)
-                .Select(d => d.MemberId)
-                .ToHashSet();
-            members = members.Where(m => matching.Contains(m.MemberId)).ToList();
-            memberIds = members.Select(m => m.MemberId).ToList();
-            decisions = decisions.Where(d => matching.Contains(d.MemberId)).ToList();
-        }
-
-        var decisionByMember = decisions
+        var decisionByMember = decisionRows
             .GroupBy(d => d.MemberId)
             .ToDictionary(g => g.Key, g => g.First().ResultStatusId);
 
@@ -745,36 +818,84 @@ public class OperationalReportsService : IOperationalReportsService
         DateRange range,
         CancellationToken cancellationToken)
     {
-        var membersQ = MembersInCenter(centerId, range);
-        if (!string.IsNullOrWhiteSpace(query.ExportStatus))
-            membersQ = membersQ.Where(m => m.ExportStatus == query.ExportStatus);
-        if (!string.IsNullOrWhiteSpace(query.Search))
-        {
-            var s = query.Search.Trim();
-            membersQ = membersQ.Where(m =>
-                m.FullName.Contains(s)
-                || m.RecruitmentNumber.Contains(s)
-                || m.FileNumber.ToString() == s);
-        }
+        // الفترة على DecidedAt لقرار نفس المركز + المنتسب ما زال في المركز الحالي.
+        var hasPeriod = range.From.HasValue || range.ToExclusive.HasValue;
+        Dictionary<Guid, FinalDecision> decisionByMember;
+        List<Member> members;
 
-        var members = await membersQ
-            .OrderByDescending(m => m.UpdatedAt)
-            .ToListAsync(cancellationToken);
+        if (hasPeriod)
+        {
+            var decisionsQ = FinalDecisionsInCenter(centerId, range);
+            if (query.ResultStatusId.HasValue)
+                decisionsQ = decisionsQ.Where(d => d.ResultStatusId == query.ResultStatusId.Value);
+
+            var decisionsInPeriod = await decisionsQ.ToListAsync(cancellationToken);
+            decisionByMember = decisionsInPeriod
+                .GroupBy(d => d.MemberId)
+                .ToDictionary(g => g.Key, g => g.First());
+            var decidedIds = decisionByMember.Keys.ToList();
+
+            var membersQ = MembersCurrentlyInCenter(centerId)
+                .Where(m => decidedIds.Contains(m.MemberId));
+            if (!string.IsNullOrWhiteSpace(query.ExportStatus))
+                membersQ = membersQ.Where(m => m.ExportStatus == query.ExportStatus);
+            if (!string.IsNullOrWhiteSpace(query.Search))
+            {
+                var s = query.Search.Trim();
+                membersQ = membersQ.Where(m =>
+                    m.FullName.Contains(s)
+                    || m.RecruitmentNumber.Contains(s)
+                    || m.FileNumber.ToString() == s);
+            }
+
+            members = await membersQ
+                .OrderByDescending(m => m.UpdatedAt)
+                .ToListAsync(cancellationToken);
+            var keep = members.Select(m => m.MemberId).ToHashSet();
+            decisionByMember = decisionByMember
+                .Where(kv => keep.Contains(kv.Key))
+                .ToDictionary(kv => kv.Key, kv => kv.Value);
+        }
+        else
+        {
+            var membersQ = MembersCurrentlyInCenter(centerId);
+            if (!string.IsNullOrWhiteSpace(query.ExportStatus))
+                membersQ = membersQ.Where(m => m.ExportStatus == query.ExportStatus);
+            if (!string.IsNullOrWhiteSpace(query.Search))
+            {
+                var s = query.Search.Trim();
+                membersQ = membersQ.Where(m =>
+                    m.FullName.Contains(s)
+                    || m.RecruitmentNumber.Contains(s)
+                    || m.FileNumber.ToString() == s);
+            }
+
+            members = await membersQ
+                .OrderByDescending(m => m.UpdatedAt)
+                .ToListAsync(cancellationToken);
+
+            var seedIds = members.Select(m => m.MemberId).ToList();
+            var decisions = await _clinicWorkspace.QueryFinalDecisions(asNoTracking: true)
+                .Where(d => d.CenterId == centerId && seedIds.Contains(d.MemberId))
+                .ToListAsync(cancellationToken);
+            decisionByMember = decisions
+                .GroupBy(d => d.MemberId)
+                .ToDictionary(g => g.Key, g => g.First());
+
+            if (query.ResultStatusId.HasValue)
+            {
+                members = members
+                    .Where(m => decisionByMember.TryGetValue(m.MemberId, out var d)
+                                && d.ResultStatusId == query.ResultStatusId.Value)
+                    .ToList();
+                var keep = members.Select(m => m.MemberId).ToHashSet();
+                decisionByMember = decisionByMember
+                    .Where(kv => keep.Contains(kv.Key))
+                    .ToDictionary(kv => kv.Key, kv => kv.Value);
+            }
+        }
 
         var memberIds = members.Select(m => m.MemberId).ToList();
-        var decisions = await _clinicWorkspace.QueryFinalDecisions(asNoTracking: true)
-            .Where(d => d.CenterId == centerId && memberIds.Contains(d.MemberId))
-            .ToListAsync(cancellationToken);
-        var decisionByMember = decisions.ToDictionary(d => d.MemberId);
-
-        if (query.ResultStatusId.HasValue)
-        {
-            members = members
-                .Where(m => decisionByMember.TryGetValue(m.MemberId, out var d)
-                            && d.ResultStatusId == query.ResultStatusId.Value)
-                .ToList();
-            memberIds = members.Select(m => m.MemberId).ToList();
-        }
 
         var assessments = await (
             from a in _clinicWorkspace.QueryClinicAssessments(asNoTracking: true)
@@ -1039,6 +1160,7 @@ public class OperationalReportsService : IOperationalReportsService
         var examRows = await (
             from e in examsQ
             join m in _members.Query(asNoTracking: true) on e.MemberId equals m.MemberId
+            where m.CurrentMedicalCenterId == centerId
             select new { e, m }
         ).ToListAsync(cancellationToken);
 
@@ -1046,6 +1168,22 @@ public class OperationalReportsService : IOperationalReportsService
         var assessments = await _clinicWorkspace.QueryClinicAssessments(asNoTracking: true)
             .Where(a => examIds.Contains(a.ExamId))
             .ToDictionaryAsync(a => a.ExamId, cancellationToken);
+
+        if (query.ResultStatusId.HasValue)
+        {
+            examRows = examRows
+                .Where(r => assessments.TryGetValue(r.e.ExamId, out var a)
+                            && a.ResultStatusId == query.ResultStatusId.Value)
+                .ToList();
+        }
+
+        var memberIds = examRows.Select(r => r.m.MemberId).Distinct().ToList();
+        var finalDecisions = await _clinicWorkspace.QueryFinalDecisions(asNoTracking: true)
+            .Where(d => d.CenterId == centerId && memberIds.Contains(d.MemberId))
+            .ToListAsync(cancellationToken);
+        var finalByMember = finalDecisions
+            .GroupBy(d => d.MemberId)
+            .ToDictionary(g => g.Key, g => g.First());
 
         var clinics = await _referenceData.Clinics(asNoTracking: true)
             .ToDictionaryAsync(c => c.ClinicId, cancellationToken);
@@ -1057,32 +1195,42 @@ public class OperationalReportsService : IOperationalReportsService
         return examRows
             .GroupBy(r => new { r.m.MemberId, r.m.FileNumber, r.m.FullName })
             .OrderBy(g => g.Key.FileNumber)
-            .Select(g => new DoctorLinkageByMemberItemDto
+            .Select(g =>
             {
-                MemberId = g.Key.MemberId,
-                FileNumber = g.Key.FileNumber,
-                FullName = g.Key.FullName,
-                Exams = g.Select(x =>
+                finalByMember.TryGetValue(g.Key.MemberId, out var final);
+                string? finalName = null;
+                if (final is not null && results.TryGetValue(final.ResultStatusId, out var fr))
+                    finalName = fr.NameAr;
+                return new DoctorLinkageByMemberItemDto
                 {
-                    clinics.TryGetValue(x.e.ClinicId, out var clinic);
-                    assessments.TryGetValue(x.e.ExamId, out var assessment);
-                    short? rsId = assessment?.ResultStatusId;
-                    string? rsName = null;
-                    if (rsId.HasValue && results.TryGetValue(rsId.Value, out var rs))
-                        rsName = rs.NameAr;
-                    names.TryGetValue(x.e.ExaminerUserId, out var display);
-                    return new DoctorExamLinkDto
+                    MemberId = g.Key.MemberId,
+                    FileNumber = g.Key.FileNumber,
+                    FullName = g.Key.FullName,
+                    FinalResultStatusId = final?.ResultStatusId,
+                    FinalResultNameAr = finalName,
+                    DecidedAt = final?.DecidedAt,
+                    Exams = g.Select(x =>
                     {
-                        ExaminerUserId = x.e.ExaminerUserId,
-                        ExaminerDisplayName = display,
-                        ClinicId = x.e.ClinicId,
-                        ClinicCode = clinic?.Code ?? "?",
-                        ClinicNameAr = clinic?.NameAr ?? "?",
-                        ExaminedAt = x.e.ExaminedAt,
-                        ResultStatusId = rsId,
-                        ResultNameAr = rsName
-                    };
-                }).OrderBy(e => e.ExaminedAt).ToList()
+                        clinics.TryGetValue(x.e.ClinicId, out var clinic);
+                        assessments.TryGetValue(x.e.ExamId, out var assessment);
+                        short? rsId = assessment?.ResultStatusId;
+                        string? rsName = null;
+                        if (rsId.HasValue && results.TryGetValue(rsId.Value, out var rs))
+                            rsName = rs.NameAr;
+                        names.TryGetValue(x.e.ExaminerUserId, out var display);
+                        return new DoctorExamLinkDto
+                        {
+                            ExaminerUserId = x.e.ExaminerUserId,
+                            ExaminerDisplayName = display,
+                            ClinicId = x.e.ClinicId,
+                            ClinicCode = clinic?.Code ?? "?",
+                            ClinicNameAr = clinic?.NameAr ?? "?",
+                            ExaminedAt = x.e.ExaminedAt,
+                            ResultStatusId = rsId,
+                            ResultNameAr = rsName
+                        };
+                    }).OrderBy(e => e.ExaminedAt).ToList()
+                };
             }).ToList();
     }
 
@@ -1127,17 +1275,36 @@ public class OperationalReportsService : IOperationalReportsService
 
     #region Shared helpers
 
-    private IQueryable<Member> MembersInCenter(Guid centerId, DateRange range)
-    {
-        // BR-059 مؤقت: كل منتسب يُحسب في مركزه الحالي فقط.
-        var q = _members.Query(asNoTracking: true)
+    /// <summary>منتسبو المركز الحالي فقط (BR-059 مؤقت).</summary>
+    private IQueryable<Member> MembersCurrentlyInCenter(Guid centerId)
+        => _members.Query(asNoTracking: true)
             .Where(m => m.CurrentMedicalCenterId == centerId);
+
+    /// <summary>تصفية تسجيل المنتسب حسب CreatedAt ضمن المدى الشامل للطرفين.</summary>
+    private static IQueryable<Member> ApplyCreatedAtRange(IQueryable<Member> query, DateRange range)
+    {
         if (range.From.HasValue)
-            q = q.Where(m => m.CreatedAt >= range.From.Value);
+            query = query.Where(m => m.CreatedAt >= range.From.Value);
         if (range.ToExclusive.HasValue)
-            q = q.Where(m => m.CreatedAt < range.ToExclusive.Value);
+            query = query.Where(m => m.CreatedAt < range.ToExclusive.Value);
+        return query;
+    }
+
+    /// <summary>قرارات نهائية لنفس المركز ضمن DecidedAt (حدود UTC ليوم التقويم).</summary>
+    private IQueryable<FinalDecision> FinalDecisionsInCenter(Guid centerId, DateRange range)
+    {
+        var q = _clinicWorkspace.QueryFinalDecisions(asNoTracking: true)
+            .Where(d => d.CenterId == centerId);
+        if (range.From.HasValue)
+            q = q.Where(d => d.DecidedAt >= range.From.Value);
+        if (range.ToExclusive.HasValue)
+            q = q.Where(d => d.DecidedAt < range.ToExclusive.Value);
         return q;
     }
+
+    /// <summary>منتسبو المركز مع فلتر CreatedAt — للمقارنة المركزية/مسارات التسجيل فقط.</summary>
+    private IQueryable<Member> MembersInCenter(Guid centerId, DateRange range)
+        => ApplyCreatedAtRange(MembersCurrentlyInCenter(centerId), range);
 
     private async Task<IReadOnlyList<(Guid ClinicId, string Code)>> LoadMandatoryAsync(
         Guid centerId,

@@ -67,7 +67,10 @@ public class DeferredActionBreakdownDto
     public int LateCount { get; set; }
 }
 
-/// <summary>فلاتر القائمة النهائية (FR-064) والتقارير المحلية (FR-066).</summary>
+/// <summary>
+/// فلاتر القائمة النهائية (FR-064). عند تعيين الفترة تُطبَّق على
+/// <c>FinalDecision.DecidedAt</c> لقرار نفس المركز، وليس على <c>Member.CreatedAt</c>.
+/// </summary>
 public class FinalMembersQuery : OperationalDateRangeQuery
 {
     public short? ResultStatusId { get; set; }
@@ -156,7 +159,11 @@ public class DeferredReportResponseDto
     public int TotalPages { get; set; }
 }
 
-/// <summary>تقرير محلي بالأعداد والنسب (FR-066).</summary>
+/// <summary>
+/// تقرير محلي بالأعداد والنسب (FR-066).
+/// عند تعيين الفترة: أعداد القرار النهائي (مقبول/مرفوض/مؤجل) على <c>DecidedAt</c>؛
+/// الانتظار على <c>CreatedAt</c> لمن بلا قرار؛ تفصيل العيادات على <c>AssessedAt</c>.
+/// </summary>
 public class LocalSummaryQuery : OperationalDateRangeQuery
 {
     public short? ResultStatusId { get; set; }
@@ -227,10 +234,13 @@ public class CentralCompareCenterDto
     public int ArchivedCount { get; set; }
 }
 
-/// <summary>تقرير ربط الأطباء (FR-068).</summary>
+/// <summary>تقرير ربط الأطباء (FR-068). الفترة على ExaminedAt؛ ResultStatusId يصفي نتيجة تقييم العيادة.</summary>
 public class DoctorLinkageQuery : OperationalDateRangeQuery
 {
     public Guid? ClinicId { get; set; }
+
+    /// <summary>تصفية بنتيجة تقييم العيادة (1/2/3)، وليس القرار النهائي.</summary>
+    public short? ResultStatusId { get; set; }
 
     /// <summary>BY_MEMBER | BY_DOCTOR</summary>
     public string ViewMode { get; set; } = DoctorLinkageViewModes.ByMember;
@@ -250,6 +260,10 @@ public class DoctorLinkageByMemberItemDto
     public Guid MemberId { get; set; }
     public long FileNumber { get; set; }
     public string FullName { get; set; } = null!;
+    /// <summary>نتيجة القرار النهائي في مركز التقرير إن وُجد.</summary>
+    public short? FinalResultStatusId { get; set; }
+    public string? FinalResultNameAr { get; set; }
+    public DateTimeOffset? DecidedAt { get; set; }
     public IReadOnlyList<DoctorExamLinkDto> Exams { get; set; } = Array.Empty<DoctorExamLinkDto>();
 }
 
