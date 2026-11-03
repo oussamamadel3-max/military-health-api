@@ -220,6 +220,73 @@ public class OperationalReportsService : IOperationalReportsService
     }
 
     /// <inheritdoc />
+    public async Task<PaginatedList<FinalMemberListItemDto>> ListWaitingMembersAsync(
+        WaitingMembersQuery query,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default)
+    {
+        query ??= new WaitingMembersQuery();
+        var centerId = await _permissionGate.EnsureLocalAsync(
+            MilitaryHealthPermissions.Reports.Local, clientCenterId, cancellationToken);
+        NormalizePaging(query);
+        var range = NormalizeRange(query);
+        NormalizeExportStatus(query);
+
+        var filtered = BuildWaitingMembersBaseQuery(centerId, query, range);
+        var total = await filtered.CountAsync(cancellationToken);
+        var pageMembers = await filtered
+            .OrderByDescending(m => m.UpdatedAt)
+            .Skip((query.PageNumber - 1) * query.PageSize)
+            .Take(query.PageSize)
+            .ToListAsync(cancellationToken);
+        var items = await EnrichWaitingMemberItemsAsync(centerId, pageMembers, cancellationToken);
+        return new PaginatedList<FinalMemberListItemDto>(items, total, query.PageNumber, query.PageSize);
+    }
+
+    /// <inheritdoc />
+    public async Task<ExportFileDto> ExportWaitingMembersAsync(
+        WaitingMembersQuery query,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default)
+    {
+        query ??= new WaitingMembersQuery();
+        var centerId = await _permissionGate.EnsureLocalAsync(
+            MilitaryHealthPermissions.Reports.Local, clientCenterId, cancellationToken);
+        var range = NormalizeRange(query);
+        NormalizeExportStatus(query);
+
+        var filtered = BuildWaitingMembersBaseQuery(centerId, query, range);
+        var total = await filtered.CountAsync(cancellationToken);
+        if (total == 0)
+            throw new OperationalReportExportEmptyException();
+        if (total > MemberService.MaxExportRows)
+            throw new InvalidOperationalReportFilterException(
+                $"عدد السجلات ({total}) يتجاوز حد التصدير ({MemberService.MaxExportRows}).");
+
+        var members = await filtered
+            .OrderByDescending(m => m.UpdatedAt)
+            .ToListAsync(cancellationToken);
+        var items = await EnrichWaitingMemberItemsAsync(centerId, members, cancellationToken);
+
+        var rows = items.Select(i => new FinalMemberExcelRowDto
+        {
+            FileNumber = i.FileNumber,
+            FullName = i.FullName,
+            RecruitmentNumber = i.RecruitmentNumber,
+            FinalResultNameAr = i.FinalResultNameAr,
+            FinalResultReason = i.FinalResultReason,
+            DecidedAt = i.DecidedAt,
+            ExportStatus = i.ExportStatus,
+            IsArchived = i.IsArchived
+        }).ToList();
+
+        return await ExportRowsAsync(
+            rows, "قيد-الانتظار", "قيد الانتظار", "تصدير قائمة قيد الانتظار",
+            cancellationToken,
+            centerId);
+    }
+
+    /// <inheritdoc />
     public async Task<LocalSummaryDto> GetLocalSummaryAsync(
         LocalSummaryQuery query,
         Guid? clientCenterId = null,
@@ -1280,6 +1347,163 @@ public class OperationalReportsService : IOperationalReportsService
         => _members.Query(asNoTracking: true)
             .Where(m => m.CurrentMedicalCenterId == centerId);
 
+    /// <summary>
+    /// منتسبو المركز بلا قرار نهائي لنفس المركز؛ الفترة على CreatedAt (تطابق waitingCount).
+    /// </summary>
+    private IQueryable<Member> QueryWaitingMembersInCenter(Guid centerId, DateRange range)
+    {
+        var decidedIds = _clinicWorkspace.QueryFinalDecisions(asNoTracking: true)
+            .Where(d => d.CenterId == centerId)
+            .Select(d => d.MemberId);
+        return ApplyCreatedAtRange(
+            MembersCurrentlyInCenter(centerId).Where(m => !decidedIds.Contains(m.MemberId)),
+            range);
+    }
+
+    /// <summary>استعلام قائمة الانتظار بعد فلاتر التصدير/البحث/العيادة/الأرشيف.</summary>
+    private IQueryable<Member> BuildWaitingMembersBaseQuery(
+        Guid centerId,
+        WaitingMembersQuery query,
+        DateRange range)
+    {
+        var q = QueryWaitingMembersInCenter(centerId, range);
+
+        if (!string.IsNullOrWhiteSpace(query.ExportStatus))
+            q = q.Where(m => m.ExportStatus == query.ExportStatus);
+
+        if (!string.IsNullOrWhiteSpace(query.Search))
+        {
+            var s = query.Search.Trim();
+            q = q.Where(m =>
+                m.FullName.Contains(s)
+                || m.RecruitmentNumber.Contains(s)
+                || m.FileNumber.ToString() == s);
+        }
+
+        if (query.ClinicId.HasValue)
+        {
+            var clinicId = query.ClinicId.Value;
+            var inClinic = _clinicWorkspace.QueryClinicAssessments(asNoTracking: true)
+                .Where(a => a.CenterId == centerId && a.ClinicId == clinicId)
+                .Select(a => a.MemberId);
+            q = q.Where(m => inClinic.Contains(m.MemberId));
+        }
+
+        if (query.IsArchived == true)
+        {
+            var archived = _archives.Query(asNoTracking: true).Select(a => a.MemberId);
+            q = q.Where(m => archived.Contains(m.MemberId));
+        }
+        else if (query.IsArchived == false)
+        {
+            var archived = _archives.Query(asNoTracking: true).Select(a => a.MemberId);
+            q = q.Where(m => !archived.Contains(m.MemberId));
+        }
+
+        return q;
+    }
+
+    /// <summary>إثراء صفوف قيد الانتظار بنفس شكل القائمة النهائية (بدون قرار نهائي).</summary>
+    private async Task<List<FinalMemberListItemDto>> EnrichWaitingMemberItemsAsync(
+        Guid centerId,
+        List<Member> members,
+        CancellationToken cancellationToken)
+    {
+        var memberIds = members.Select(m => m.MemberId).ToList();
+        if (memberIds.Count == 0)
+            return new List<FinalMemberListItemDto>();
+
+        var assessments = await (
+            from a in _clinicWorkspace.QueryClinicAssessments(asNoTracking: true)
+            join e in _clinicWorkspace.QueryMedicalExams(asNoTracking: true) on a.ExamId equals e.ExamId
+            where a.CenterId == centerId && memberIds.Contains(a.MemberId) && e.IsCurrent
+            select new { a, e.ExaminerUserId }
+        ).ToListAsync(cancellationToken);
+
+        var archives = await _archives.Query(asNoTracking: true)
+            .Where(a => memberIds.Contains(a.MemberId))
+            .ToListAsync(cancellationToken);
+        var archiveByMember = archives.ToDictionary(a => a.MemberId);
+
+        var deferred = await _clinicWorkspace.QueryDeferredActions(asNoTracking: true)
+            .Where(d => d.CenterId == centerId
+                        && memberIds.Contains(d.MemberId)
+                        && d.Status == DeferredStatusRequested)
+            .ToListAsync(cancellationToken);
+        var deferredByMember = deferred
+            .GroupBy(d => d.MemberId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.RequestedAt).First());
+
+        var noteMap = new Dictionary<Guid, string?>();
+        foreach (var id in memberIds)
+        {
+            var list = await _members.GetActiveNotesAsync(id, cancellationToken);
+            noteMap[id] = list.FirstOrDefault()?.NoteText;
+        }
+
+        var clinics = await _referenceData.Clinics(asNoTracking: true).ToListAsync(cancellationToken);
+        var clinicMap = clinics.ToDictionary(c => c.ClinicId);
+        var results = await _referenceData.ResultStatuses(asNoTracking: true)
+            .ToDictionaryAsync(r => r.StatusId, cancellationToken);
+        var examinerIds = assessments.Select(a => a.ExaminerUserId).Distinct();
+        var names = await _users.GetDisplayNamesByIdsAsync(examinerIds, cancellationToken);
+        var actionTypes = await _referenceData.RequiredActionTypes(asNoTracking: true)
+            .ToDictionaryAsync(a => a.ActionTypeId, cancellationToken);
+
+        var items = new List<FinalMemberListItemDto>(members.Count);
+        foreach (var m in members)
+        {
+            archiveByMember.TryGetValue(m.MemberId, out var archive);
+            deferredByMember.TryGetValue(m.MemberId, out var openDeferred);
+            noteMap.TryGetValue(m.MemberId, out var note);
+
+            string? deferredSummary = null;
+            if (openDeferred is not null && actionTypes.TryGetValue(openDeferred.ActionTypeId, out var at))
+                deferredSummary = $"{at.NameAr} — {openDeferred.Status}";
+
+            var clinicRows = assessments
+                .Where(x => x.a.MemberId == m.MemberId)
+                .Select(x =>
+                {
+                    clinicMap.TryGetValue(x.a.ClinicId, out var clinic);
+                    results.TryGetValue(x.a.ResultStatusId, out var rs);
+                    names.TryGetValue(x.ExaminerUserId, out var display);
+                    return new FinalMemberClinicSummaryDto
+                    {
+                        ClinicId = x.a.ClinicId,
+                        ClinicCode = clinic?.Code ?? "?",
+                        ClinicNameAr = clinic?.NameAr ?? "?",
+                        ResultStatusId = x.a.ResultStatusId,
+                        ResultNameAr = rs?.NameAr,
+                        ExaminerUserId = x.ExaminerUserId,
+                        ExaminerDisplayName = display,
+                        AssessedAt = x.a.AssessedAt
+                    };
+                }).ToList();
+
+            items.Add(new FinalMemberListItemDto
+            {
+                MemberId = m.MemberId,
+                FileNumber = m.FileNumber,
+                FullName = m.FullName,
+                RecruitmentNumber = m.RecruitmentNumber,
+                FinalResultStatusId = null,
+                FinalResultNameAr = null,
+                FinalResultReason = null,
+                DecidedAt = null,
+                DeferUntil = openDeferred?.DeferUntil,
+                OpenDeferredActionSummary = deferredSummary,
+                ExportStatus = m.ExportStatus,
+                IsArchived = archive is not null,
+                ArchiveNumber = archive?.ArchiveNumber,
+                LatestGeneralNote = note,
+                ClinicAssessments = clinicRows
+            });
+        }
+
+        return items;
+    }
+
     /// <summary>تصفية تسجيل المنتسب حسب CreatedAt ضمن المدى الشامل للطرفين.</summary>
     private static IQueryable<Member> ApplyCreatedAtRange(IQueryable<Member> query, DateRange range)
     {
@@ -1454,6 +1678,13 @@ public class OperationalReportsService : IOperationalReportsService
         if (query.PageSize > MaxPageSize) query.PageSize = MaxPageSize;
     }
 
+    private static void NormalizePaging(WaitingMembersQuery query)
+    {
+        if (query.PageNumber < 1) query.PageNumber = 1;
+        if (query.PageSize < 1) query.PageSize = 20;
+        if (query.PageSize > MaxPageSize) query.PageSize = MaxPageSize;
+    }
+
     private static void NormalizeDeferredQuery(DeferredReportQuery query)
     {
         if (query.PageNumber < 1) query.PageNumber = 1;
@@ -1480,6 +1711,9 @@ public class OperationalReportsService : IOperationalReportsService
     }
 
     private static void NormalizeExportStatus(FinalMembersQuery query)
+        => query.ExportStatus = NormalizeExportStatusValue(query.ExportStatus);
+
+    private static void NormalizeExportStatus(WaitingMembersQuery query)
         => query.ExportStatus = NormalizeExportStatusValue(query.ExportStatus);
 
     private static void NormalizeExportStatus(CentralCompareQuery query)
