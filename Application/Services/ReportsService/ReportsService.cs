@@ -1,7 +1,10 @@
+using System.Net;
+using System.Text.Json;
+using Application.Common.Permissions;
+using Application.Common.Security;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
-using Application.Common.Utilities;
 using Application.Dtos.DashboardDtos;
 using Application.Dtos.ExportDtos;
 using Application.Dtos.ReportDtos;
@@ -14,62 +17,44 @@ namespace Application.Services.Reports
 {
     public class ReportsService : IReportsService
     {
+        public const string AuditExportEventType = "AuditLogExported";
+
         private readonly IAuditLogRepository _auditLogRepository;
         private readonly IUserRepository _users;
-        private readonly IUserContextService _userCtx;
         private readonly IExportService _export;
         private readonly IDashboardService _dashboard;
         private readonly IMapper _mapper;
+        private readonly IPermissionGate _permissionGate;
+        private readonly ICurrentUserService _currentUser;
+        private readonly IUnitOfWork _unitOfWork;
 
         public ReportsService(
             IAuditLogRepository auditLogRepository,
             IUserRepository users,
-            IUserContextService userCtx,
             IExportService export,
             IDashboardService dashboard,
-            IMapper mapper)
+            IMapper mapper,
+            IPermissionGate permissionGate,
+            ICurrentUserService currentUser,
+            IUnitOfWork unitOfWork)
         {
             _auditLogRepository = auditLogRepository;
             _users = users;
-            _userCtx = userCtx;
             _export = export;
             _dashboard = dashboard;
             _mapper = mapper;
+            _permissionGate = permissionGate;
+            _currentUser = currentUser;
+            _unitOfWork = unitOfWork;
         }
 
         #region Export Audit Logs
         public async Task<ExportFileDto> ExportAuditLogsAsync(AuditLogFilter filter, string format)
         {
+            _permissionGate.EnsureAll(SystemPermissions.AuditLog.Export);
+
             filter ??= new AuditLogFilter();
-
-            var q = _auditLogRepository.Query().AsQueryable();
-
-            if (!string.IsNullOrWhiteSpace(filter.searchUserName))
-                q = await FilterByActorNameAsync(q, filter.searchUserName);
-
-            if (!string.IsNullOrWhiteSpace(filter.userName))
-                q = await FilterByActorNameAsync(q, filter.userName);
-
-            if (filter.actionType.HasValue)
-            {
-                var at = filter.actionType.Value.ToString();
-                q = q.Where(a => a.EventType == at);
-            }
-
-            if (filter.tableNames != null && filter.tableNames.Count > 0)
-            {
-                var set = filter.tableNames
-                    .Where(t => !string.IsNullOrWhiteSpace(t))
-                    .Select(t => t.Trim().ToLower())
-                    .Distinct()
-                    .ToList();
-
-                if (set.Count > 0)
-                    q = q.Where(a => set.Contains((a.EntityType ?? "").ToLower()));
-            }
-
-            ApplyDateRangeForExport(ref q, filter.From, filter.To, out var periodText);
-
+            var q = await AuditEventQuery.ApplyAsync(_auditLogRepository.Query(), filter, _users);
             q = q.OrderByDescending(a => a.OccurredAt);
 
             var list = await q.ToListAsync();
@@ -82,6 +67,7 @@ namespace Application.Services.Reports
                     rows[i].UserName = name;
             }
 
+            var periodText = BuildPeriodText(filter.From, filter.To);
             var opt = new ExportOptions
             {
                 ReportName = "AuditLogs_Report",
@@ -93,11 +79,9 @@ namespace Application.Services.Reports
                 IncludeSummary = true,
                 AutoFilter = true,
                 FreezeHeaders = true,
-                // لا نجمع معرفات نصية/طويلة — الملخص يبقى عدد السجلات فقط
                 NonSummarizedColumns = ["LogId"],
                 ColumnMappings = new Dictionary<string, string>
                 {
-                    // ترتيب العرض من اليمين لليسار مع RTL: رقم السجل ← … ← التاريخ
                     ["LogId"] = "رقم السجل",
                     ["TableName"] = "اسم الجدول",
                     ["ActionType"] = "الإجراء",
@@ -109,44 +93,52 @@ namespace Application.Services.Reports
                 }
             };
 
-            return format.ToLower() == "pdf"
+            var file = format.ToLower() == "pdf"
                 ? await _export.ExportToPdfAsync(rows, opt)
                 : await _export.ExportToExcelAsync(rows, opt);
-        }
 
-        private async Task<IQueryable<AuditEvent>> FilterByActorNameAsync(IQueryable<AuditEvent> query, string raw)
-        {
-            var term = SqlLikePatternEscape.EscapeForSqlServerLike(raw.Trim().ToLower());
-            var ids = await _users.QueryUsers()
-                .Where(u => (u.FullName ?? "").ToLower().Contains(term) || (u.UserName ?? "").ToLower().Contains(term))
-                .Select(u => u.Id)
-                .ToListAsync();
-            return query.Where(a => ids.Contains(a.ActorUserId!) || (a.ActorUserId ?? "").ToLower().Contains(term));
-        }
-
-        private static void ApplyDateRangeForExport(ref IQueryable<AuditEvent> q, DateTimeOffset? from, DateTimeOffset? to, out string? periodText)
-        {
-            periodText = null;
-            if (!from.HasValue && !to.HasValue) return;
-
-            DateTimeOffset? start = null;
-            DateTimeOffset? endExclusive = null;
-
-            if (from.HasValue)
-                start = from.Value;
-
-            if (to.HasValue)
+            // FR-077: تسجيل عملية الاستخراج نفسها دون تضمين محتوى التقرير.
+            _auditLogRepository.Add(new AuditEvent
             {
-                var t = to.Value;
-                endExclusive = (t.TimeOfDay == TimeSpan.Zero) ? t.AddDays(1) : t;
-            }
+                OccurredAt = DateTimeOffset.UtcNow,
+                ActorUserId = string.IsNullOrWhiteSpace(_currentUser.UserId) || _currentUser.UserId == "0"
+                    ? null
+                    : _currentUser.UserId,
+                ContextScope = CenterClaimTypes.Central,
+                CenterId = null,
+                EventType = AuditExportEventType,
+                Result = "SUCCESS",
+                EntityType = nameof(AuditEvent),
+                EntityId = null,
+                ReasonText = "استخراج تقرير سجل التدقيق",
+                NewValues = JsonSerializer.Serialize(new
+                {
+                    Format = format,
+                    RecordCount = rows.Count,
+                    filter.centerId,
+                    filter.eventType,
+                    filter.entityType,
+                    filter.actorUserId,
+                    filter.From,
+                    filter.To
+                }),
+                UserAgent = _currentUser.UserAgent,
+                CorrelationId = _currentUser.CorrelationId == Guid.Empty
+                    ? Guid.NewGuid()
+                    : _currentUser.CorrelationId,
+                IPAddress = IPAddress.TryParse(_currentUser.IPAddress, out var ip) ? ip : null
+            });
+            await _unitOfWork.SaveChangesAsync();
 
-            if (start.HasValue) q = q.Where(a => a.OccurredAt >= start.Value);
-            if (endExclusive.HasValue) q = q.Where(a => a.OccurredAt < endExclusive.Value);
+            return file;
+        }
 
+        private static string? BuildPeriodText(DateTimeOffset? from, DateTimeOffset? to)
+        {
+            if (!from.HasValue && !to.HasValue) return null;
             var fromText = from.HasValue ? from.Value.ToString("yyyy/MM/dd") : "—";
             var toText = to.HasValue ? to.Value.ToString("yyyy/MM/dd") : "—";
-            periodText = $"{fromText} → {toText}";
+            return $"{fromText} → {toText}";
         }
 
         #endregion

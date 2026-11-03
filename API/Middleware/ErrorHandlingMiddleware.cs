@@ -1,27 +1,27 @@
 using API.Infrastructure;
 using Application.Exceptions;
+using Application.Interfaces.Services;
 using Domain.Exceptions;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using System.Net;
 
 namespace API.Middleware;
 
+/// <summary>
+/// معالجة مركزية للأخطاء: رسالة آمنة للعميل مع معرّف تتبع، وتفاصيل كاملة في السجل الداخلي فقط (FR-079).
+/// </summary>
 public class ErrorHandlingMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ILogger<ErrorHandlingMiddleware> _logger;
-    private readonly IWebHostEnvironment _environment;
 
     public ErrorHandlingMiddleware(
         RequestDelegate next,
-        ILogger<ErrorHandlingMiddleware> logger,
-        IWebHostEnvironment environment)
+        ILogger<ErrorHandlingMiddleware> logger)
     {
         _next = next;
         _logger = logger;
-        _environment = environment;
     }
 
     public async Task InvokeAsync(HttpContext context)
@@ -38,6 +38,11 @@ public class ErrorHandlingMiddleware
 
     private async Task HandleExceptionAsync(HttpContext context, Exception exception)
     {
+        var correlationId = ResolveCorrelationId(context);
+        if (!context.Response.HasStarted)
+            context.Response.Headers["X-Correlation-Id"] = correlationId.ToString("D");
+
+        var safeMeta = new { correlationId };
         IResult response;
 
         switch (exception)
@@ -47,31 +52,29 @@ public class ErrorHandlingMiddleware
             // =========================================================================
             case UserAccountLockedException lockedEx:
                 if (!context.Response.HasStarted)
-                {
                     context.Response.Headers["Retry-After"] = lockedEx.RetryAfterSeconds.ToString();
-                }
 
                 response = ApiResponse.Error(
                     message: lockedEx.Message,
                     code: lockedEx.ErrorCode,
-                    meta: lockedEx.Meta,
+                    meta: MergeMeta(lockedEx.Meta, correlationId),
                     status: lockedEx.Status);
 
                 _logger.LogWarning(
-                    "LOGIN LOCKOUT: Code={ErrorCode}, RetryAfter={RetryAfter}, Message={Message}",
-                    lockedEx.ErrorCode, lockedEx.RetryAfterSeconds, lockedEx.Message);
+                    "LOGIN LOCKOUT: CorrelationId={CorrelationId}, Code={ErrorCode}, RetryAfter={RetryAfter}, Message={Message}",
+                    correlationId, lockedEx.ErrorCode, lockedEx.RetryAfterSeconds, lockedEx.Message);
                 break;
 
             case BusinessException bizEx:
                 response = ApiResponse.Error(
                     message: bizEx.Message,
                     code: bizEx.ErrorCode,
-                    meta: bizEx.Meta,
+                    meta: MergeMeta(bizEx.Meta, correlationId),
                     status: bizEx.Status);
 
                 _logger.LogWarning(
-                    "BUSINESS EXCEPTION: Code={ErrorCode}, Status={Status}, Message={Message}",
-                    bizEx.ErrorCode, bizEx.Status, bizEx.Message);
+                    "BUSINESS EXCEPTION: CorrelationId={CorrelationId}, Code={ErrorCode}, Status={Status}, Message={Message}",
+                    correlationId, bizEx.ErrorCode, bizEx.Status, bizEx.Message);
                 break;
 
             // =========================================================================
@@ -81,6 +84,7 @@ public class ErrorHandlingMiddleware
                 response = ApiResponse.Error(
                     message: "غير مسموح بالوصول لهذا المورد.",
                     code: "UNAUTHORIZED_ACCESS",
+                    meta: safeMeta,
                     status: (int)HttpStatusCode.Unauthorized);
                 break;
 
@@ -91,6 +95,7 @@ public class ErrorHandlingMiddleware
                 response = ApiResponse.Error(
                     message: "المورد المطلوب غير موجود.",
                     code: "RESOURCE_NOT_FOUND",
+                    meta: safeMeta,
                     status: (int)HttpStatusCode.NotFound);
                 break;
 
@@ -101,18 +106,24 @@ public class ErrorHandlingMiddleware
                 response = ApiResponse.Error(
                     message: "المدخلات غير صالحة أو مفقودة.",
                     code: "INVALID_ARGUMENT",
+                    meta: safeMeta,
                     status: (int)HttpStatusCode.BadRequest);
 
-                _logger.LogWarning(argEx, "ARGUMENT EXCEPTION: Message={Message}", argEx.Message);
+                _logger.LogWarning(argEx,
+                    "ARGUMENT EXCEPTION: CorrelationId={CorrelationId}, Message={Message}",
+                    correlationId, argEx.Message);
                 break;
 
             case InvalidOperationException invOpEx:
                 response = ApiResponse.Error(
                     message: "تعذر تنفيذ العملية في الحالة الحالية.",
                     code: "INVALID_OPERATION",
+                    meta: safeMeta,
                     status: (int)HttpStatusCode.BadRequest);
 
-                _logger.LogWarning(invOpEx, "INVALID OPERATION EXCEPTION: Message={Message}", invOpEx.Message);
+                _logger.LogWarning(invOpEx,
+                    "INVALID OPERATION EXCEPTION: CorrelationId={CorrelationId}, Message={Message}",
+                    correlationId, invOpEx.Message);
                 break;
 
             // =========================================================================
@@ -122,18 +133,24 @@ public class ErrorHandlingMiddleware
                 response = ApiResponse.Error(
                     message: "تعارض في البيانات: القيمة موجودة مسبقاً.",
                     code: "DATABASE_CONFLICT",
+                    meta: safeMeta,
                     status: (int)HttpStatusCode.Conflict);
 
-                _logger.LogWarning(dbEx, "DATABASE CONFLICT: Message={Message}", dbEx.Message);
+                _logger.LogWarning(dbEx,
+                    "DATABASE CONFLICT: CorrelationId={CorrelationId}, Message={Message}",
+                    correlationId, dbEx.Message);
                 break;
 
             case DbUpdateException dbEx:
                 response = ApiResponse.Error(
                     message: "حدث خطأ أثناء حفظ البيانات في قاعدة البيانات.",
                     code: "DATABASE_ERROR",
+                    meta: safeMeta,
                     status: (int)HttpStatusCode.InternalServerError);
 
-                _logger.LogError(dbEx, "DATABASE UPDATE EXCEPTION: Message={Message}", dbEx.Message);
+                _logger.LogError(dbEx,
+                    "DATABASE UPDATE EXCEPTION: CorrelationId={CorrelationId}, Message={Message}",
+                    correlationId, dbEx.Message);
                 break;
 
             // =========================================================================
@@ -143,6 +160,7 @@ public class ErrorHandlingMiddleware
                 response = ApiResponse.Error(
                     message: "حدث خطأ فني في إعدادات الخادم. يرجى إبلاغ فريق الدعم الفني فوراً.",
                     code: "SERVER_CONFIG_ERROR",
+                    meta: safeMeta,
                     status: (int)HttpStatusCode.InternalServerError);
                 break;
 
@@ -150,21 +168,41 @@ public class ErrorHandlingMiddleware
             // 7. Default Fallback (Unexpected System Server Errors - 500)
             // =========================================================================
             default:
-                var friendlyMessage = "عذراً، حدث خطأ غير متوقع أثناء معالجة طلبك. (يرجى الاتصال بالدعم)";
-                var meta = _environment.IsDevelopment() ? new { originalError = exception.Message } : null;
-
+                // FR-079: لا تُعاد تفاصيل تقنية/Stack/SQL للعميل حتى في Development.
                 response = ApiResponse.Error(
-                    message: friendlyMessage,
+                    message: "عذراً، حدث خطأ غير متوقع أثناء معالجة طلبك. استخدم معرّف التتبع عند التواصل مع الدعم.",
                     code: "UNEXPECTED_SERVER_ERROR",
-                    meta: meta,
+                    meta: safeMeta,
                     status: (int)HttpStatusCode.InternalServerError);
 
                 _logger.LogError(exception,
-                    "UNHANDLED SYSTEM EXCEPTION: Message={Message}", exception.Message);
+                    "UNHANDLED SYSTEM EXCEPTION: CorrelationId={CorrelationId}, Message={Message}",
+                    correlationId, exception.Message);
                 break;
         }
 
         await response.ExecuteAsync(context);
+    }
+
+    private static Guid ResolveCorrelationId(HttpContext context)
+    {
+        var currentUser = context.RequestServices.GetService<ICurrentUserService>();
+        if (currentUser is not null && currentUser.CorrelationId != Guid.Empty)
+            return currentUser.CorrelationId;
+
+        var header = context.Request.Headers["X-Correlation-Id"].FirstOrDefault();
+        if (Guid.TryParse(header, out var fromHeader) && fromHeader != Guid.Empty)
+            return fromHeader;
+
+        return Guid.NewGuid();
+    }
+
+    private static object MergeMeta(object? existing, Guid correlationId)
+    {
+        if (existing is null)
+            return new { correlationId };
+
+        return new { correlationId, detail = existing };
     }
 
     private static bool IsUniqueConstraintViolation(DbUpdateException ex)

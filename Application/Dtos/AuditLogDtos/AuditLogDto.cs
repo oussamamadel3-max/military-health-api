@@ -66,6 +66,9 @@ namespace Application.ModelsDto.AuditLogDtos
         public long Modified { get; set; }
         public long Deleted { get; set; }
     }
+    /// <summary>
+    /// فلاتر استعراض/استخراج سجل التدقيق (FR-077): مستخدم، عملية، مركز، فترة، نوع المورد.
+    /// </summary>
     public class AuditLogFilter : IValidatableObject
     {
         [StringLength(200)]
@@ -77,7 +80,23 @@ namespace Application.ModelsDto.AuditLogDtos
         [StringLength(200)]
         public string? userName { get; set; }
 
+        /// <summary>معرّف المستخدم المنفّذ (مطابقة تامة).</summary>
+        [StringLength(450)]
+        public string? actorUserId { get; set; }
+
+        /// <summary>تصفية بنوع العملية النصي (مثل MemberTransferExecuted / Added).</summary>
+        [StringLength(100)]
+        public string? eventType { get; set; }
+
+        /// <summary>تصفية قديمة بأنواع CRUD فقط؛ تُتجاهل عند تعيين <see cref="eventType"/>.</summary>
         public AuditActionType? actionType { get; set; }
+
+        /// <summary>تصفية حسب مركز العملية.</summary>
+        public Guid? centerId { get; set; }
+
+        /// <summary>نوع المورد/الكيان الواحد (مرادف مبسّط لـ tableNames).</summary>
+        [StringLength(200)]
+        public string? entityType { get; set; }
 
         [MaxLength(100)]
         public List<string>? tableNames { get; set; }
