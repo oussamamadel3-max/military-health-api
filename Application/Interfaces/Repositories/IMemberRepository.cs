@@ -34,6 +34,35 @@ public interface IMemberRepository
 
     void AddIdentity(MemberCenterIdentity identity);
 
+    /// <summary>
+    /// يخصّص رقم الدور اليومي التالي للمركز ضمن المعاملة الحالية دون المساس بتسلسل رقم الملف.
+    /// </summary>
+    Task<int> AllocateDailyQueueNumberAsync(
+        Guid centerId,
+        DateOnly queueDate,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>الهوية المحلية المفتوحة للمنتسب (ValidTo IS NULL) للتتبع والتحديث.</summary>
+    Task<MemberCenterIdentity?> GetOpenIdentityForUpdateAsync(
+        Guid memberId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// ينفّذ النقل الذري عبر <c>patient.transferMember</c> (أو محاكاة مكافئة على InMemory)،
+    /// بما في ذلك إغلاق/فتح الهوية وتحديث المركز الحالي وإعادة ضبط علامات التصدير.
+    /// </summary>
+    Task<Guid> ExecuteAuthorizedTransferAsync(
+        Guid memberId,
+        Guid toCenterId,
+        string newCenterMemberId,
+        string executedByUserId,
+        string transferReason,
+        DateTimeOffset executedAt,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>استعلام سجلات النقل مع مراكز المصدر/الهدف والمنفّذ.</summary>
+    IQueryable<MemberTransfer> QueryTransfers(bool asNoTracking = true);
+
     /// <summary>الملاحظات العامة النشطة للمنتسب مرتبة من الأحدث.</summary>
     Task<IReadOnlyList<MemberGeneralNote>> GetActiveNotesAsync(
         Guid memberId,

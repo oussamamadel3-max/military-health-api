@@ -96,6 +96,93 @@ public class MemberRepository : IMemberRepository
 
     public void AddIdentity(MemberCenterIdentity identity) => _context.MemberCenterIdentities.Add(identity);
 
+    /// <inheritdoc />
+    public async Task<int> AllocateDailyQueueNumberAsync(
+        Guid centerId,
+        DateOnly queueDate,
+        CancellationToken cancellationToken = default)
+    {
+        await AcquireQueueAllocationLockAsync(centerId, queueDate, cancellationToken);
+
+        var maxQueueDb = await _context.Members.AsNoTracking()
+            .Where(m => m.QueueMedicalCenterId == centerId && m.QueueDate == queueDate)
+            .MaxAsync(m => (int?)m.QueueNumber, cancellationToken) ?? 0;
+
+        var maxQueuePending = _context.ChangeTracker.Entries<Member>()
+            .Where(e => e.State is EntityState.Added or EntityState.Modified)
+            .Select(e => e.Entity)
+            .Where(m => m.QueueMedicalCenterId == centerId && m.QueueDate == queueDate)
+            .Select(m => (int?)m.QueueNumber)
+            .DefaultIfEmpty(null)
+            .Max() ?? 0;
+
+        return Math.Max(maxQueueDb, maxQueuePending) + 1;
+    }
+
+    /// <inheritdoc />
+    public Task<MemberCenterIdentity?> GetOpenIdentityForUpdateAsync(
+        Guid memberId,
+        CancellationToken cancellationToken = default)
+    {
+        return _context.MemberCenterIdentities
+            .FirstOrDefaultAsync(
+                i => i.MemberId == memberId && i.ValidTo == null,
+                cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<Guid> ExecuteAuthorizedTransferAsync(
+        Guid memberId,
+        Guid toCenterId,
+        string newCenterMemberId,
+        string executedByUserId,
+        string transferReason,
+        DateTimeOffset executedAt,
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsNpgsqlProvider())
+            return await ExecuteTransferInMemoryAsync(
+                memberId,
+                toCenterId,
+                newCenterMemberId,
+                executedByUserId,
+                transferReason,
+                executedAt,
+                cancellationToken);
+
+        // EF cannot UPDATE currentMedicalCenterId directly (DB trigger); must use transferMember.
+        var rows = await _context.Database
+            .SqlQueryRaw<Guid>(
+                """
+                SELECT patient."transferMember"({0}, {1}, {2}::citext, {3}, {4}, {5}) AS "Value"
+                """,
+                memberId,
+                toCenterId,
+                newCenterMemberId,
+                executedByUserId,
+                transferReason,
+                executedAt)
+            .ToListAsync(cancellationToken);
+
+        var transferId = rows.SingleOrDefault();
+        if (transferId == Guid.Empty)
+            throw new InvalidOperationException("patient.transferMember returned no transfer id.");
+
+        _context.ChangeTracker.Clear();
+        return transferId;
+    }
+
+    /// <inheritdoc />
+    public IQueryable<MemberTransfer> QueryTransfers(bool asNoTracking = true)
+    {
+        var query = _context.MemberTransfers
+            .Include(t => t.FromCenter)
+            .Include(t => t.ToCenter)
+            .Include(t => t.ExecutedByUser)
+            .AsQueryable();
+        return asNoTracking ? query.AsNoTracking() : query;
+    }
+
     public async Task<IReadOnlyList<MemberGeneralNote>> GetActiveNotesAsync(
         Guid memberId,
         CancellationToken cancellationToken = default)
@@ -144,12 +231,93 @@ public class MemberRepository : IMemberRepository
             parameters: new object[] { FileNumberLockClass, 1 },
             cancellationToken: cancellationToken);
 
+        await AcquireQueueAllocationLockAsync(centerId, queueDate, cancellationToken);
+    }
+
+    private async Task AcquireQueueAllocationLockAsync(
+        Guid centerId,
+        DateOnly queueDate,
+        CancellationToken cancellationToken)
+    {
+        if (!IsNpgsqlProvider())
+            return;
+
         // قفل مستقل لكل (مركز، يوم) لتسلسل رقم الدور.
         var queueKey2 = HashCode.Combine(centerId, queueDate.DayNumber);
         await _context.Database.ExecuteSqlRawAsync(
             "SELECT pg_advisory_xact_lock({0}, {1})",
             parameters: new object[] { QueueNumberLockClass, queueKey2 },
             cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// محاكاة دلالية لـ patient.transferMember على مزوّدات الاختبار (InMemory) دون triggers.
+    /// </summary>
+    private async Task<Guid> ExecuteTransferInMemoryAsync(
+        Guid memberId,
+        Guid toCenterId,
+        string newCenterMemberId,
+        string executedByUserId,
+        string transferReason,
+        DateTimeOffset executedAt,
+        CancellationToken cancellationToken)
+    {
+        var member = await _context.Members
+            .FirstOrDefaultAsync(m => m.MemberId == memberId, cancellationToken)
+            ?? throw new InvalidOperationException($"Member {memberId} does not exist");
+
+        var fromCenterId = member.CurrentMedicalCenterId;
+        if (fromCenterId == toCenterId)
+            throw new InvalidOperationException("Cannot transfer member to the same medical center");
+
+        var openIdentity = await _context.MemberCenterIdentities
+            .FirstOrDefaultAsync(
+                i => i.MemberId == memberId
+                     && i.MedicalCenterId == fromCenterId
+                     && i.ValidTo == null,
+                cancellationToken)
+            ?? throw new InvalidOperationException("Current open memberCenterIdentity was not found");
+
+        openIdentity.ValidTo = executedAt;
+        openIdentity.ClosedByUserId = executedByUserId;
+
+        var toIdentityId = Guid.NewGuid();
+        _context.MemberCenterIdentities.Add(new MemberCenterIdentity
+        {
+            MemberCenterIdentityId = toIdentityId,
+            MemberId = memberId,
+            MedicalCenterId = toCenterId,
+            CenterMemberId = newCenterMemberId,
+            ValidFrom = executedAt,
+            ValidTo = null,
+            AssignedByUserId = executedByUserId,
+            ClosedByUserId = null
+        });
+
+        // Matches SQL transferMember: center change + export reset; queue origin stays historical.
+        member.CurrentMedicalCenterId = toCenterId;
+        member.DataRevision += 1;
+        member.ExportStatus = "UNEXPORTED";
+        member.LastExportedAt = null;
+        member.UpdatedByUserId = executedByUserId;
+        member.UpdatedAt = executedAt;
+
+        var transferId = Guid.NewGuid();
+        _context.MemberTransfers.Add(new MemberTransfer
+        {
+            TransferId = transferId,
+            MemberId = memberId,
+            FromCenterId = fromCenterId,
+            ToCenterId = toCenterId,
+            FromMemberCenterIdentityId = openIdentity.MemberCenterIdentityId,
+            ToMemberCenterIdentityId = toIdentityId,
+            TransferReason = transferReason,
+            ExecutedByUserId = executedByUserId,
+            ExecutedAt = executedAt
+        });
+
+        await _context.SaveChangesAsync(cancellationToken);
+        return transferId;
     }
 
     private bool IsNpgsqlProvider()
