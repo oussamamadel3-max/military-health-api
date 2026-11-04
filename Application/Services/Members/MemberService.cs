@@ -24,6 +24,9 @@ namespace Application.Services.Members;
 public class MemberService : IMemberService
 {
     public const int MaxExportRows = 10000;
+    public const int MaxEditReasonLength = 500;
+    public const string MemberUpdateEventType = "MemberUpdate";
+    public const string MemberUpdateAfterFinalDecisionEventType = "MemberUpdateAfterFinalDecision";
 
     private static readonly JsonSerializerOptions ImportJsonOptions = new()
     {
@@ -34,6 +37,7 @@ public class MemberService : IMemberService
     private readonly IMemberImportBatchRepository _importBatches;
     private readonly IMedicalCenterRepository _centers;
     private readonly IReferenceDataRepository _references;
+    private readonly IClinicWorkspaceRepository _clinicWorkspace;
     private readonly IAuditLogRepository _audit;
     private readonly ICrossCenterAccessService _crossCenterAccess;
     private readonly IUnitOfWork _unitOfWork;
@@ -47,6 +51,7 @@ public class MemberService : IMemberService
         IMemberImportBatchRepository importBatches,
         IMedicalCenterRepository centers,
         IReferenceDataRepository references,
+        IClinicWorkspaceRepository clinicWorkspace,
         IAuditLogRepository audit,
         ICrossCenterAccessService crossCenterAccess,
         IUnitOfWork unitOfWork,
@@ -59,6 +64,7 @@ public class MemberService : IMemberService
         _importBatches = importBatches;
         _centers = centers;
         _references = references;
+        _clinicWorkspace = clinicWorkspace;
         _audit = audit;
         _crossCenterAccess = crossCenterAccess;
         _unitOfWork = unitOfWork;
@@ -288,19 +294,15 @@ public class MemberService : IMemberService
     }
 
     /// <summary>
-    /// يعدّل بيانات المنتسب الشخصية والطبية ضمن المركز النشط (FR-024)، مع ثبات الأرقام/المركز وإعادة حساب BMI عبر العمود المحسوب.
+    /// يعدّل بيانات المنتسب ضمن المركز النشط (FR-024)، مع ثبات الأرقام/المركز وإعادة حساب BMI عبر العمود المحسوب.
+    /// عند وجود قرار نهائي معتمد يُشترط <c>Members.EditAfterFinalDecision</c> وسبب منظّف، ويُقفل الحقل الطبي.
     /// </summary>
-    /// <remarks>
-    /// TODO(FR-024 A5): تقييد التعديل عند وجود قرار نهائي معتمد معلّق حتى اعتماد سياسة الجهة / مسار القرار النهائي (T-07).
-    /// السلوك المؤقت المعتمد: السماح بالتعديل مع تسجيل Audit بالقيم السابقة والجديدة دون قفل.
-    /// </remarks>
     public async Task<MemberDetailsDto> UpdateAsync(
         Guid memberId,
         UpdateMemberRequest request,
         Guid? clientCenterId = null,
         CancellationToken cancellationToken = default)
     {
-        // TODO(FR-024 A5): لا يُفحص FinalDecision هنا — السماح + Audit حتى سياسة الجهة / T-07.
         var centerId = await _permissionGate.EnsureLocalAsync(
             MilitaryHealthPermissions.Members.CreateUpdate,
             clientCenterId,
@@ -313,96 +315,110 @@ public class MemberService : IMemberService
 
         await EnsureReferenceAsync(request.MaritalStatusId, request.RecruitmentCenterId, request.BloodTypeId, cancellationToken);
 
-        var member = await _members.GetByIdInCenterAsync(memberId, centerId, asNoTracking: false, cancellationToken)
-            ?? throw new MemberNotFoundException();
-
-        var recruitmentNumber = request.RecruitmentNumber.Trim();
-        if (await _members.RecruitmentNumberExistsAsync(recruitmentNumber, excludingMemberId: memberId, cancellationToken))
-            throw new MemberRecruitmentNumberExistsException(recruitmentNumber);
-
-        var oldSnapshot = JsonSerializer.Serialize(new
+        await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
         {
-            member.FullName,
-            member.MotherName,
-            member.BirthDate,
-            member.MaritalStatusId,
-            member.Occupation,
-            member.RecruitmentNumber,
-            member.RecruitmentCenterId,
-            member.BloodTypeId,
-            member.BloodSugarMgDl,
-            member.HeightCm,
-            member.WeightKg,
-            member.BloodPressure,
-            member.PulseBpm,
-            member.HasTattoo,
-            member.DistinguishingMarks,
-            member.FileNumber,
-            member.CurrentMedicalCenterId,
-            member.DataRevision
-        });
+            // ترتيب متوافق مع إصدار القرار: قفل الصف ثم الفحص ثم التعديل.
+            await _members.LockMemberForUpdateAsync(memberId, cancellationToken);
 
-        var preservedFile = member.FileNumber;
-        var preservedCenter = member.CurrentMedicalCenterId;
-        var preservedQueueCenter = member.QueueMedicalCenterId;
-        var preservedQueueDate = member.QueueDate;
-        var preservedQueueNumber = member.QueueNumber;
+            var member = await _members.GetByIdInCenterAsync(memberId, centerId, asNoTracking: false, cancellationToken)
+                ?? throw new MemberNotFoundException();
 
-        member.FullName = request.FullName.Trim();
-        member.MotherName = request.MotherName.Trim();
-        member.BirthDate = request.BirthDate;
-        member.MaritalStatusId = request.MaritalStatusId;
-        member.Occupation = request.Occupation.Trim();
-        member.RecruitmentNumber = recruitmentNumber;
-        member.RecruitmentCenterId = request.RecruitmentCenterId;
-        member.BloodTypeId = request.BloodTypeId;
-        member.BloodSugarMgDl = request.BloodSugarMgDl;
-        member.HeightCm = request.HeightCm;
-        member.WeightKg = request.WeightKg;
-        member.BloodPressure = TrimOrNull(request.BloodPressure);
-        member.PulseBpm = request.PulseBpm;
-        member.HasTattoo = request.HasTattoo;
-        member.DistinguishingMarks = TrimOrNull(request.DistinguishingMarks);
-        member.FileNumber = preservedFile;
-        member.CurrentMedicalCenterId = preservedCenter;
-        member.QueueMedicalCenterId = preservedQueueCenter;
-        member.QueueDate = preservedQueueDate;
-        member.QueueNumber = preservedQueueNumber;
-        member.DataRevision += 1;
-        member.UpdatedByUserId = userId;
-        member.UpdatedAt = DateTimeOffset.UtcNow;
+            var finalDecision = await LoadSingleFinalDecisionAsync(memberId, cancellationToken);
+            var afterFinalDecision = finalDecision is not null;
+            string? editReason = null;
 
-        RecordAudit(
-            userId,
-            centerId,
-            "MemberUpdate",
-            "SUCCESS",
-            member.MemberId.ToString(),
-            "تم تعديل ملف المنتسب",
-            oldValues: oldSnapshot,
-            newValues: JsonSerializer.Serialize(new
+            if (afterFinalDecision)
             {
-                member.FullName,
-                member.MotherName,
-                member.BirthDate,
-                member.MaritalStatusId,
-                member.Occupation,
-                member.RecruitmentNumber,
-                member.RecruitmentCenterId,
-                member.BloodTypeId,
-                member.BloodSugarMgDl,
-                member.HeightCm,
-                member.WeightKg,
-                member.BloodPressure,
-                member.PulseBpm,
-                member.HasTattoo,
-                member.DistinguishingMarks,
-                member.FileNumber,
-                member.CurrentMedicalCenterId,
-                member.DataRevision
-            }));
+                if (!_permissionGate.Has(MilitaryHealthPermissions.Members.EditAfterFinalDecision))
+                {
+                    throw new ForbiddenPermissionException(
+                        "لا يمكن تعديل منتسب صدر بحقه قرار نهائي دون الصلاحية الإدارية المحددة.");
+                }
 
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+                editReason = NormalizeEditReason(request.EditReason);
+                EnsureMedicalFieldsUnchanged(member, request);
+            }
+
+            var recruitmentNumber = request.RecruitmentNumber.Trim();
+            if (await _members.RecruitmentNumberExistsAsync(recruitmentNumber, excludingMemberId: memberId, cancellationToken))
+                throw new MemberRecruitmentNumberExistsException(recruitmentNumber);
+
+            var preservedExportStatus = member.ExportStatus;
+            var preservedLastExportedRevision = member.LastExportedRevision;
+            var preservedLastExportedAt = member.LastExportedAt;
+            var preservedReviewedBy = member.ReviewedByUserId;
+            var preservedReviewedAt = member.ReviewedAt;
+            var preservedReviewedRevision = member.ReviewedRevision;
+
+            var oldSnapshot = BuildMemberAuditSnapshot(member, finalDecision?.FinalDecisionId);
+
+            var preservedFile = member.FileNumber;
+            var preservedCenter = member.CurrentMedicalCenterId;
+            var preservedQueueCenter = member.QueueMedicalCenterId;
+            var preservedQueueDate = member.QueueDate;
+            var preservedQueueNumber = member.QueueNumber;
+
+            member.FullName = request.FullName.Trim();
+            member.MotherName = request.MotherName.Trim();
+            member.BirthDate = request.BirthDate;
+            member.MaritalStatusId = request.MaritalStatusId;
+            member.Occupation = request.Occupation.Trim();
+            member.RecruitmentNumber = recruitmentNumber;
+            member.RecruitmentCenterId = request.RecruitmentCenterId;
+
+            if (!afterFinalDecision)
+            {
+                member.BloodTypeId = request.BloodTypeId;
+                member.BloodSugarMgDl = request.BloodSugarMgDl;
+                member.HeightCm = request.HeightCm;
+                member.WeightKg = request.WeightKg;
+                member.BloodPressure = TrimOrNull(request.BloodPressure);
+                member.PulseBpm = request.PulseBpm;
+                member.HasTattoo = request.HasTattoo;
+                member.DistinguishingMarks = TrimOrNull(request.DistinguishingMarks);
+            }
+
+            member.FileNumber = preservedFile;
+            member.CurrentMedicalCenterId = preservedCenter;
+            member.QueueMedicalCenterId = preservedQueueCenter;
+            member.QueueDate = preservedQueueDate;
+            member.QueueNumber = preservedQueueNumber;
+            member.ExportStatus = preservedExportStatus;
+            member.LastExportedRevision = preservedLastExportedRevision;
+            member.LastExportedAt = preservedLastExportedAt;
+            member.ReviewedByUserId = preservedReviewedBy;
+            member.ReviewedAt = preservedReviewedAt;
+            member.ReviewedRevision = preservedReviewedRevision;
+            member.DataRevision += 1;
+            member.UpdatedByUserId = userId;
+            member.UpdatedAt = DateTimeOffset.UtcNow;
+
+            var eventType = afterFinalDecision
+                ? MemberUpdateAfterFinalDecisionEventType
+                : MemberUpdateEventType;
+            var reasonText = afterFinalDecision
+                ? editReason!
+                : "تم تعديل ملف المنتسب";
+
+            RecordAudit(
+                userId,
+                centerId,
+                eventType,
+                "SUCCESS",
+                member.MemberId.ToString(),
+                reasonText,
+                oldValues: oldSnapshot,
+                newValues: BuildMemberAuditSnapshot(member, finalDecision?.FinalDecisionId));
+
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await tx.RollbackAsync(cancellationToken);
+            throw;
+        }
 
         var updated = await _members.GetByIdInCenterAsync(memberId, centerId, asNoTracking: true, cancellationToken)
             ?? throw new MemberNotFoundException();
@@ -1141,6 +1157,95 @@ public class MemberService : IMemberService
 
     private static string? TrimOrNull(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    /// <summary>يحمّل القرار النهائي الوحيد للمنتسب؛ يرفض عند تعدد صفوف غير متوقع.</summary>
+    private async Task<Domain.Entities.Clinical.FinalDecision?> LoadSingleFinalDecisionAsync(
+        Guid memberId,
+        CancellationToken cancellationToken)
+    {
+        var decisions = await _clinicWorkspace.QueryFinalDecisions(asNoTracking: true)
+            .Where(d => d.MemberId == memberId)
+            .Take(2)
+            .ToListAsync(cancellationToken);
+
+        if (decisions.Count > 1)
+        {
+            throw new MemberUpdateConflictException(
+                "وُجد أكثر من قرار نهائي مرتبط بالمنتسب. راجع سلامة البيانات.");
+        }
+
+        return decisions.Count == 0 ? null : decisions[0];
+    }
+
+    /// <summary>يتحقق من سبب التعديل بعد Trim ويحفظ الطول المعتمد.</summary>
+    private static string NormalizeEditReason(string? editReason)
+    {
+        if (string.IsNullOrWhiteSpace(editReason))
+            throw new InvalidMemberDataException("سبب التعديل إلزامي عند وجود قرار نهائي معتمد.");
+
+        var trimmed = editReason.Trim();
+        if (trimmed.Length > MaxEditReasonLength)
+        {
+            throw new InvalidMemberDataException(
+                $"سبب التعديل يجب ألا يتجاوز {MaxEditReasonLength} حرفاً.");
+        }
+
+        return trimmed;
+    }
+
+    /// <summary>
+    /// يرفض أي اختلاف حقيقي في الحقول الطبية بعد تطبيع متماثل (null والنصوص المقصوصة).
+    /// </summary>
+    private static void EnsureMedicalFieldsUnchanged(Member member, UpdateMemberRequest request)
+    {
+        var bloodPressureEqual = string.Equals(
+            TrimOrNull(member.BloodPressure),
+            TrimOrNull(request.BloodPressure),
+            StringComparison.Ordinal);
+
+        var marksEqual = string.Equals(
+            TrimOrNull(member.DistinguishingMarks),
+            TrimOrNull(request.DistinguishingMarks),
+            StringComparison.Ordinal);
+
+        if (member.BloodTypeId != request.BloodTypeId
+            || member.BloodSugarMgDl != request.BloodSugarMgDl
+            || member.HeightCm != request.HeightCm
+            || member.WeightKg != request.WeightKg
+            || !bloodPressureEqual
+            || member.PulseBpm != request.PulseBpm
+            || member.HasTattoo != request.HasTattoo
+            || !marksEqual)
+        {
+            throw new InvalidMemberDataException(
+                "لا يمكن تعديل الحقول الطبية عبر مسار تعديل البيانات بعد صدور القرار النهائي.");
+        }
+    }
+
+    private static string BuildMemberAuditSnapshot(Member member, Guid? finalDecisionId)
+        => JsonSerializer.Serialize(new
+        {
+            member.FullName,
+            member.MotherName,
+            member.BirthDate,
+            member.MaritalStatusId,
+            member.Occupation,
+            member.RecruitmentNumber,
+            member.RecruitmentCenterId,
+            member.BloodTypeId,
+            member.BloodSugarMgDl,
+            member.HeightCm,
+            member.WeightKg,
+            member.BloodPressure,
+            member.PulseBpm,
+            member.HasTattoo,
+            member.DistinguishingMarks,
+            member.FileNumber,
+            member.CurrentMedicalCenterId,
+            member.DataRevision,
+            member.ExportStatus,
+            FinalDecisionId = finalDecisionId
+        });
 
     #endregion
 }

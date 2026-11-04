@@ -124,91 +124,101 @@ public class FinalDecisionService : IFinalDecisionService
         if (isDeferred)
             actionType = await ResolveAndValidateActionTypeAsync(request, cancellationToken);
 
-        var member = await _members.GetByIdInCenterAsync(
-            memberId,
-            centerId,
-            asNoTracking: false,
-            cancellationToken);
-        if (member is null)
-            throw new MemberNotFoundException();
+        Member member;
+        FinalDecision decision;
+        DeferredAction? deferredAction;
+        IReadOnlyList<string> disagreeingCodes;
+        int objectionCount;
+        MemberArchive archive;
 
-        EnsureExpectedRevision(member, request.ExpectedDataRevision);
-
-        var existing = await _clinicWorkspace.QueryFinalDecisions(asNoTracking: true)
-            .AnyAsync(d => d.MemberId == memberId, cancellationToken);
-        if (existing)
-            throw new FinalDecisionAlreadyExistsException();
-
-        var (disagreeing, clinicCodeById) = await LoadDisagreeingAssessmentsAsync(
-            memberId,
-            centerId,
-            request.ResultStatusId,
-            cancellationToken);
-
-        var justification = ResolveJustification(request.DisagreementJustification, disagreeing, clinicCodeById);
-        var rejectionReason = request.ResultStatusId == RejectedResultStatusId
-            ? request.RejectionReason!.Trim()
-            : null;
-
-        var now = DateTimeOffset.UtcNow;
-        var decisionId = Guid.NewGuid();
-        var decision = new FinalDecision
-        {
-            FinalDecisionId = decisionId,
-            MemberId = memberId,
-            CenterId = centerId,
-            SupervisorUserId = userId,
-            ResultStatusId = request.ResultStatusId,
-            RejectionReason = rejectionReason,
-            DisagreementJustification = justification,
-            DecidedAt = now,
-            UpdatedByUserId = userId,
-            UpdatedAt = now
-        };
-
-        _clinicWorkspace.AddFinalDecision(decision);
-
-        DeferredAction? deferredAction = null;
-        if (isDeferred)
-        {
-            deferredAction = CreateFinalDeferredAction(decision, request, actionType!, userId, now);
-            _clinicWorkspace.AddDeferredAction(deferredAction);
-        }
-
-        var objections = CreateObjections(
-            disagreeing,
-            memberId,
-            centerId,
-            decisionId,
-            userId,
-            justification,
-            now);
-
-        BumpMemberRevision(member, userId, now);
-        // اعتماد القرار النهائي يُعدّ مراجعة للنسخة الحالية تمهيداً للتصدير (FR-058/059 + قيد reviewedRevision).
-        MarkMemberReviewed(member, userId, now);
-
-        var disagreeingCodes = disagreeing.Select(a => clinicCodeById[a.ClinicId]).ToList();
-        // FR-069 / BR-017: الأرشيف يُنشأ في نفس وحدة العمل قبل COMMIT لإرضاء ctFinalDecisionArchive.
-        var archive = await CreateArchiveForDecisionAsync(decision, now, cancellationToken);
-
-        RecordIssuedAudit(
-            userId,
-            centerId,
-            memberId,
-            decision,
-            disagreeingCodes,
-            objections.Count,
-            deferredAction?.DeferredActionId,
-            archive);
-
-        RecordArchiveCreatedAudit(userId, centerId, memberId, archive);
-
-        // معاملة واحدة + suppressRevision: يمنع trgFinalDecisionRevision من زيادة dataRevision
-        // بعد أن طبع التطبيق reviewedRevision = dataRevision (وإلا يظهر الفرق 19/18 في التصدير).
+        // ترتيب متوافق مع تعديل المنتسب: BeginTransaction → FOR UPDATE → فحص → كتابة.
         await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
         try
         {
+            await _members.LockMemberForUpdateAsync(memberId, cancellationToken);
+
+            member = await _members.GetByIdInCenterAsync(
+                memberId,
+                centerId,
+                asNoTracking: false,
+                cancellationToken)
+                ?? throw new MemberNotFoundException();
+
+            EnsureExpectedRevision(member, request.ExpectedDataRevision);
+
+            var existing = await _clinicWorkspace.QueryFinalDecisions(asNoTracking: true)
+                .AnyAsync(d => d.MemberId == memberId, cancellationToken);
+            if (existing)
+                throw new FinalDecisionAlreadyExistsException();
+
+            var (disagreeing, clinicCodeById) = await LoadDisagreeingAssessmentsAsync(
+                memberId,
+                centerId,
+                request.ResultStatusId,
+                cancellationToken);
+
+            var justification = ResolveJustification(request.DisagreementJustification, disagreeing, clinicCodeById);
+            var rejectionReason = request.ResultStatusId == RejectedResultStatusId
+                ? request.RejectionReason!.Trim()
+                : null;
+
+            var now = DateTimeOffset.UtcNow;
+            var decisionId = Guid.NewGuid();
+            decision = new FinalDecision
+            {
+                FinalDecisionId = decisionId,
+                MemberId = memberId,
+                CenterId = centerId,
+                SupervisorUserId = userId,
+                ResultStatusId = request.ResultStatusId,
+                RejectionReason = rejectionReason,
+                DisagreementJustification = justification,
+                DecidedAt = now,
+                UpdatedByUserId = userId,
+                UpdatedAt = now
+            };
+
+            _clinicWorkspace.AddFinalDecision(decision);
+
+            deferredAction = null;
+            if (isDeferred)
+            {
+                deferredAction = CreateFinalDeferredAction(decision, request, actionType!, userId, now);
+                _clinicWorkspace.AddDeferredAction(deferredAction);
+            }
+
+            var objections = CreateObjections(
+                disagreeing,
+                memberId,
+                centerId,
+                decisionId,
+                userId,
+                justification,
+                now);
+            objectionCount = objections.Count;
+
+            BumpMemberRevision(member, userId, now);
+            // اعتماد القرار النهائي يُعدّ مراجعة للنسخة الحالية تمهيداً للتصدير (FR-058/059 + قيد reviewedRevision).
+            MarkMemberReviewed(member, userId, now);
+
+            disagreeingCodes = disagreeing.Select(a => clinicCodeById[a.ClinicId]).ToList();
+            // FR-069 / BR-017: الأرشيف يُنشأ في نفس وحدة العمل قبل COMMIT لإرضاء ctFinalDecisionArchive.
+            archive = await CreateArchiveForDecisionAsync(decision, now, cancellationToken);
+
+            RecordIssuedAudit(
+                userId,
+                centerId,
+                memberId,
+                decision,
+                disagreeingCodes,
+                objectionCount,
+                deferredAction?.DeferredActionId,
+                archive);
+
+            RecordArchiveCreatedAudit(userId, centerId, memberId, archive);
+
+            // suppressRevision: يمنع trgFinalDecisionRevision من زيادة dataRevision
+            // بعد أن طبع التطبيق reviewedRevision = dataRevision (وإلا يظهر الفرق 19/18 في التصدير).
             await _postgresSession.ApplyForFinalDecisionWriteAsync(
                 userId,
                 changeReason: null,
@@ -239,7 +249,7 @@ public class FinalDecisionService : IFinalDecisionService
             decision,
             member,
             disagreeingCodes,
-            objections.Count,
+            objectionCount,
             deferredAction,
             actionType,
             archive,
@@ -276,129 +286,142 @@ public class FinalDecisionService : IFinalDecisionService
         if (isDeferred)
             actionType = await ResolveAndValidateActionTypeAsync(request, cancellationToken);
 
-        var member = await _members.GetByIdInCenterAsync(
-            memberId,
-            centerId,
-            asNoTracking: false,
-            cancellationToken);
-        if (member is null)
-            throw new MemberNotFoundException();
-
-        EnsureExpectedRevision(member, request.ExpectedDataRevision);
-
-        var decision = await _clinicWorkspace.QueryFinalDecisions(asNoTracking: false)
-            .FirstOrDefaultAsync(
-                d => d.MemberId == memberId && d.CenterId == centerId,
-                cancellationToken);
-        if (decision is null)
-            throw new FinalDecisionNotFoundException();
-
-        if (decision.ResultStatusId == request.ResultStatusId)
-            throw new FinalDecisionUnchangedException();
-
-        var (disagreeing, clinicCodeById) = await LoadDisagreeingAssessmentsAsync(
-            memberId,
-            centerId,
-            request.ResultStatusId,
-            cancellationToken);
-
-        var justification = ResolveJustification(request.DisagreementJustification, disagreeing, clinicCodeById);
-        var rejectionReason = request.ResultStatusId == RejectedResultStatusId
-            ? request.RejectionReason!.Trim()
-            : null;
-
         var changeReason = request.ChangeReason.Trim();
-        var now = DateTimeOffset.UtcNow;
-        var oldStatusId = decision.ResultStatusId;
-        var previousExportStatus = member.ExportStatus;
-        var previousLastExportedAt = member.LastExportedAt;
-        var previousRejection = decision.RejectionReason;
-        var previousJustification = decision.DisagreementJustification;
 
-        // إغلاق الإجراءات المؤجلة المفتوحة المرتبطة بالقرار دون حذفها (قيود التفرد + FR-056).
-        var openFinalDeferred = await _clinicWorkspace.QueryDeferredActions(asNoTracking: false)
-            .Where(d => d.FinalDecisionId == decision.FinalDecisionId
-                && d.Status != DeferredStatusClosed)
-            .ToListAsync(cancellationToken);
+        Member member;
+        FinalDecision decision;
+        DeferredAction? newDeferredAction;
+        IReadOnlyList<string> disagreeingCodes;
+        FinalDecisionHistory history;
+        MemberArchive? archive;
+        short oldStatusId;
+        string previousExportStatus;
+        int objectionCount;
 
-        foreach (var open in openFinalDeferred)
-            open.Status = DeferredStatusClosed;
-
-        DeferredAction? newDeferredAction = null;
-        if (isDeferred)
-        {
-            newDeferredAction = CreateFinalDeferredAction(decision, request, actionType!, userId, now);
-            _clinicWorkspace.AddDeferredAction(newDeferredAction);
-        }
-
-        decision.ResultStatusId = request.ResultStatusId;
-        decision.RejectionReason = rejectionReason;
-        decision.DisagreementJustification = justification;
-        decision.UpdatedByUserId = userId;
-        decision.UpdatedAt = now;
-
-        var objections = CreateObjections(
-            disagreeing,
-            memberId,
-            centerId,
-            decision.FinalDecisionId,
-            userId,
-            justification,
-            now);
-
-        // BR-021 / FR-056: إعادة حالة التصدير دائماً عند التعديل ومسح تاريخ التصدير السابق.
-        // القرار المؤجل يبقى غير مصدَّر لكنه غير مؤهل لقائمة التصدير حتى الحسم.
-        member.ExportStatus = ExportStatusUnexported;
-        member.LastExportedAt = null;
-        BumpMemberRevision(member, userId, now);
-        // إعادة وضع علامة المراجعة على النسخة بعد التعديل حتى يظهر الملف مجدداً في قائمة التصدير عند القبول/الرفض.
-        MarkMemberReviewed(member, userId, now);
-
-        // على PostgreSQL يكتب trgFinalDecisionHistory السجل بشرط app.changeReason؛ إدراج موازٍ يكرّر الصف.
-        var history = new FinalDecisionHistory
-        {
-            HistoryId = Guid.NewGuid(),
-            FinalDecisionId = decision.FinalDecisionId,
-            MemberId = memberId,
-            CenterId = centerId,
-            OldStatusId = oldStatusId,
-            NewStatusId = request.ResultStatusId,
-            ChangeReason = changeReason,
-            ChangedByUserId = userId,
-            ChangedAt = now,
-            ExportResetPerformed = true
-        };
-        var historyOwnedByDatabase = _postgresSession.DefersFinalDecisionHistoryToDatabase;
-        if (!historyOwnedByDatabase)
-            _clinicWorkspace.AddFinalDecisionHistory(history);
-
-        var disagreeingCodes = disagreeing.Select(a => clinicCodeById[a.ClinicId]).ToList();
-        // FR-069 / A3 وخطوة FR-056-9: تحديث سجل الأرشيف المرتبط دون فقد الربط أو التاريخ.
-        var archive = await TouchArchiveForDecisionAsync(decision, now, cancellationToken);
-
-        RecordAmendedAudit(
-            userId,
-            centerId,
-            memberId,
-            decision,
-            history,
-            oldStatusId,
-            previousRejection,
-            previousJustification,
-            previousExportStatus,
-            previousLastExportedAt,
-            disagreeingCodes,
-            objections.Count,
-            newDeferredAction?.DeferredActionId,
-            closedDeferredCount: openFinalDeferred.Count,
-            archive);
-
-        if (archive is not null)
-            RecordArchiveUpdatedAudit(userId, centerId, memberId, archive);
-
+        // ترتيب متوافق مع تعديل المنتسب: BeginTransaction → FOR UPDATE → فحص → كتابة.
         await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
         try
         {
+            await _members.LockMemberForUpdateAsync(memberId, cancellationToken);
+
+            member = await _members.GetByIdInCenterAsync(
+                memberId,
+                centerId,
+                asNoTracking: false,
+                cancellationToken)
+                ?? throw new MemberNotFoundException();
+
+            EnsureExpectedRevision(member, request.ExpectedDataRevision);
+
+            decision = await _clinicWorkspace.QueryFinalDecisions(asNoTracking: false)
+                .FirstOrDefaultAsync(
+                    d => d.MemberId == memberId && d.CenterId == centerId,
+                    cancellationToken)
+                ?? throw new FinalDecisionNotFoundException();
+
+            if (decision.ResultStatusId == request.ResultStatusId)
+                throw new FinalDecisionUnchangedException();
+
+            var (disagreeing, clinicCodeById) = await LoadDisagreeingAssessmentsAsync(
+                memberId,
+                centerId,
+                request.ResultStatusId,
+                cancellationToken);
+
+            var justification = ResolveJustification(request.DisagreementJustification, disagreeing, clinicCodeById);
+            var rejectionReason = request.ResultStatusId == RejectedResultStatusId
+                ? request.RejectionReason!.Trim()
+                : null;
+
+            var now = DateTimeOffset.UtcNow;
+            oldStatusId = decision.ResultStatusId;
+            previousExportStatus = member.ExportStatus;
+            var previousLastExportedAt = member.LastExportedAt;
+            var previousRejection = decision.RejectionReason;
+            var previousJustification = decision.DisagreementJustification;
+
+            // إغلاق الإجراءات المؤجلة المفتوحة المرتبطة بالقرار دون حذفها (قيود التفرد + FR-056).
+            var openFinalDeferred = await _clinicWorkspace.QueryDeferredActions(asNoTracking: false)
+                .Where(d => d.FinalDecisionId == decision.FinalDecisionId
+                    && d.Status != DeferredStatusClosed)
+                .ToListAsync(cancellationToken);
+
+            foreach (var open in openFinalDeferred)
+                open.Status = DeferredStatusClosed;
+
+            newDeferredAction = null;
+            if (isDeferred)
+            {
+                newDeferredAction = CreateFinalDeferredAction(decision, request, actionType!, userId, now);
+                _clinicWorkspace.AddDeferredAction(newDeferredAction);
+            }
+
+            decision.ResultStatusId = request.ResultStatusId;
+            decision.RejectionReason = rejectionReason;
+            decision.DisagreementJustification = justification;
+            decision.UpdatedByUserId = userId;
+            decision.UpdatedAt = now;
+
+            var objections = CreateObjections(
+                disagreeing,
+                memberId,
+                centerId,
+                decision.FinalDecisionId,
+                userId,
+                justification,
+                now);
+            objectionCount = objections.Count;
+
+            // BR-021 / FR-056: إعادة حالة التصدير دائماً عند التعديل ومسح تاريخ التصدير السابق.
+            // القرار المؤجل يبقى غير مصدَّر لكنه غير مؤهل لقائمة التصدير حتى الحسم.
+            member.ExportStatus = ExportStatusUnexported;
+            member.LastExportedAt = null;
+            BumpMemberRevision(member, userId, now);
+            // إعادة وضع علامة المراجعة على النسخة بعد التعديل حتى يظهر الملف مجدداً في قائمة التصدير عند القبول/الرفض.
+            MarkMemberReviewed(member, userId, now);
+
+            // على PostgreSQL يكتب trgFinalDecisionHistory السجل بشرط app.changeReason؛ إدراج موازٍ يكرّر الصف.
+            history = new FinalDecisionHistory
+            {
+                HistoryId = Guid.NewGuid(),
+                FinalDecisionId = decision.FinalDecisionId,
+                MemberId = memberId,
+                CenterId = centerId,
+                OldStatusId = oldStatusId,
+                NewStatusId = request.ResultStatusId,
+                ChangeReason = changeReason,
+                ChangedByUserId = userId,
+                ChangedAt = now,
+                ExportResetPerformed = true
+            };
+            var historyOwnedByDatabase = _postgresSession.DefersFinalDecisionHistoryToDatabase;
+            if (!historyOwnedByDatabase)
+                _clinicWorkspace.AddFinalDecisionHistory(history);
+
+            disagreeingCodes = disagreeing.Select(a => clinicCodeById[a.ClinicId]).ToList();
+            // FR-069 / A3 وخطوة FR-056-9: تحديث سجل الأرشيف المرتبط دون فقد الربط أو التاريخ.
+            archive = await TouchArchiveForDecisionAsync(decision, now, cancellationToken);
+
+            RecordAmendedAudit(
+                userId,
+                centerId,
+                memberId,
+                decision,
+                history,
+                oldStatusId,
+                previousRejection,
+                previousJustification,
+                previousExportStatus,
+                previousLastExportedAt,
+                disagreeingCodes,
+                objectionCount,
+                newDeferredAction?.DeferredActionId,
+                closedDeferredCount: openFinalDeferred.Count,
+                archive);
+
+            if (archive is not null)
+                RecordArchiveUpdatedAudit(userId, centerId, memberId, archive);
+
             await _postgresSession.ApplyForFinalDecisionWriteAsync(
                 userId,
                 changeReason,
@@ -434,7 +457,7 @@ public class FinalDecisionService : IFinalDecisionService
             decision,
             member,
             disagreeingCodes,
-            objections.Count,
+            objectionCount,
             newDeferredAction,
             actionType,
             archive,

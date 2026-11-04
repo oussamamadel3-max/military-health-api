@@ -38,6 +38,12 @@ public class UpdateMemberRequest
     public short? PulseBpm { get; set; }
     public bool HasTattoo { get; set; }
     public string? DistinguishingMarks { get; set; }
+
+    /// <summary>
+    /// سبب التعديل؛ إلزامي فقط عند وجود قرار نهائي معتمد وصلاحية <c>Members.EditAfterFinalDecision</c>.
+    /// يُتجاهل قبل القرار النهائي ولا يُقبل كتجاوز عند غياب الصلاحية الإدارية.
+    /// </summary>
+    public string? EditReason { get; set; }
 }
 
 /// <summary>معايير قائمة/بحث المنتسبين مع تصفية زمنية وتصفح.</summary>

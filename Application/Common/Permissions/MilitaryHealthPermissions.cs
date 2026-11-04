@@ -24,6 +24,8 @@ public static class MilitaryHealthPermissions
     public static class Members
     {
         public const string CreateUpdate = "Members.CreateUpdate";
+        /// <summary>تعديل البيانات التعريفية للمنتسب بعد صدور قرار نهائي معتمد (FR-024 A5).</summary>
+        public const string EditAfterFinalDecision = "Members.EditAfterFinalDecision";
         public const string View = "Members.View";
         /// <summary>بحث وعرض ملف المنتسب عبر المراكز (صلاحية مركزية صريحة).</summary>
         public const string ViewCentral = "Members.ViewCentral";

@@ -10,6 +10,7 @@ using Application.Services;
 using Application.Services.Members;
 using Domain.Entities.Audit;
 using Domain.Entities.Auth;
+using Domain.Entities.Clinical;
 using Domain.Entities.Core;
 using Domain.Entities.Patient;
 using Infrastructure.Persistence;
@@ -135,6 +136,7 @@ public class MemberServiceTests
             Mock.Of<IMemberImportBatchRepository>(),
             new MedicalCenterRepository(db),
             new ReferenceDataRepository(db),
+            Mock.Of<IClinicWorkspaceRepository>(),
             audit.Object,
             Mock.Of<ICrossCenterAccessService>(),
             uow.Object,
@@ -224,6 +226,317 @@ public class MemberServiceTests
         Assert.Equal(created.FullName, row.FullName);
         Assert.Equal(1, row.DataRevision);
         Assert.Empty(await db.AuditEvents.Where(e => e.EventType == "MemberUpdate").ToListAsync());
+    }
+
+    [Fact]
+    public async Task Update_without_final_decision_succeeds_with_create_update_permission()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var service = CreateService(db, CenterA, allowCreate: true, allowView: true);
+        var created = await service.CreateAsync(ValidCreate(recruitment: "NO-FD-1"));
+
+        var updated = await service.UpdateAsync(
+            created.MemberId,
+            ToUpdate(created, fullName: "بعد التعديل بلا قرار"));
+
+        Assert.Equal("بعد التعديل بلا قرار", updated.FullName);
+        Assert.Equal(2, updated.DataRevision);
+        Assert.Equal(1, await db.AuditEvents.CountAsync(e =>
+            e.EventType == MemberService.MemberUpdateEventType));
+    }
+
+    [Fact]
+    public async Task Update_with_final_decision_without_admin_permission_is_forbidden()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var service = CreateService(db, CenterA, allowCreate: true, allowView: true);
+        var created = await service.CreateAsync(ValidCreate(recruitment: "FD-FORB"));
+        await SeedFinalDecisionAsync(db, created.MemberId, CenterA);
+
+        var request = ToUpdate(created, fullName: "محاولة ممنوعة");
+        request.EditReason = "سبب لن يُقبل بدون صلاحية";
+
+        var error = await Assert.ThrowsAsync<ForbiddenPermissionException>(() =>
+            service.UpdateAsync(created.MemberId, request));
+
+        Assert.Equal(403, error.Status);
+        db.ChangeTracker.Clear();
+        var row = await db.Members.SingleAsync(m => m.MemberId == created.MemberId);
+        Assert.Equal(created.FullName, row.FullName);
+        Assert.Equal(1, row.DataRevision);
+        Assert.Empty(await db.AuditEvents.Where(e =>
+            e.EventType == MemberService.MemberUpdateAfterFinalDecisionEventType).ToListAsync());
+    }
+
+    [Fact]
+    public async Task Update_with_final_decision_requires_non_empty_edit_reason()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var service = CreateService(
+            db, CenterA, allowCreate: true, allowView: true, allowEditAfterFinalDecision: true);
+        var created = await service.CreateAsync(ValidCreate(recruitment: "FD-REASON"));
+        await SeedFinalDecisionAsync(db, created.MemberId, CenterA);
+
+        var blank = ToUpdate(created, fullName: "بدون سبب");
+        blank.EditReason = "   ";
+        var blankError = await Assert.ThrowsAsync<InvalidMemberDataException>(() =>
+            service.UpdateAsync(created.MemberId, blank));
+        Assert.Equal(400, blankError.Status);
+
+        var tooLong = ToUpdate(created, fullName: "سبب طويل");
+        tooLong.EditReason = new string('س', MemberService.MaxEditReasonLength + 1);
+        var lengthError = await Assert.ThrowsAsync<InvalidMemberDataException>(() =>
+            service.UpdateAsync(created.MemberId, tooLong));
+        Assert.Equal(400, lengthError.Status);
+
+        db.ChangeTracker.Clear();
+        Assert.Equal(1, (await db.Members.SingleAsync(m => m.MemberId == created.MemberId)).DataRevision);
+    }
+
+    [Fact]
+    public async Task Update_with_final_decision_admin_reason_succeeds_and_audits()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var service = CreateService(
+            db, CenterA, allowCreate: true, allowView: true, allowEditAfterFinalDecision: true);
+        var created = await service.CreateAsync(ValidCreate(recruitment: "FD-OK"));
+        var decisionId = await SeedFinalDecisionAsync(db, created.MemberId, CenterA);
+        var exportBefore = (await db.Members.SingleAsync(m => m.MemberId == created.MemberId)).ExportStatus;
+
+        var request = ToUpdate(created, fullName: "اسم إداري");
+        request.EditReason = "  تصحيح بيانات تعريفية  ";
+
+        var updated = await service.UpdateAsync(created.MemberId, request);
+
+        Assert.Equal("اسم إداري", updated.FullName);
+        Assert.Equal(created.HeightCm, updated.HeightCm);
+        Assert.Equal(created.BloodTypeId, updated.BloodTypeId);
+
+        db.ChangeTracker.Clear();
+        var row = await db.Members.SingleAsync(m => m.MemberId == created.MemberId);
+        Assert.Equal(exportBefore, row.ExportStatus);
+        Assert.Equal(2, row.DataRevision);
+
+        var audit = await db.AuditEvents.SingleAsync(e =>
+            e.EventType == MemberService.MemberUpdateAfterFinalDecisionEventType);
+        Assert.Equal("تصحيح بيانات تعريفية", audit.ReasonText);
+        Assert.Equal(CenterA, audit.CenterId);
+        Assert.Equal("actor-1", audit.ActorUserId);
+        using var oldJson = JsonDocument.Parse(audit.OldValues!);
+        using var newJson = JsonDocument.Parse(audit.NewValues!);
+        Assert.Equal(decisionId, oldJson.RootElement.GetProperty("FinalDecisionId").GetGuid());
+        Assert.Equal(decisionId, newJson.RootElement.GetProperty("FinalDecisionId").GetGuid());
+        Assert.Equal(created.FullName, oldJson.RootElement.GetProperty("FullName").GetString());
+        Assert.Equal("اسم إداري", newJson.RootElement.GetProperty("FullName").GetString());
+    }
+
+    [Fact]
+    public async Task Update_with_final_decision_rejects_medical_field_change()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var service = CreateService(
+            db, CenterA, allowCreate: true, allowView: true, allowEditAfterFinalDecision: true);
+        var created = await service.CreateAsync(ValidCreate(recruitment: "FD-MED"));
+        await SeedFinalDecisionAsync(db, created.MemberId, CenterA);
+
+        var request = ToUpdate(created, fullName: created.FullName);
+        request.EditReason = "محاولة طبية";
+        request.HeightCm = (created.HeightCm ?? 170m) + 1m;
+
+        var error = await Assert.ThrowsAsync<InvalidMemberDataException>(() =>
+            service.UpdateAsync(created.MemberId, request));
+        Assert.Equal(400, error.Status);
+
+        db.ChangeTracker.Clear();
+        var row = await db.Members.SingleAsync(m => m.MemberId == created.MemberId);
+        Assert.Equal(created.HeightCm, row.HeightCm);
+        Assert.Equal(1, row.DataRevision);
+    }
+
+    [Fact]
+    public async Task Update_after_final_decision_appears_blocks_medical_path_without_admin()
+    {
+        // يحاكي سباق الإصدار: القرار يظهر قبل/عند بداية التحديث بعد القفل (InMemory no-op للقفل).
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var service = CreateService(db, CenterA, allowCreate: true, allowView: true);
+        var created = await service.CreateAsync(ValidCreate(recruitment: "FD-RACE"));
+        await SeedFinalDecisionAsync(db, created.MemberId, CenterA);
+
+        var request = ToUpdate(created, fullName: "سباق");
+        request.HeightCm = (created.HeightCm ?? 170m) + 5m;
+
+        await Assert.ThrowsAsync<ForbiddenPermissionException>(() =>
+            service.UpdateAsync(created.MemberId, request));
+
+        db.ChangeTracker.Clear();
+        var row = await db.Members.SingleAsync(m => m.MemberId == created.MemberId);
+        Assert.Equal(created.FullName, row.FullName);
+        Assert.Equal(created.HeightCm, row.HeightCm);
+        Assert.Equal(1, row.DataRevision);
+    }
+
+    [Fact]
+    public async Task Update_rolls_back_member_when_audit_save_fails()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var created = await CreateService(db, CenterA, allowCreate: true, allowView: true)
+            .CreateAsync(ValidCreate(recruitment: "FD-RB"));
+        await SeedFinalDecisionAsync(db, created.MemberId, CenterA);
+
+        var failingUow = new Mock<IUnitOfWork>();
+        failingUow.Setup(u => u.BeginTransactionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new NoopTransaction());
+        failingUow.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("audit persist failed"));
+
+        var service = CreateService(
+            db,
+            CenterA,
+            allowCreate: true,
+            allowView: true,
+            allowEditAfterFinalDecision: true,
+            unitOfWork: failingUow.Object);
+
+        var request = ToUpdate(created, fullName: "يجب ألا يُحفظ");
+        request.EditReason = "سبب صالح";
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.UpdateAsync(created.MemberId, request));
+
+        db.ChangeTracker.Clear();
+        var row = await db.Members.AsNoTracking().SingleAsync(m => m.MemberId == created.MemberId);
+        Assert.Equal(created.FullName, row.FullName);
+        Assert.Equal(1, row.DataRevision);
+        Assert.Empty(await db.AuditEvents.AsNoTracking()
+            .Where(e => e.EventType == MemberService.MemberUpdateAfterFinalDecisionEventType)
+            .ToListAsync());
+    }
+
+    [Fact]
+    public async Task Update_and_issue_both_invoke_member_row_lock()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+
+        var members = new Mock<IMemberRepository>();
+        members.Setup(m => m.LockMemberForUpdateAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        members.Setup(m => m.GetByIdInCenterAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Member?)null);
+
+        var gate = new Mock<IPermissionGate>();
+        gate.Setup(g => g.EnsureLocalAsync(
+                MilitaryHealthPermissions.Members.CreateUpdate,
+                It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CenterA);
+        gate.Setup(g => g.EnsureLocalAsync(
+                MilitaryHealthPermissions.Clinical.FinalDecision,
+                It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CenterA);
+
+        var uow = new Mock<IUnitOfWork>();
+        uow.Setup(u => u.BeginTransactionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new NoopTransaction());
+
+        var config = new TypeAdapterConfig();
+        new MemberProfile().Register(config);
+        var memberService = new MemberService(
+            members.Object,
+            Mock.Of<IMemberImportBatchRepository>(),
+            new MedicalCenterRepository(db),
+            new ReferenceDataRepository(db),
+            new ClinicWorkspaceRepository(db),
+            new AuditLogRepository(db),
+            Mock.Of<ICrossCenterAccessService>(),
+            uow.Object,
+            new Mapper(config),
+            gate.Object,
+            new TestCurrentUser(),
+            new ExportService());
+
+        var memberId = Guid.NewGuid();
+        await Assert.ThrowsAsync<MemberNotFoundException>(() =>
+            memberService.UpdateAsync(memberId, ToUpdate(new MemberDetailsDto
+            {
+                MemberId = memberId,
+                FullName = "س",
+                MotherName = "أ",
+                BirthDate = DateOnly.FromDateTime(DateTime.UtcNow).AddYears(-20),
+                MaritalStatusId = 1,
+                Occupation = "موظف",
+                RecruitmentNumber = "L1",
+                RecruitmentCenterId = RecruitmentCenterId,
+                HasTattoo = false,
+                FileNumber = 1,
+                QueueNumber = 1,
+                QueueDate = DateOnly.FromDateTime(DateTime.UtcNow),
+                CurrentMedicalCenterId = CenterA,
+                CreatedAt = DateTimeOffset.UtcNow,
+                DataRevision = 1,
+                ExportStatus = "UNEXPORTED"
+            })));
+
+        members.Verify(m => m.LockMemberForUpdateAsync(memberId, It.IsAny<CancellationToken>()), Times.Once);
+
+        var postgres = new Mock<IPostgresSessionGuard>();
+        postgres.SetupGet(p => p.DefersFinalDecisionHistoryToDatabase).Returns(false);
+        var fdService = new Application.Services.Supervisor.FinalDecisionService(
+            gate.Object,
+            new TestCurrentUser(),
+            members.Object,
+            new ClinicWorkspaceRepository(db),
+            Mock.Of<ICenterClinicRepository>(),
+            new ReferenceDataRepository(db),
+            new MedicalCenterRepository(db),
+            Mock.Of<IMemberArchiveRepository>(),
+            new AuditLogRepository(db),
+            uow.Object,
+            postgres.Object);
+
+        await Assert.ThrowsAsync<MemberNotFoundException>(() =>
+            fdService.IssueAsync(memberId, new Application.Dtos.Supervisor.IssueFinalDecisionRequest
+            {
+                ResultStatusId = 1
+            }));
+
+        members.Verify(m => m.LockMemberForUpdateAsync(memberId, It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    private static async Task<Guid> SeedFinalDecisionAsync(AppDbContext db, Guid memberId, Guid centerId)
+    {
+        if (!await db.ResultStatuses.AnyAsync())
+        {
+            db.ResultStatuses.AddRange(
+                new ResultStatus { StatusId = 1, Code = "ACCEPTED", NameAr = "مقبول", IsActive = true },
+                new ResultStatus { StatusId = 2, Code = "REJECTED", NameAr = "مرفوض", IsActive = true },
+                new ResultStatus { StatusId = 3, Code = "DEFERRED", NameAr = "مؤجل", IsActive = true });
+        }
+
+        var decisionId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        db.FinalDecisions.Add(new FinalDecision
+        {
+            FinalDecisionId = decisionId,
+            MemberId = memberId,
+            CenterId = centerId,
+            SupervisorUserId = "actor-1",
+            ResultStatusId = 1,
+            DecidedAt = now,
+            UpdatedByUserId = "actor-1",
+            UpdatedAt = now
+        });
+        await db.SaveChangesAsync();
+        return decisionId;
     }
 
     [Fact]
@@ -933,9 +1246,15 @@ public class MemberServiceTests
         bool allowPrintReceipt = false,
         bool allowImport = false,
         bool allowExport = false,
-        bool allowViewCentral = false)
+        bool allowViewCentral = false,
+        bool allowEditAfterFinalDecision = false,
+        IUnitOfWork? unitOfWork = null,
+        IAuditLogRepository? audit = null)
     {
         var gate = new Mock<IPermissionGate>();
+        gate.Setup(g => g.Has(MilitaryHealthPermissions.Members.EditAfterFinalDecision))
+            .Returns(allowEditAfterFinalDecision);
+
         if (allowCreate)
         {
             gate.Setup(g => g.EnsureLocalAsync(
@@ -1036,10 +1355,14 @@ public class MemberServiceTests
                 .ThrowsAsync(new ForbiddenPermissionException());
         }
 
-        return CreateService(db, gate.Object);
+        return CreateService(db, gate.Object, unitOfWork, audit);
     }
 
-    private static MemberService CreateService(AppDbContext db, IPermissionGate gate)
+    private static MemberService CreateService(
+        AppDbContext db,
+        IPermissionGate gate,
+        IUnitOfWork? unitOfWork = null,
+        IAuditLogRepository? audit = null)
     {
         var config = new TypeAdapterConfig();
         new MemberProfile().Register(config);
@@ -1056,9 +1379,10 @@ public class MemberServiceTests
             new MemberImportBatchRepository(db),
             new MedicalCenterRepository(db),
             new ReferenceDataRepository(db),
-            new AuditLogRepository(db),
+            new ClinicWorkspaceRepository(db),
+            audit ?? new AuditLogRepository(db),
             crossCenter,
-            new TestUnitOfWork(db),
+            unitOfWork ?? new TestUnitOfWork(db),
             mapper,
             gate,
             currentUser,

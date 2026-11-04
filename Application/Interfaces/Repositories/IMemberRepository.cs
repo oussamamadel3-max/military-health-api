@@ -15,6 +15,13 @@ public interface IMemberRepository
         bool asNoTracking = false,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// يقفل صف المنتسب داخل المعاملة الحالية (<c>SELECT … FOR UPDATE</c> على PostgreSQL)
+    /// لمنع السباق مع إصدار/تعديل القرار النهائي أو تعديل الملف.
+    /// لا تأثير على InMemory (يُتخطى كما في أقفال التخصيص).
+    /// </summary>
+    Task LockMemberForUpdateAsync(Guid memberId, CancellationToken cancellationToken = default);
+
     Task<bool> RecruitmentNumberExistsAsync(
         string recruitmentNumber,
         Guid? excludingMemberId = null,

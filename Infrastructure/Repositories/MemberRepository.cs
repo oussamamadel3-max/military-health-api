@@ -44,6 +44,19 @@ public class MemberRepository : IMemberRepository
             cancellationToken);
     }
 
+    /// <inheritdoc />
+    public async Task LockMemberForUpdateAsync(Guid memberId, CancellationToken cancellationToken = default)
+    {
+        if (!IsNpgsqlProvider())
+            return;
+
+        // قفل صف داخل المعاملة الحالية؛ يُحرَّر تلقائياً عند Commit/Rollback.
+        await _context.Database.ExecuteSqlRawAsync(
+            """SELECT 1 FROM patient.member WHERE "memberId" = {0} FOR UPDATE""",
+            parameters: new object[] { memberId },
+            cancellationToken: cancellationToken);
+    }
+
     public Task<bool> RecruitmentNumberExistsAsync(
         string recruitmentNumber,
         Guid? excludingMemberId = null,

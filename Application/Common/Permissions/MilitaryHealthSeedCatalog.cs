@@ -32,6 +32,7 @@ public static class MilitaryHealthSeedCatalog
         new(MilitaryHealthPermissions.UserCenters.Manage, "إسناد المستخدمين إلى المراكز", "UserCenters.Manage"),
         new(MilitaryHealthPermissions.UserClinics.Manage, "إسناد الأطباء إلى عيادات المراكز", "UserClinics.Manage"),
         new(MilitaryHealthPermissions.Members.CreateUpdate, "إنشاء ملف المنتسب وتعديله", "Members.CreateUpdate"),
+        new(MilitaryHealthPermissions.Members.EditAfterFinalDecision, "تعديل بيانات المنتسب بعد القرار النهائي", "Members.EditAfterFinalDecision"),
         new(MilitaryHealthPermissions.Members.View, "البحث وعرض ملف المنتسب", "Members.View"),
         new(MilitaryHealthPermissions.Members.ViewCentral, "البحث وعرض ملف المنتسب عبر المراكز", "Members.ViewCentral"),
         new(MilitaryHealthPermissions.Members.PrintReceipt, "طباعة الإيصال والباركود", "Members.PrintReceipt"),
@@ -142,6 +143,9 @@ public static class MilitaryHealthSeedCatalog
         // إنشاء ملف المنتسب وتعديله
         Grant("ReceptionClerk", MilitaryHealthPermissions.Members.CreateUpdate),
         Grant("Supervisor", MilitaryHealthPermissions.Members.CreateUpdate),
+
+        // تعديل بيانات المنتسب بعد القرار النهائي (FR-024 A5) — دور إداري معتمد فقط
+        Grant("Supervisor", MilitaryHealthPermissions.Members.EditAfterFinalDecision),
 
         // البحث وعرض ملف المنتسب
         Grant("SuperAdmin", MilitaryHealthPermissions.Members.View),

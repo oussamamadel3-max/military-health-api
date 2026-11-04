@@ -42,6 +42,15 @@ public class MemberPhysicalDeleteNotAllowedException : BusinessException
     }
 }
 
+/// <summary>تعارض بيانات/تزامن عند تعديل المنتسب (مثل أكثر من قرار نهائي أو سباق مع الإصدار).</summary>
+public class MemberUpdateConflictException : BusinessException
+{
+    public MemberUpdateConflictException(string message = "تعارض أثناء تعديل ملف المنتسب. أعد المحاولة.")
+        : base(message, "MEMBER_UPDATE_CONFLICT", 409)
+    {
+    }
+}
+
 public class MemberImportException : BusinessException
 {
     public MemberImportException(string message, string errorCode = "MEMBER_IMPORT_INVALID", int status = 400)
