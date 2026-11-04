@@ -984,6 +984,10 @@ public class MemberService : IMemberService
             };
         }
 
+        // علم عرض فقط: وجود قرار نهائي دون كشف نتيجته (لدعم واجهة FR-024 A5).
+        dto.HasFinalDecision = await _clinicWorkspace.QueryFinalDecisions(asNoTracking: true)
+            .AnyAsync(d => d.MemberId == member.MemberId, cancellationToken);
+
         return dto;
     }
 

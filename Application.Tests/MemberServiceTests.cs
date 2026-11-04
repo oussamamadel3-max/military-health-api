@@ -1024,6 +1024,22 @@ public class MemberServiceTests
         Assert.False(details.HasGeneralNotesAlert);
         Assert.Empty(details.GeneralNotes);
         Assert.Null(details.LastTransfer);
+        Assert.False(details.HasFinalDecision);
+    }
+
+    [Fact]
+    public async Task GetById_sets_has_final_decision_true_when_decision_exists()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var service = CreateService(db, CenterA, allowCreate: true, allowView: true);
+        var created = await service.CreateAsync(ValidCreate(recruitment: "HAS-FD"));
+        Assert.False(created.HasFinalDecision);
+
+        await SeedFinalDecisionAsync(db, created.MemberId, CenterA);
+
+        var details = await service.GetByIdAsync(created.MemberId);
+        Assert.True(details.HasFinalDecision);
     }
 
     [Fact]

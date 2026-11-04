@@ -115,6 +115,12 @@ public class MemberDetailsDto
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 
+    /// <summary>
+    /// هل يوجد قرار نهائي معتمد للمنتسب؟ يُستخدم لضبط واجهة التعديل (قفل طبي / إلزام سبب)
+    /// دون كشف نتيجة القرار أو تفاصيله. متاح ضمن صلاحية عرض الملف.
+    /// </summary>
+    public bool HasFinalDecision { get; set; }
+
     /// <summary>تنبيه الملاحظات العامة عندما توجد ملاحظات نشطة غير فارغة.</summary>
     public bool HasGeneralNotesAlert { get; set; }
 
