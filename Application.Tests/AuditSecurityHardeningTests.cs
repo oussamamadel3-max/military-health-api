@@ -219,6 +219,45 @@ public class AuditSecurityHardeningTests
         Assert.False(root.TryGetProperty("JwtSettings", out _));
     }
 
+    [Theory]
+    [InlineData("appsettings.json")]
+    [InlineData("appsettings.Development.json")]
+    [InlineData("appsettings.Testing.json")]
+    public void Tracked_appsettings_do_not_embed_connection_or_jwt_secrets(string fileName)
+    {
+        var path = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory, "..", "..", "..", "..", "API", fileName));
+        Assert.True(File.Exists(path), path);
+        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+        var root = doc.RootElement;
+
+        if (root.TryGetProperty("ConnectionStrings", out var cs)
+            && cs.TryGetProperty("DefaultConnection", out var conn))
+        {
+            var value = conn.GetString() ?? string.Empty;
+            Assert.True(string.IsNullOrWhiteSpace(value), $"{fileName} must not contain DefaultConnection secret.");
+        }
+
+        if (root.TryGetProperty("JwtSettings", out var jwt)
+            && jwt.TryGetProperty("Key", out var key))
+        {
+            var value = key.GetString() ?? string.Empty;
+            Assert.True(string.IsNullOrWhiteSpace(value), $"{fileName} must not contain JwtSettings:Key secret.");
+        }
+    }
+
+    [Fact]
+    public void Local_example_documents_required_secret_keys()
+    {
+        var path = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory, "..", "..", "..", "..", "API", "appsettings.Local.example.json"));
+        Assert.True(File.Exists(path), path);
+        var text = File.ReadAllText(path);
+        Assert.Contains("DefaultConnection", text, StringComparison.Ordinal);
+        Assert.Contains("JwtSettings", text, StringComparison.Ordinal);
+        Assert.Contains("REPLACE", text, StringComparison.Ordinal);
+    }
+
     private static AuditEvent Ev(
         string actor,
         string eventType,

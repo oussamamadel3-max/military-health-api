@@ -22,7 +22,15 @@ namespace API.Extensions
             var jwtSettingsSection = configuration.GetSection("JwtSettings");
             services.Configure<JwtSettings>(jwtSettingsSection);
 
-            var jwtSettings = jwtSettingsSection.Get<JwtSettings>();
+            var jwtSettings = jwtSettingsSection.Get<JwtSettings>()
+                ?? throw new InvalidOperationException("JwtSettings section is missing from configuration.");
+
+            if (string.IsNullOrWhiteSpace(jwtSettings.Key))
+            {
+                throw new InvalidOperationException(
+                    "JwtSettings:Key is not configured. Set JwtSettings__Key via environment variables or appsettings.Local.json (Development only).");
+            }
+
             services.AddSingleton(sp => sp.GetRequiredService<IOptions<JwtSettings>>().Value);
 
             services.AddAuthentication(options =>

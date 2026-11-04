@@ -7,6 +7,17 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
+if (builder.Environment.IsDevelopment())
+{
+    builder.Configuration.AddJsonFile(
+        ConfigurationSecretsExtensions.LocalSettingsFileName,
+        optional: true,
+        reloadOnChange: true);
+}
+
+if (!EF.IsDesignTime)
+    ConfigurationSecretsExtensions.ValidateRequiredSecrets(builder.Configuration, builder.Environment);
+
 builder.WebHost.ConfigureKestrel(options => options.AddServerHeader = false);
 
 #region ================== CONFIGURE SERVICES ==================
