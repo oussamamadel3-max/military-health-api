@@ -488,6 +488,8 @@ public class UserService : IUserService
 
         var statusChanging = dto.isActive.HasValue && dto.isActive.Value != user.IsActive;
         var rolesProvided = dto.roles != null;
+        // roles: null → leave unchanged; roles: [] → invalid (not an implicit clear).
+        MinimumActiveRoleGuard.EnsurePatchRolesNotEmptyClear(dto.roles);
 
         var required = new List<string> { SystemPermissions.UserManagement.Edit };
         if (statusChanging) required.Add(SystemPermissions.UserManagement.ChangeStatus);
@@ -803,11 +805,8 @@ public class UserService : IUserService
 
         await EnsureCanManageTargetAsync(user.Id);
 
-        var requested = new List<string>();
-        if (dto.RoleIds is { Count: > 0 })
-            requested.AddRange(dto.RoleIds.Where(x => !string.IsNullOrWhiteSpace(x)));
-        if (dto.RoleNames is { Count: > 0 })
-            requested.AddRange(dto.RoleNames.Where(n => !string.IsNullOrWhiteSpace(n))!);
+        var requested = MinimumActiveRoleGuard.CollectTokens(dto.RoleIds, dto.RoleNames);
+        MinimumActiveRoleGuard.EnsureRequestContainsRoleToken(requested);
 
         using var tx = await _unitOfWork.BeginTransactionAsync();
         try
@@ -971,7 +970,10 @@ public class UserService : IUserService
                 throw new InvalidUserDataException(string.Join(", ", updateRes.Errors.Select(e => e.Description)));
 
             if (updatedUser.RoleIds is not null)
+            {
+                MinimumActiveRoleGuard.EnsureRequestContainsRoleToken(updatedUser.RoleIds);
                 await ApplyScopedRoleSyncAsync(userId, updatedUser.RoleIds, updatedUser.CenterId);
+            }
 
             await _unitOfWork.SaveChangesAsync();
 
@@ -1329,13 +1331,26 @@ public class UserService : IUserService
                     row.Role?.Scope ?? RoleScope.Center))
                 .ToList();
 
-            if (toRemove.Count > 0)
-                RevokeRoleAssignments(toRemove);
-
-            if (toAdd.Count > 0)
-                _userRepository.AddRoleAssociations(toAdd.Select(r => NewRoleLink(userId, r.Id, scopeCenterId)));
-
             if (toAdd.Count > 0 || toRemove.Count > 0)
+            {
+                var allActiveRows = await _userRepository.QueryRoleAssociations(asNoTracking: true)
+                    .Include(ura => ura.Role)
+                    .Where(ura => ura.UserId == userId && ura.IsActive && ura.Role != null && ura.Role.IsActive)
+                    .ToListAsync();
+                var allActive = allActiveRows
+                    .Select(ura => new MinimumActiveRoleGuard.ActiveRoleKey(ura.RoleId, ura.CenterId));
+                var removing = toRemove.Select(r => new MinimumActiveRoleGuard.ActiveRoleKey(r.RoleId, r.CenterId));
+                var adding = toAdd.Select(r => new MinimumActiveRoleGuard.ActiveRoleKey(r.Id, scopeCenterId));
+                MinimumActiveRoleGuard.EnsureProjectedActiveRolesRemain(allActive, removing, adding);
+
+                if (toRemove.Count > 0)
+                    RevokeRoleAssignments(toRemove);
+
+                if (toAdd.Count > 0)
+                    _userRepository.AddRoleAssociations(toAdd.Select(r => NewRoleLink(userId, r.Id, scopeCenterId)));
+
                 await _unitOfWork.SaveChangesAsync();
+                await MinimumActiveRoleGuard.EnsurePersistedActiveRoleRemainsAsync(_userRepository, userId);
+            }
         }
 }

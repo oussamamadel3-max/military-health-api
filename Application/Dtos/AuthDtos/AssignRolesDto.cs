@@ -1,25 +1,46 @@
-using Application.Attributes;
+using Application.Common.Security;
 using System.ComponentModel.DataAnnotations;
 
 namespace Application.Dtos.AuthDtos;
 
-public class AssignRolesDto
+/// <summary>
+/// Scoped role sync for a user. RoleIds and RoleNames are merged and de-duplicated
+/// (case-insensitive). At least one valid non-blank token is required; empty sync
+/// is rejected — clearing a center's last roles uses the explicit revoke path with
+/// <see cref="MinimumActiveRoleGuard"/>.
+/// </summary>
+public class AssignRolesDto : IValidatableObject
 {
     [Required(ErrorMessage = "معرف المستخدم مطلوب.")]
     [StringLength(450, MinimumLength = 1)]
     public string UserId { get; set; } = null!;
 
     /// <summary>
-    /// قد تكون فارغة لمزامنة نهائية بلا أدوار (مع منطق الحماية في الخدمة).
+    /// Role identifiers to keep in the sync scope. Merged with <see cref="RoleNames"/>.
+    /// Must yield at least one non-blank token together with RoleNames.
     /// </summary>
-    public List<string> RoleIds { get; set; } = new List<string>();
+    public List<string>? RoleIds { get; set; }
 
-    public List<string>? RoleNames { get; set; } = new List<string>();
+    /// <summary>
+    /// Role names to keep in the sync scope. Merged with <see cref="RoleIds"/>.
+    /// Whitespace-only entries are ignored; if nothing valid remains, validation fails.
+    /// </summary>
+    public List<string>? RoleNames { get; set; }
 
     /// <summary>
     /// نطاق المزامنة. لمدير المركز يجب أن يطابق المركز النشط أو يُترك فارغاً.
     /// </summary>
     public Guid? CenterId { get; set; }
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        if (MinimumActiveRoleGuard.CollectTokens(RoleIds, RoleNames).Count == 0)
+        {
+            yield return new ValidationResult(
+                MinimumActiveRoleGuard.AtLeastOneRoleMessage,
+                new[] { nameof(RoleIds), nameof(RoleNames) });
+        }
+    }
 }
 
 public class RemoveRoleDto

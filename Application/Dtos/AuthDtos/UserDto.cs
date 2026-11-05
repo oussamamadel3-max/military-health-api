@@ -80,6 +80,11 @@ public class UpdateUserPatchRequest
     public string? rankOrTitle { get; set; }
 
     public bool? isActive { get; set; }
+
+    /// <summary>
+    /// null / omitted: leave roles unchanged. Empty list is rejected (not an implicit clear).
+    /// Non-empty list triggers scoped sync with MinimumActiveRoleGuard.
+    /// </summary>
     public List<RoleLiteDto>? roles { get; set; }
 
     /// <summary>
@@ -196,6 +201,9 @@ public class UpdateUserWithRolesDto
     [StringLength(254)]
     public required string Email { get; set; }
 
+    /// <summary>
+    /// null: leave roles unchanged. Empty list is rejected; use explicit revoke to remove roles.
+    /// </summary>
     public List<string>? RoleIds { get; set; }
 
     /// <summary>
