@@ -14,9 +14,19 @@ public static class CookieHeaderAssertions
         return headers;
     }
 
+    /// <summary>
+    /// Finds a Set-Cookie that carries a non-empty value (skips delete markers <c>name=;</c>).
+    /// </summary>
     public static string? FindSetCookie(HttpResponseMessage response, string cookieName)
         => GetSetCookieHeaders(response)
-            .FirstOrDefault(v => v.StartsWith(cookieName + "=", StringComparison.OrdinalIgnoreCase));
+            .FirstOrDefault(v =>
+                v.StartsWith(cookieName + "=", StringComparison.OrdinalIgnoreCase)
+                && !v.StartsWith(cookieName + "=;", StringComparison.OrdinalIgnoreCase));
+
+    public static IReadOnlyList<string> FindAllSetCookies(HttpResponseMessage response, string cookieName)
+        => GetSetCookieHeaders(response)
+            .Where(v => v.StartsWith(cookieName + "=", StringComparison.OrdinalIgnoreCase))
+            .ToList();
 
     public static void AssertAuthCookiesIssued(HttpResponseMessage response)
     {
@@ -28,20 +38,76 @@ public static class CookieHeaderAssertions
         Assert.Contains("httponly", refresh!, StringComparison.OrdinalIgnoreCase);
     }
 
-    public static void AssertRefreshPathIsRoot(HttpResponseMessage response)
+    public static void AssertRefreshPathIsEndpoint(HttpResponseMessage response)
     {
         var refresh = FindSetCookie(response, AuthCookieNames.RefreshToken);
         Assert.False(string.IsNullOrWhiteSpace(refresh));
-        Assert.True(
-            Regex.IsMatch(refresh!, @";\s*path=/($|;|\s)", RegexOptions.IgnoreCase)
-            || refresh!.Contains("; path=/", StringComparison.OrdinalIgnoreCase)
-            || refresh.Contains(";path=/", StringComparison.OrdinalIgnoreCase),
-            $"Expected Path=/ on refresh cookie (current contract), got: {refresh}");
+        Assert.Contains(
+            "path=" + AuthCookieNames.RefreshTokenPath,
+            refresh!,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.False(
+            HasExactRootPath(refresh!),
+            "Refresh cookie must not use Path=/ after MH-SEC-054");
+    }
+
+    public static void AssertRefreshLegacyRootClearedOnIssue(HttpResponseMessage response)
+    {
+        var refreshHeaders = FindAllSetCookies(response, AuthCookieNames.RefreshToken);
+        Assert.Contains(
+            refreshHeaders,
+            h => h.StartsWith(AuthCookieNames.RefreshToken + "=;", StringComparison.OrdinalIgnoreCase)
+                 && HasExactRootPath(h));
+    }
+
+    public static void AssertRefreshDualDeleteOnClear(HttpResponseMessage response)
+    {
+        var refreshHeaders = FindAllSetCookies(response, AuthCookieNames.RefreshToken)
+            .Where(h => h.StartsWith(AuthCookieNames.RefreshToken + "=;", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        Assert.Contains(refreshHeaders, HasExactRootPath);
+        Assert.Contains(
+            refreshHeaders,
+            h => h.Contains("path=" + AuthCookieNames.RefreshTokenPath, StringComparison.OrdinalIgnoreCase));
     }
 
     public static void RemoveCookie(CookieContainer container, Uri baseAddress, string name)
     {
-        foreach (var cookie in container.GetCookies(baseAddress).Cast<Cookie>().Where(c => c.Name == name).ToList())
+        foreach (var cookie in EnumerateCookies(container, baseAddress, name).ToList())
             cookie.Expired = true;
     }
+
+    /// <summary>
+    /// CookieContainer.GetCookies(root) omits Path-scoped refresh cookies — query both root and Refresh path.
+    /// </summary>
+    public static IEnumerable<Cookie> EnumerateCookies(CookieContainer container, Uri baseAddress, string? name = null)
+    {
+        var uris = new[]
+        {
+            baseAddress,
+            new Uri(baseAddress, AuthCookieNames.RefreshTokenPath)
+        };
+
+        foreach (var uri in uris.Distinct())
+        {
+            foreach (var cookie in container.GetCookies(uri).Cast<Cookie>())
+            {
+                if (name is null || cookie.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                    yield return cookie;
+            }
+        }
+    }
+
+    public static string? TryGetCookieValue(CookieContainer container, Uri baseAddress, string name)
+        => EnumerateCookies(container, baseAddress, name)
+            .FirstOrDefault(c => !c.Expired && !string.IsNullOrEmpty(c.Value))
+            ?.Value;
+
+    public static Cookie? TryGetLiveCookie(CookieContainer container, Uri baseAddress, string name)
+        => EnumerateCookies(container, baseAddress, name)
+            .FirstOrDefault(c => !c.Expired && !string.IsNullOrEmpty(c.Value));
+
+    private static bool HasExactRootPath(string setCookie)
+        => Regex.IsMatch(setCookie, @";\s*path=/(;|$)", RegexOptions.IgnoreCase)
+           || setCookie.EndsWith("path=/", StringComparison.OrdinalIgnoreCase);
 }

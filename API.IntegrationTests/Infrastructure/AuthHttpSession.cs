@@ -120,7 +120,11 @@ public sealed class AuthHttpSession
         => CookieHeaderAssertions.RemoveCookie(_cookies, _client.BaseAddress!, AuthCookieNames.AccessToken);
 
     public bool HasCookie(string name)
-        => _cookies.GetCookies(_client.BaseAddress!).Cast<Cookie>().Any(c => c.Name == name && !c.Expired);
+        => CookieHeaderAssertions.EnumerateCookies(_cookies, _client.BaseAddress!, name)
+            .Any(c => !c.Expired && !string.IsNullOrEmpty(c.Value));
+
+    public string? GetCookieValue(string name)
+        => CookieHeaderAssertions.TryGetCookieValue(_cookies, _client.BaseAddress!, name);
 
     public async Task<JsonDocument> ReadJsonAsync(HttpResponseMessage response)
     {
@@ -204,6 +208,20 @@ public sealed class AuthHttpSession
                     path = segment["path=".Length..];
                 else if (segment.Equals("httponly", StringComparison.OrdinalIgnoreCase))
                     httpOnly = true;
+            }
+
+            // Empty value = browser delete for that Path (MH-SEC-054 dual-delete).
+            if (string.IsNullOrEmpty(pair[1]))
+            {
+                foreach (var existing in _cookies.GetCookies(uri).Cast<Cookie>()
+                             .Where(c => c.Name.Equals(pair[0], StringComparison.OrdinalIgnoreCase)
+                                         && c.Path.Equals(path, StringComparison.OrdinalIgnoreCase))
+                             .ToList())
+                {
+                    existing.Expired = true;
+                }
+
+                return;
             }
 
             _cookies.Add(uri, new Cookie(pair[0], pair[1], path)

@@ -308,6 +308,46 @@ public class SessionLifecycleTests
         Assert.Contains("samesite=lax", prodCookies, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void Refresh_cookie_is_scoped_to_refresh_endpoint_and_clears_legacy_root()
+    {
+        var context = new DefaultHttpContext();
+        Cookies(Environments.Production).SetAuthCookies(context.Response, "access-secret", RawRefresh);
+
+        var headers = context.Response.Headers.SetCookie.ToList();
+        var access = Assert.Single(headers, h => h.StartsWith(AuthCookieNames.AccessToken + "=", StringComparison.OrdinalIgnoreCase)
+                                                 && !h.StartsWith(AuthCookieNames.AccessToken + "=;", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("path=/", access, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("path=" + AuthCookieNames.RefreshTokenPath, access, StringComparison.OrdinalIgnoreCase);
+
+        var refreshIssued = Assert.Single(headers, h => h.StartsWith(AuthCookieNames.RefreshToken + "=", StringComparison.OrdinalIgnoreCase)
+                                                        && !h.StartsWith(AuthCookieNames.RefreshToken + "=;", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("path=" + AuthCookieNames.RefreshTokenPath, refreshIssued, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("httponly", refreshIssued, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("secure", refreshIssued, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("samesite=lax", refreshIssued, StringComparison.OrdinalIgnoreCase);
+
+        Assert.Contains(headers, h => h.StartsWith(AuthCookieNames.RefreshToken + "=;", StringComparison.OrdinalIgnoreCase)
+                                      && System.Text.RegularExpressions.Regex.IsMatch(h, @";\s*path=/(;|$)", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+    }
+
+    [Fact]
+    public void Clear_auth_cookies_dual_deletes_refresh_on_root_and_endpoint_paths()
+    {
+        var context = new DefaultHttpContext();
+        Cookies(Environments.Development).ClearAuthCookies(context.Response);
+        var headers = context.Response.Headers.SetCookie.ToList();
+
+        var refreshDeletes = headers
+            .Where(h => h.StartsWith(AuthCookieNames.RefreshToken + "=;", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        Assert.Equal(2, refreshDeletes.Count);
+        Assert.Contains(refreshDeletes, h => System.Text.RegularExpressions.Regex.IsMatch(
+            h, @";\s*path=/(;|$)", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+        Assert.Contains(refreshDeletes, h => h.Contains(
+            "path=" + AuthCookieNames.RefreshTokenPath, StringComparison.OrdinalIgnoreCase));
+    }
+
     private static void AssertDeleted(string header, string name)
         => Assert.Contains(name + "=;", header, StringComparison.OrdinalIgnoreCase);
 
