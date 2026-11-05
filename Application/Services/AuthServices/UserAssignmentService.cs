@@ -389,8 +389,25 @@ public class UserAssignmentService : IUserAssignmentService
                     cancellationToken)
                 ?? throw new InvalidUserDataException("لا يوجد إسناد دور فعّال مطابق.");
 
+            var allActiveRows = await _userRepository.QueryRoleAssociations(asNoTracking: true)
+                .Include(ura => ura.Role)
+                .Where(ura => ura.UserId == user.Id && ura.IsActive && ura.Role != null && ura.Role.IsActive)
+                .ToListAsync(cancellationToken);
+            var allActive = allActiveRows
+                .Select(ura => new MinimumActiveRoleGuard.ActiveRoleKey(ura.RoleId, ura.CenterId));
+
+            // Reject before mutation whenever the projected global active-role set is empty.
+            MinimumActiveRoleGuard.EnsureProjectedActiveRolesRemain(
+                allActive,
+                removing: new[] { new MinimumActiveRoleGuard.ActiveRoleKey(row.RoleId, row.CenterId) },
+                adding: Array.Empty<MinimumActiveRoleGuard.ActiveRoleKey>());
+
             IamRetention.Revoke(row, actorId, reason);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            // Post-save checks (same DbContext/TX): concurrency + independent IAM admin guard.
+            await MinimumActiveRoleGuard.EnsurePersistedActiveRoleRemainsAsync(
+                _userRepository, user.Id, cancellationToken);
 
             var afterPerms = await IamAdminGuard.GetEffectivePermissionNamesAsync(
                 _userRepository, _roleRepository, user.Id, cancellationToken);
