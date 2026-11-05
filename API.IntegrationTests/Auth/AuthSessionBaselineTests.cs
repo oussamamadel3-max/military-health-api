@@ -98,6 +98,64 @@ public sealed class AuthSessionBaselineTests
     }
 
     [Fact]
+    [Trait("Regression", "MH-SEC-052")]
+    public async Task Logout_without_refresh_cookie_rejects_reattached_access_token()
+    {
+        var session = _factory.CreateSession();
+        Assert.Equal(HttpStatusCode.OK, (await session.LoginAsync(AuthTestSeed.ActiveUserName, AuthTestSeed.ActivePassword)).StatusCode);
+
+        var accessValue = session.Cookies.GetCookies(session.Client.BaseAddress!)[AuthCookieNames.AccessToken]?.Value;
+        Assert.False(string.IsNullOrWhiteSpace(accessValue));
+
+        session.DropRefreshCookie();
+        Assert.Equal(HttpStatusCode.OK, (await session.LogoutAsync()).StatusCode);
+
+        session.Cookies.Add(session.Client.BaseAddress!, new System.Net.Cookie(AuthCookieNames.AccessToken, accessValue!)
+        {
+            HttpOnly = true,
+            Path = "/"
+        });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await session.MeAsync()).StatusCode);
+    }
+
+    [Fact]
+    [Trait("Regression", "MH-SEC-052")]
+    public async Task Logout_without_refresh_cookie_rejects_replayed_refresh_token()
+    {
+        var session = _factory.CreateSession();
+        Assert.Equal(HttpStatusCode.OK, (await session.LoginAsync(AuthTestSeed.ActiveUserName, AuthTestSeed.ActivePassword)).StatusCode);
+
+        var refreshValue = session.Cookies.GetCookies(session.Client.BaseAddress!)[AuthCookieNames.RefreshToken]?.Value;
+        Assert.False(string.IsNullOrWhiteSpace(refreshValue));
+        session.DropRefreshCookie();
+        Assert.Equal(HttpStatusCode.OK, (await session.LogoutAsync()).StatusCode);
+
+        session.Cookies.Add(session.Client.BaseAddress!, new System.Net.Cookie(AuthCookieNames.RefreshToken, refreshValue!)
+        {
+            HttpOnly = true,
+            Path = "/"
+        });
+        Assert.Equal(HttpStatusCode.Unauthorized, (await session.RefreshAsync()).StatusCode);
+    }
+
+    [Fact]
+    [Trait("Regression", "MH-SEC-052")]
+    public async Task Logout_without_refresh_on_first_device_leaves_second_device_session_alive()
+    {
+        var first = _factory.CreateSession();
+        var second = _factory.CreateSession();
+        Assert.Equal(HttpStatusCode.OK, (await first.LoginAsync(AuthTestSeed.ActiveUserName, AuthTestSeed.ActivePassword)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await second.LoginAsync(AuthTestSeed.ActiveUserName, AuthTestSeed.ActivePassword)).StatusCode);
+
+        first.DropRefreshCookie();
+        Assert.Equal(HttpStatusCode.OK, (await first.LogoutAsync()).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await first.MeAsync()).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await second.MeAsync()).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await second.RefreshAsync()).StatusCode);
+    }
+
+    [Fact]
     public async Task Logout_repeated_does_not_return_500()
     {
         var session = _factory.CreateSession();

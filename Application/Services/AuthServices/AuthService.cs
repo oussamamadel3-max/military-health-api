@@ -249,13 +249,48 @@ namespace Application.Services.AuthServices
             }
         }
 
-        public async Task LogoutAsync(string? refreshToken, Guid? activeCenterId = null)
+        /// <inheritdoc />
+        public async Task LogoutAsync(string? refreshToken, Guid? sessionFamilyId = null, Guid? activeCenterId = null)
         {
-            if (!string.IsNullOrWhiteSpace(refreshToken))
-                await _tokenService.RevokeRefreshTokenAsync(refreshToken);
-
             var actor = string.IsNullOrWhiteSpace(_currentUser.UserId) ? null : _currentUser.UserId;
-            await RecordLoginAsync(actor, true, SessionRefresh.LogoutReason, "تسجيل الخروج", activeCenterId, "Logout");
+
+            bool ended;
+            try
+            {
+                ended = await _tokenService.EndSessionFamilyAsync(sessionFamilyId, refreshToken);
+            }
+            catch (Exception)
+            {
+                // Technical failure while the revoke path ran — never claim SUCCESS if we could not finish.
+                await RecordLoginAsync(
+                    actor,
+                    false,
+                    "logout_failed",
+                    "تعذر إبطال الجلسة",
+                    activeCenterId,
+                    "Logout");
+                throw;
+            }
+
+            if (!ended)
+            {
+                await RecordLoginAsync(
+                    actor,
+                    false,
+                    "logout_persist_failed",
+                    "تعذر إبطال الجلسة",
+                    activeCenterId,
+                    "Logout");
+                throw new InvalidOperationException("تعذر إكمال تسجيل الخروج.");
+            }
+
+            await RecordLoginAsync(
+                actor,
+                true,
+                SessionRefresh.LogoutReason,
+                "تسجيل الخروج",
+                activeCenterId,
+                "Logout");
         }
 
         private static LoginSessionDto BuildSession(

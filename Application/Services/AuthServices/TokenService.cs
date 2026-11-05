@@ -254,6 +254,39 @@ namespace Application.Services.AuthServices
             await _unitOfWork.SaveChangesAsync();
             return true;
         }
+
+        /// <inheritdoc />
+        public async Task<bool> EndSessionFamilyAsync(
+            Guid? sessionFamilyId,
+            string? rawRefreshToken,
+            CancellationToken cancellationToken = default)
+        {
+            var familyId = sessionFamilyId;
+            if (familyId is null && !string.IsNullOrWhiteSpace(rawRefreshToken))
+            {
+                var tokenHash = RefreshTokenProtector.HashToken(rawRefreshToken);
+                var known = await _refreshTokenRepository.GetByTokenAsync(tokenHash, cancellationToken);
+                familyId = known?.TokenFamilyId;
+            }
+
+            // Nothing targetable — treat as already ended (idempotent empty logout).
+            if (familyId is null)
+                return true;
+
+            var now = DateTime.UtcNow;
+            if (!await _refreshTokenRepository.HasActiveInFamilyAsync(familyId.Value, now, cancellationToken))
+                return true;
+
+            if (!string.IsNullOrWhiteSpace(rawRefreshToken))
+                await RevokeRefreshTokenAsync(rawRefreshToken);
+
+            await _refreshTokenRepository.RevokeActiveFamilyAsync(
+                familyId.Value,
+                SessionRefresh.LogoutReason,
+                cancellationToken);
+
+            return !await _refreshTokenRepository.HasActiveInFamilyAsync(familyId.Value, DateTime.UtcNow, cancellationToken);
+        }
         #endregion
     }
 }
