@@ -251,6 +251,8 @@ public class LoginSessionTests
 
         var controller = File.ReadAllText(Path.Combine(root, "API", "Controllers", "AuthControllers", "AuthController.cs"));
         Assert.Contains("[EnableRateLimiting(RateLimitPolicies.Login)]", controller, StringComparison.Ordinal);
+        Assert.Contains("[EnableRateLimiting(RateLimitPolicies.Refresh)]", controller, StringComparison.Ordinal);
+        Assert.Contains("\"Refresh\"", settings, StringComparison.Ordinal);
         Assert.Contains("_cookieService.SetAuthCookies", controller, StringComparison.Ordinal);
         Assert.Contains("_csrfService.IssueCsrf", controller, StringComparison.Ordinal);
         Assert.Contains("new LoginResponseDto { CsrfToken = csrfToken }", controller, StringComparison.Ordinal);

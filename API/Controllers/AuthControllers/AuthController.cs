@@ -61,6 +61,7 @@ namespace API.Controllers.AuthControllers
             return ApiResponse.Success("CSRF token generated", new CsrfResponseDto { CsrfToken = csrfToken });
         }
 
+        [EnableRateLimiting(RateLimitPolicies.Refresh)]
         [HttpPost("[action]")]
         public async Task<IResult> Refresh()
         {

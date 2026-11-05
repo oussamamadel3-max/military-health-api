@@ -6,6 +6,10 @@ public sealed class RateLimitingSettings
 
     public GlobalRateLimitSettings Global { get; set; } = new();
     public LoginRateLimitSettings Login { get; set; } = new();
+
+    /// <summary>MH-SEC-055 / D3: same shape as Login (sliding window); IP-only partition at policy layer.</summary>
+    public LoginRateLimitSettings Refresh { get; set; } = new();
+
     public ReportsRateLimitSettings Reports { get; set; } = new();
     public PublicRateLimitSettings Public { get; set; } = new();
 }

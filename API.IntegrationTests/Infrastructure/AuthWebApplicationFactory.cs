@@ -66,6 +66,10 @@ public sealed class AuthWebApplicationFactory : WebApplicationFactory<Program>, 
         builder.UseSetting("RateLimiting:Login:PermitLimit", "100");
         builder.UseSetting("RateLimiting:Login:WindowSeconds", "60");
         builder.UseSetting("RateLimiting:Login:SegmentsPerWindow", "6");
+        // MH-SEC-055 / D3 Testing budget (2/60s). Sessions use unique X-Forwarded-For to avoid cross-test bleed.
+        builder.UseSetting("RateLimiting:Refresh:PermitLimit", "2");
+        builder.UseSetting("RateLimiting:Refresh:WindowSeconds", "60");
+        builder.UseSetting("RateLimiting:Refresh:SegmentsPerWindow", "6");
         builder.UseSetting("RateLimiting:Global:Authenticated:TokenLimit", "1000");
         builder.UseSetting("RateLimiting:Global:Authenticated:TokensPerPeriod", "1000");
         builder.UseSetting("RateLimiting:Global:Anonymous:TokenLimit", "1000");

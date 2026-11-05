@@ -99,6 +99,43 @@ public sealed class AuthSessionBaselineTests
     }
 
     [Fact]
+    [Trait("Regression", "MH-SEC-055")]
+    public async Task Refresh_rate_limit_returns_429_after_testing_permit_limit()
+    {
+        // Testing Refresh PermitLimit=2 (D3) — third Refresh in the window must be 429, not 401.
+        var session = _factory.CreateSession();
+        Assert.Equal(HttpStatusCode.OK, (await session.LoginAsync(AuthTestSeed.ActiveUserName, AuthTestSeed.ActivePassword)).StatusCode);
+
+        Assert.Equal(HttpStatusCode.OK, (await session.RefreshAsync()).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await session.RefreshAsync()).StatusCode);
+
+        var limited = await session.RefreshAsync();
+        Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
+        var body = await limited.Content.ReadAsStringAsync();
+        Assert.Contains("rate_limit_exceeded", body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(session.GetCookieValue(AuthCookieNames.RefreshToken) ?? "___", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Regression", "MH-SEC-055")]
+    public async Task Invalid_refresh_within_limit_returns_401_not_429()
+    {
+        var session = _factory.CreateSession();
+        Assert.Equal(HttpStatusCode.OK, (await session.LoginAsync(AuthTestSeed.ActiveUserName, AuthTestSeed.ActivePassword)).StatusCode);
+
+        session.DropRefreshCookie();
+        session.Cookies.Add(session.Client.BaseAddress!, new System.Net.Cookie(AuthCookieNames.RefreshToken, "not-a-valid-refresh")
+        {
+            HttpOnly = true,
+            Path = AuthCookieNames.RefreshTokenPath
+        });
+
+        var response = await session.RefreshAsync();
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.NotEqual(HttpStatusCode.TooManyRequests, response.StatusCode);
+    }
+
+    [Fact]
     [Trait("Regression", "MH-SEC-054")]
     public async Task Refresh_cookie_path_is_endpoint_scoped_and_refresh_logout_still_work()
     {

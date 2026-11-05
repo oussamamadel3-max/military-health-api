@@ -67,6 +67,27 @@ public static class RateLimitingExtensions
                 });
             });
 
+            // MH-SEC-055 / D3: IP-only sliding window (same shape as Login). In-memory counters are
+            // per process — multi-instance deployments do not share budgets (sticky sessions / per-node
+            // capacity must be considered; Redis is out of scope).
+            options.AddPolicy(RateLimitPolicies.Refresh, httpContext =>
+            {
+                var resolver = httpContext.RequestServices.GetRequiredService<IRateLimitPartitionKeyResolver>();
+                var settings = httpContext.RequestServices.GetRequiredService<IOptions<RateLimitingSettings>>().Value;
+                var key = resolver.ResolveIp(httpContext);
+
+                return RateLimitPartition.GetSlidingWindowLimiter(
+                    $"refresh:{key}",
+                    _ => new SlidingWindowRateLimiterOptions
+                    {
+                        PermitLimit = settings.Refresh.PermitLimit,
+                        Window = TimeSpan.FromSeconds(settings.Refresh.WindowSeconds),
+                        SegmentsPerWindow = settings.Refresh.SegmentsPerWindow,
+                        QueueLimit = 0,
+                        AutoReplenishment = true
+                    });
+            });
+
             options.AddPolicy(RateLimitPolicies.Reports, httpContext =>
             {
                 var resolver = httpContext.RequestServices.GetRequiredService<IRateLimitPartitionKeyResolver>();
