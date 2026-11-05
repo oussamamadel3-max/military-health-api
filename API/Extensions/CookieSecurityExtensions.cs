@@ -12,7 +12,8 @@ namespace API.Extensions
         {
             services.Configure<CookiePolicyOptions>(options =>
             {
-                options.Secure = environment.IsDevelopment()
+                // Testing uses HTTP WebApplicationFactory hosts (MH-SEC-051); keep Secure=Always for real non-dev hosts.
+                options.Secure = environment.IsDevelopment() || environment.IsEnvironment("Testing")
                     ? CookieSecurePolicy.SameAsRequest
                     : CookieSecurePolicy.Always;
 
