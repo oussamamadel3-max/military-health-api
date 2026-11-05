@@ -15,6 +15,10 @@ public static class PasswordPolicy
 
     public const string ConfirmationMismatchMessage = "تأكيد كلمة المرور غير متطابق.";
 
+    /// <summary>MH-SEC-053: safe client message when new password matches the current one.</summary>
+    public const string SameAsCurrentMessage =
+        "كلمة المرور الجديدة يجب أن تختلف عن كلمة المرور الحالية.";
+
     public static bool IsCompliant(string? password) =>
         !string.IsNullOrEmpty(password) &&
         password.Length is >= MinLength and <= MaxLength &&

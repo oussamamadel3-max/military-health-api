@@ -218,6 +218,28 @@ public sealed class AuthSessionBaselineTests
     }
 
     [Fact]
+    [Trait("Regression", "MH-SEC-053")]
+    public async Task Change_password_rejects_reusing_current_password_and_keeps_session()
+    {
+        var session = _factory.CreateSession();
+        Assert.Equal(HttpStatusCode.OK, (await session.LoginAsync(AuthTestSeed.ActiveUserName, AuthTestSeed.ActivePassword)).StatusCode);
+
+        var response = await session.ChangeMyPasswordAsync(
+            AuthTestSeed.ActivePassword,
+            AuthTestSeed.ActivePassword,
+            AuthTestSeed.ActivePassword);
+
+        Assert.True((int)response.StatusCode is >= 400 and < 500, $"Expected 4xx, got {(int)response.StatusCode}");
+        Assert.NotEqual(HttpStatusCode.Unauthorized, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains(Application.Common.PasswordPolicy.SameAsCurrentMessage, body, StringComparison.Ordinal);
+        Assert.DoesNotContain(AuthTestSeed.ActivePassword, body, StringComparison.Ordinal);
+
+        // Session must remain usable after rejection (no SecurityStamp / refresh revoke).
+        Assert.Equal(HttpStatusCode.OK, (await session.MeAsync()).StatusCode);
+    }
+
+    [Fact]
     public async Task Admin_reset_password_requires_permission_and_succeeds_for_admin()
     {
         var targetId = await _factory.WithDbAsync(async db =>

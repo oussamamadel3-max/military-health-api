@@ -16,27 +16,6 @@ public sealed class AuthSessionKnownGapBaselineTests
     public AuthSessionKnownGapBaselineTests(AuthWebApplicationFactory factory) => _factory = factory;
 
     [Fact]
-    [Trait("Baseline", "KnownGap:MH-SEC-053")]
-    public async Task Change_password_should_reject_reusing_current_password()
-    {
-        var session = _factory.CreateSession();
-        var login = await session.LoginAsync(AuthTestSeed.ActiveUserName, AuthTestSeed.ActivePassword);
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-
-        var response = await session.ChangeMyPasswordAsync(
-            AuthTestSeed.ActivePassword,
-            AuthTestSeed.ActivePassword,
-            AuthTestSeed.ActivePassword);
-
-        // Desired after MH-SEC-053: reject reuse with a validation/business error (not auth failure).
-        Assert.NotEqual(HttpStatusCode.OK, response.StatusCode);
-        Assert.NotEqual(HttpStatusCode.Unauthorized, response.StatusCode);
-        Assert.True(
-            (int)response.StatusCode is >= 400 and < 500,
-            $"Expected client error rejecting password reuse, got {(int)response.StatusCode}");
-    }
-
-    [Fact]
     [Trait("Baseline", "KnownGap:MH-SEC-054")]
     public async Task Refresh_cookie_path_should_be_refresh_endpoint_not_root()
     {
