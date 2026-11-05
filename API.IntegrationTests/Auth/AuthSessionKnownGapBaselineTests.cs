@@ -16,27 +16,6 @@ public sealed class AuthSessionKnownGapBaselineTests
     public AuthSessionKnownGapBaselineTests(AuthWebApplicationFactory factory) => _factory = factory;
 
     [Fact]
-    [Trait("Baseline", "KnownGap:MH-SEC-054")]
-    public async Task Refresh_cookie_path_should_be_refresh_endpoint_not_root()
-    {
-        var session = _factory.CreateSession();
-        var login = await session.LoginAsync(AuthTestSeed.ActiveUserName, AuthTestSeed.ActivePassword);
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-
-        var refreshCookie = CookieHeaderAssertions.FindSetCookie(login, AuthCookieNames.RefreshToken);
-        Assert.False(string.IsNullOrWhiteSpace(refreshCookie));
-
-        // Desired after MH-SEC-054 (+ F-12): Path matches Refresh route, not '/'.
-        Assert.Contains("path=/api/Auth/Refresh", refreshCookie!, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("; path=/;", refreshCookie!, StringComparison.OrdinalIgnoreCase);
-        Assert.False(
-            refreshCookie!.EndsWith("path=/", StringComparison.OrdinalIgnoreCase)
-            || refreshCookie.Contains("; path=/;", StringComparison.OrdinalIgnoreCase)
-            || System.Text.RegularExpressions.Regex.IsMatch(refreshCookie, @";\s*path=/(;|$)", System.Text.RegularExpressions.RegexOptions.IgnoreCase),
-            "Refresh cookie must not use Path=/ after MH-SEC-054");
-    }
-
-    [Fact]
     [Trait("Baseline", "KnownGap:MH-SEC-055")]
     public async Task Refresh_endpoint_should_return_429_when_rate_limit_exceeded()
     {

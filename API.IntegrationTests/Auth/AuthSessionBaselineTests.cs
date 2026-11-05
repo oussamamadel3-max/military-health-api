@@ -23,7 +23,8 @@ public sealed class AuthSessionBaselineTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         CookieHeaderAssertions.AssertAuthCookiesIssued(response);
-        CookieHeaderAssertions.AssertRefreshPathIsRoot(response);
+        CookieHeaderAssertions.AssertRefreshPathIsEndpoint(response);
+        CookieHeaderAssertions.AssertRefreshLegacyRootClearedOnIssue(response);
 
         using var doc = await session.ReadJsonAsync(response);
         var json = doc.RootElement.GetRawText();
@@ -60,21 +61,21 @@ public sealed class AuthSessionBaselineTests
         var session = _factory.CreateSession();
         Assert.Equal(HttpStatusCode.OK, (await session.LoginAsync(AuthTestSeed.ActiveUserName, AuthTestSeed.ActivePassword)).StatusCode);
 
-        var firstRefreshCookie = session.Cookies.GetCookies(session.Client.BaseAddress!)
-            [AuthCookieNames.RefreshToken]?.Value;
+        var firstRefreshCookie = session.GetCookieValue(AuthCookieNames.RefreshToken);
         Assert.False(string.IsNullOrWhiteSpace(firstRefreshCookie));
 
         var refresh = await session.RefreshAsync();
         Assert.Equal(HttpStatusCode.OK, refresh.StatusCode);
         CookieHeaderAssertions.AssertAuthCookiesIssued(refresh);
+        CookieHeaderAssertions.AssertRefreshPathIsEndpoint(refresh);
 
-        // Replay old refresh value by restoring cookie.
+        // Replay old refresh value by restoring cookie on the Refresh Path.
         var container = session.Cookies;
         CookieHeaderAssertions.RemoveCookie(container, session.Client.BaseAddress!, AuthCookieNames.RefreshToken);
         container.Add(session.Client.BaseAddress!, new System.Net.Cookie(AuthCookieNames.RefreshToken, firstRefreshCookie!)
         {
             HttpOnly = true,
-            Path = "/"
+            Path = AuthCookieNames.RefreshTokenPath
         });
 
         var reuse = await session.RefreshAsync();
@@ -98,13 +99,38 @@ public sealed class AuthSessionBaselineTests
     }
 
     [Fact]
+    [Trait("Regression", "MH-SEC-054")]
+    public async Task Refresh_cookie_path_is_endpoint_scoped_and_refresh_logout_still_work()
+    {
+        var session = _factory.CreateSession();
+        var login = await session.LoginAsync(AuthTestSeed.ActiveUserName, AuthTestSeed.ActivePassword);
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        CookieHeaderAssertions.AssertRefreshPathIsEndpoint(login);
+        CookieHeaderAssertions.AssertRefreshLegacyRootClearedOnIssue(login);
+
+        var refreshCookie = CookieHeaderAssertions.TryGetLiveCookie(
+            session.Cookies, session.Client.BaseAddress!, AuthCookieNames.RefreshToken);
+        Assert.NotNull(refreshCookie);
+        Assert.Equal(AuthCookieNames.RefreshTokenPath, refreshCookie!.Path);
+
+        // Narrow Path must not prevent Refresh; Me must still work via Access on Path=/.
+        Assert.Equal(HttpStatusCode.OK, (await session.MeAsync()).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await session.RefreshAsync()).StatusCode);
+
+        var logout = await session.LogoutAsync();
+        Assert.Equal(HttpStatusCode.OK, logout.StatusCode);
+        CookieHeaderAssertions.AssertRefreshDualDeleteOnClear(logout);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await session.MeAsync()).StatusCode);
+    }
+
+    [Fact]
     [Trait("Regression", "MH-SEC-052")]
     public async Task Logout_without_refresh_cookie_rejects_reattached_access_token()
     {
         var session = _factory.CreateSession();
         Assert.Equal(HttpStatusCode.OK, (await session.LoginAsync(AuthTestSeed.ActiveUserName, AuthTestSeed.ActivePassword)).StatusCode);
 
-        var accessValue = session.Cookies.GetCookies(session.Client.BaseAddress!)[AuthCookieNames.AccessToken]?.Value;
+        var accessValue = session.GetCookieValue(AuthCookieNames.AccessToken);
         Assert.False(string.IsNullOrWhiteSpace(accessValue));
 
         session.DropRefreshCookie();
@@ -113,7 +139,7 @@ public sealed class AuthSessionBaselineTests
         session.Cookies.Add(session.Client.BaseAddress!, new System.Net.Cookie(AuthCookieNames.AccessToken, accessValue!)
         {
             HttpOnly = true,
-            Path = "/"
+            Path = AuthCookieNames.RootPath
         });
 
         Assert.Equal(HttpStatusCode.Unauthorized, (await session.MeAsync()).StatusCode);
@@ -126,7 +152,7 @@ public sealed class AuthSessionBaselineTests
         var session = _factory.CreateSession();
         Assert.Equal(HttpStatusCode.OK, (await session.LoginAsync(AuthTestSeed.ActiveUserName, AuthTestSeed.ActivePassword)).StatusCode);
 
-        var refreshValue = session.Cookies.GetCookies(session.Client.BaseAddress!)[AuthCookieNames.RefreshToken]?.Value;
+        var refreshValue = session.GetCookieValue(AuthCookieNames.RefreshToken);
         Assert.False(string.IsNullOrWhiteSpace(refreshValue));
         session.DropRefreshCookie();
         Assert.Equal(HttpStatusCode.OK, (await session.LogoutAsync()).StatusCode);
@@ -134,7 +160,7 @@ public sealed class AuthSessionBaselineTests
         session.Cookies.Add(session.Client.BaseAddress!, new System.Net.Cookie(AuthCookieNames.RefreshToken, refreshValue!)
         {
             HttpOnly = true,
-            Path = "/"
+            Path = AuthCookieNames.RefreshTokenPath
         });
         Assert.Equal(HttpStatusCode.Unauthorized, (await session.RefreshAsync()).StatusCode);
     }
@@ -280,7 +306,7 @@ public sealed class AuthSessionBaselineTests
     {
         var session = _factory.CreateSession();
         Assert.Equal(HttpStatusCode.OK, (await session.LoginAsync(AuthTestSeed.ActiveUserName, AuthTestSeed.ActivePassword)).StatusCode);
-        var refreshValue = session.Cookies.GetCookies(session.Client.BaseAddress!)[AuthCookieNames.RefreshToken]?.Value;
+        var refreshValue = session.GetCookieValue(AuthCookieNames.RefreshToken);
         Assert.Equal(HttpStatusCode.OK, (await session.LogoutAsync()).StatusCode);
 
         await _factory.WithDbAsync(async db =>
