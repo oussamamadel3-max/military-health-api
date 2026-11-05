@@ -85,9 +85,12 @@ namespace Application.Services.AuthServices
 
             if (await _userManager.IsLockedOutAsync(user))
             {
+                // MH-SEC-061: client must not distinguish locked from unknown/wrong (no 429 / Retry-After).
+                // Progressive lockout remains server-side; audit keeps an internal locked reason.
+                _passwordHasher.VerifyHashedPassword(null!, DummyHash, password);
                 await Task.Delay(FailDelay);
                 await RecordLoginAsync(user.Id, false, "locked", "فشل تسجيل الدخول بسبب القفل المؤقت", null);
-                throw new UserAccountLockedException(_loginLockout.GetRetryAfterSeconds(user));
+                throw new InvalidCredentialsException();
             }
 
             await _loginLockout.EnsureTierDecayAsync(user);
@@ -114,9 +117,10 @@ namespace Application.Services.AuthServices
 
                 if (signIn.IsLockedOut || await _userManager.IsLockedOutAsync(user))
                 {
-                    var retryAfter = await _loginLockout.ApplyProgressiveLockoutAsync(user.Id);
+                    // Apply progressive duration server-side; do not expose retry budget to the client.
+                    _ = await _loginLockout.ApplyProgressiveLockoutAsync(user.Id);
                     await RecordLoginAsync(user.Id, false, "locked", "فشل تسجيل الدخول بسبب القفل المؤقت", null);
-                    throw new UserAccountLockedException(retryAfter);
+                    throw new InvalidCredentialsException();
                 }
 
                 await RecordLoginAsync(user.Id, false, "invalid_credentials", "فشل تسجيل الدخول", null);
