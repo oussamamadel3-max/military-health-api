@@ -8,7 +8,6 @@ using Application.Common.Results;
 using Application.Common.Permissions;
 using Application.Exceptions;
 using Application.Dtos.AuthDtos;
-using Application.Interfaces.Services;
 using Domain.Entities.Auth;
 using Domain.Enums;
 using PasswordPolicyRules = Application.Common.PasswordPolicy;
@@ -678,6 +677,10 @@ public class UserService : IUserService
     #endregion
 
     #region تغيير كلمة المرور (المستخدم نفسه)
+    /// <summary>
+    /// MH-SEC-053: rejects reuse of the current password via Identity CheckPasswordAsync
+    /// without touching PasswordHash/SecurityStamp/sessions on rejection.
+    /// </summary>
     public async Task ChangeOwnPasswordAsync(ChangePasswordRequest request)
     {
         var user = await GetCurrentUserOrThrowAsync();
@@ -687,6 +690,13 @@ public class UserService : IUserService
 
         if (!PasswordPolicyRules.IsCompliant(request.NewPassword))
             throw new InvalidUserDataException(PasswordPolicyRules.ComplexityErrorMessage);
+
+        if (!await _userManager.CheckPasswordAsync(user, request.CurrentPassword))
+            throw new InvalidUserDataException("كلمة المرور الحالية غير صحيحة.");
+
+        // Prefer Identity hasher APIs — never compare PasswordHash strings directly.
+        if (await _userManager.CheckPasswordAsync(user, request.NewPassword))
+            throw new InvalidUserDataException(PasswordPolicyRules.SameAsCurrentMessage);
 
         var result = await _userManager.ChangePasswordAsync(user, request.CurrentPassword, request.NewPassword);
         if (!result.Succeeded)

@@ -26,17 +26,43 @@ public class ChangeOwnPasswordTests
     {
         var harness = CreateHarness();
         harness.UserManager
-            .Setup(m => m.ChangePasswordAsync(harness.User, "wrong-current", StrongPassword))
-            .ReturnsAsync(IdentityResult.Failed(new IdentityError
-            {
-                Code = nameof(IdentityErrorDescriber.PasswordMismatch),
-                Description = "كلمة المرور الحالية غير صحيحة."
-            }));
+            .Setup(m => m.CheckPasswordAsync(harness.User, "wrong-current"))
+            .ReturnsAsync(false);
 
         var error = await Assert.ThrowsAsync<InvalidUserDataException>(() =>
             harness.Service.ChangeOwnPasswordAsync(ValidRequest(current: "wrong-current")));
 
         Assert.Contains("كلمة المرور الحالية غير صحيحة", error.Message);
+        harness.UserManager.Verify(
+            m => m.ChangePasswordAsync(It.IsAny<User>(), It.IsAny<string>(), It.IsAny<string>()),
+            Times.Never);
+        harness.UserManager.Verify(
+            m => m.UpdateSecurityStampAsync(It.IsAny<User>()),
+            Times.Never);
+        harness.Tokens.Verify(r => r.MarkRevoked(It.IsAny<UserRefreshToken>()), Times.Never);
+        harness.UnitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Reusing_current_password_rejects_without_invalidating_sessions()
+    {
+        var harness = CreateHarness();
+        var stampBefore = harness.User.SecurityStamp;
+        var hashBefore = harness.User.PasswordHash;
+        // Same plaintext for current and new — both verify against the stored hash.
+        harness.UserManager
+            .Setup(m => m.CheckPasswordAsync(harness.User, StrongPassword))
+            .ReturnsAsync(true);
+
+        var error = await Assert.ThrowsAsync<InvalidUserDataException>(() =>
+            harness.Service.ChangeOwnPasswordAsync(ValidRequest(current: StrongPassword, next: StrongPassword)));
+
+        Assert.Equal(PasswordPolicyRules.SameAsCurrentMessage, error.Message);
+        Assert.Equal(stampBefore, harness.User.SecurityStamp);
+        Assert.Equal(hashBefore, harness.User.PasswordHash);
+        harness.UserManager.Verify(
+            m => m.ChangePasswordAsync(It.IsAny<User>(), It.IsAny<string>(), It.IsAny<string>()),
+            Times.Never);
         harness.UserManager.Verify(
             m => m.UpdateSecurityStampAsync(It.IsAny<User>()),
             Times.Never);
@@ -87,6 +113,7 @@ public class ChangeOwnPasswordTests
     {
         var harness = CreateHarness();
         var oldStamp = harness.User.SecurityStamp;
+        SetupSuccessfulPasswordChecks(harness, current: "Current!1", next: StrongPassword);
         harness.UserManager
             .Setup(m => m.ChangePasswordAsync(harness.User, "Current!1", StrongPassword))
             .ReturnsAsync(IdentityResult.Success);
@@ -118,6 +145,7 @@ public class ChangeOwnPasswordTests
     {
         var harness = CreateHarness();
         harness.User.MustChangePassword = true;
+        SetupSuccessfulPasswordChecks(harness, current: "Current!1", next: StrongPassword);
         harness.UserManager
             .Setup(m => m.ChangePasswordAsync(harness.User, "Current!1", StrongPassword))
             .ReturnsAsync(IdentityResult.Success);
@@ -132,6 +160,16 @@ public class ChangeOwnPasswordTests
 
         Assert.False(harness.User.MustChangePassword);
         harness.UserManager.Verify(m => m.UpdateAsync(harness.User), Times.Once);
+    }
+
+    private static void SetupSuccessfulPasswordChecks(Harness harness, string current, string next)
+    {
+        harness.UserManager
+            .Setup(m => m.CheckPasswordAsync(harness.User, current))
+            .ReturnsAsync(true);
+        harness.UserManager
+            .Setup(m => m.CheckPasswordAsync(harness.User, next))
+            .ReturnsAsync(false);
     }
 
     [Fact]
