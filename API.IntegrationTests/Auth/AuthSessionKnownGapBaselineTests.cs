@@ -16,54 +16,6 @@ public sealed class AuthSessionKnownGapBaselineTests
     public AuthSessionKnownGapBaselineTests(AuthWebApplicationFactory factory) => _factory = factory;
 
     [Fact]
-    [Trait("Baseline", "KnownGap:MH-SEC-052")]
-    public async Task Logout_without_refresh_cookie_should_reject_subsequent_access()
-    {
-        var session = _factory.CreateSession();
-        Assert.Equal(HttpStatusCode.OK, (await session.LoginAsync(AuthTestSeed.ActiveUserName, AuthTestSeed.ActivePassword)).StatusCode);
-
-        var accessValue = session.Cookies.GetCookies(session.Client.BaseAddress!)[AuthCookieNames.AccessToken]?.Value;
-        Assert.False(string.IsNullOrWhiteSpace(accessValue));
-
-        session.DropRefreshCookie();
-        var logout = await session.LogoutAsync();
-        Assert.Equal(HttpStatusCode.OK, logout.StatusCode);
-
-        // Re-attach pre-logout access cookie — proves server-side family invalidation, not just Set-Cookie deletes.
-        session.Cookies.Add(session.Client.BaseAddress!, new System.Net.Cookie(AuthCookieNames.AccessToken, accessValue!)
-        {
-            HttpOnly = true,
-            Path = "/"
-        });
-
-        // Desired after MH-SEC-052: access family ended even without refresh cookie.
-        var me = await session.MeAsync();
-        Assert.Equal(HttpStatusCode.Unauthorized, me.StatusCode);
-    }
-
-    [Fact]
-    [Trait("Baseline", "KnownGap:MH-SEC-052")]
-    public async Task Logout_without_refresh_cookie_should_reject_subsequent_refresh_of_dropped_family()
-    {
-        var session = _factory.CreateSession();
-        Assert.Equal(HttpStatusCode.OK, (await session.LoginAsync(AuthTestSeed.ActiveUserName, AuthTestSeed.ActivePassword)).StatusCode);
-
-        // Capture refresh, drop from client, logout via access only, then replay refresh.
-        var refreshValue = session.Cookies.GetCookies(session.Client.BaseAddress!)[AuthCookieNames.RefreshToken]?.Value;
-        Assert.False(string.IsNullOrWhiteSpace(refreshValue));
-        session.DropRefreshCookie();
-        Assert.Equal(HttpStatusCode.OK, (await session.LogoutAsync()).StatusCode);
-
-        session.Cookies.Add(session.Client.BaseAddress!, new System.Net.Cookie(AuthCookieNames.RefreshToken, refreshValue!)
-        {
-            HttpOnly = true,
-            Path = "/"
-        });
-        var refresh = await session.RefreshAsync();
-        Assert.Equal(HttpStatusCode.Unauthorized, refresh.StatusCode);
-    }
-
-    [Fact]
     [Trait("Baseline", "KnownGap:MH-SEC-053")]
     public async Task Change_password_should_reject_reusing_current_password()
     {

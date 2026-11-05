@@ -139,10 +139,17 @@ public class SessionLifecycleTests
     [Fact]
     public async Task Logout_revokes_the_current_token_and_audits_without_token_contents()
     {
+        var familyId = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0001");
         var harness = new AuthHarness();
-        await harness.Service.LogoutAsync(RawRefresh, CenterA);
+        harness.Tokens
+            .Setup(t => t.EndSessionFamilyAsync(familyId, RawRefresh, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
 
-        harness.Tokens.Verify(t => t.RevokeRefreshTokenAsync(RawRefresh), Times.Once);
+        await harness.Service.LogoutAsync(RawRefresh, familyId, CenterA);
+
+        harness.Tokens.Verify(
+            t => t.EndSessionFamilyAsync(familyId, RawRefresh, It.IsAny<CancellationToken>()),
+            Times.Once);
         var audit = Assert.Single(harness.Audits);
         Assert.Equal("Logout", audit.EventType);
         Assert.Equal("SUCCESS", audit.Result);
@@ -151,6 +158,73 @@ public class SessionLifecycleTests
         Assert.Equal(CenterClaimTypes.Center, audit.ContextScope);
         Assert.Equal(CenterA, audit.CenterId);
         AssertNoToken(audit, RawRefresh);
+    }
+
+    [Fact]
+    public async Task Logout_without_refresh_ends_family_and_audits_success()
+    {
+        var familyId = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0002");
+        var harness = new AuthHarness();
+        harness.Tokens
+            .Setup(t => t.EndSessionFamilyAsync(familyId, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        await harness.Service.LogoutAsync(null, familyId, CenterA);
+
+        harness.Tokens.Verify(
+            t => t.EndSessionFamilyAsync(familyId, null, It.IsAny<CancellationToken>()),
+            Times.Once);
+        harness.Tokens.Verify(t => t.RevokeRefreshTokenAsync(It.IsAny<string>()), Times.Never);
+        var audit = Assert.Single(harness.Audits);
+        Assert.Equal("SUCCESS", audit.Result);
+        Assert.Equal("Logout", audit.EventType);
+    }
+
+    [Fact]
+    public async Task Logout_persist_failure_audits_failure_without_success()
+    {
+        var familyId = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0003");
+        var harness = new AuthHarness();
+        harness.Tokens
+            .Setup(t => t.EndSessionFamilyAsync(familyId, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            harness.Service.LogoutAsync(null, familyId, CenterA));
+
+        var audit = Assert.Single(harness.Audits);
+        Assert.Equal("FAILURE", audit.Result);
+        Assert.Equal("Logout", audit.EventType);
+        Assert.Equal("تعذر إبطال الجلسة", audit.ReasonText);
+        AssertNoToken(audit, RawRefresh);
+    }
+
+    [Fact]
+    public async Task EndSessionFamily_without_refresh_revokes_active_family()
+    {
+        var familyId = Guid.NewGuid();
+        var row = new UserRefreshToken
+        {
+            Id = Guid.NewGuid(),
+            UserId = "user-1",
+            Token = "hash",
+            TokenFamilyId = familyId,
+            ExpiryDate = DateTime.UtcNow.AddDays(1),
+            IsRevoked = false
+        };
+        var harness = TokenHarness.ForRow(row);
+        harness.Refresh
+            .SetupSequence(r => r.HasActiveInFamilyAsync(familyId, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true)
+            .ReturnsAsync(false);
+
+        var ended = await harness.Service.EndSessionFamilyAsync(familyId, null);
+
+        Assert.True(ended);
+        harness.Refresh.Verify(
+            r => r.RevokeActiveFamilyAsync(familyId, SessionRefresh.LogoutReason, It.IsAny<CancellationToken>()),
+            Times.Once);
+        harness.Refresh.Verify(r => r.GetByTokenAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

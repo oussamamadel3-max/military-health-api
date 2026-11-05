@@ -1,4 +1,5 @@
 using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using API.Infrastructure;
 using Application.Common.Security;
 using API.RateLimiting;
@@ -78,9 +79,17 @@ namespace API.Controllers.AuthControllers
         {
             var refreshToken = _cookieService.TryGetRefreshToken(Request);
             var activeCenterId = ReadActiveCenter(_cookieService.TryGetAccessToken(Request));
-            await _authService.LogoutAsync(refreshToken, activeCenterId);
+            // Prefer validated principal claim (post OnTokenValidated) — do not trust an unverified cookie parse alone.
+            var sessionFamilyId = ReadSessionFamily(User);
+            await _authService.LogoutAsync(refreshToken, sessionFamilyId, activeCenterId);
             _cookieService.ClearAuthCookies(Response);
             return ApiResponse.Success("تم تسجيل الخروج بنجاح.");
+        }
+
+        private static Guid? ReadSessionFamily(ClaimsPrincipal user)
+        {
+            var raw = user.FindFirst(SessionFamilyGate.ClaimType)?.Value;
+            return Guid.TryParse(raw, out var id) ? id : null;
         }
 
         private static Guid? ReadActiveCenter(string? accessToken)
