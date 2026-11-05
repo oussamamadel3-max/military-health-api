@@ -16,33 +16,6 @@ public sealed class AuthSessionKnownGapBaselineTests
     public AuthSessionKnownGapBaselineTests(AuthWebApplicationFactory factory) => _factory = factory;
 
     [Fact]
-    [Trait("Baseline", "KnownGap:MH-SEC-055")]
-    public async Task Refresh_endpoint_should_return_429_when_rate_limit_exceeded()
-    {
-        // Desired after MH-SEC-055: dedicated Refresh rate limit. Currently no Refresh policy exists.
-        // This probe floods Refresh; without a policy it should NOT stay 200 forever under a limit —
-        // assert that at least one response becomes 429 within the burst (expected fail today).
-        var session = _factory.CreateSession();
-        Assert.Equal(HttpStatusCode.OK, (await session.LoginAsync(AuthTestSeed.ActiveUserName, AuthTestSeed.ActivePassword)).StatusCode);
-
-        HttpStatusCode? saw429 = null;
-        for (var i = 0; i < 40; i++)
-        {
-            var response = await session.RefreshAsync();
-            if (response.StatusCode == HttpStatusCode.TooManyRequests)
-            {
-                saw429 = response.StatusCode;
-                break;
-            }
-
-            if (response.StatusCode != HttpStatusCode.OK)
-                break;
-        }
-
-        Assert.Equal(HttpStatusCode.TooManyRequests, saw429);
-    }
-
-    [Fact]
     [Trait("Baseline", "KnownGap:MH-SEC-061")]
     public async Task Locked_account_login_should_look_like_unknown_user_401()
     {

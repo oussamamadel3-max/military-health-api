@@ -9,6 +9,8 @@ namespace API.IntegrationTests.Infrastructure;
 
 public sealed class AuthHttpSession
 {
+    private static int _forwardedIpCounter;
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -16,12 +18,18 @@ public sealed class AuthHttpSession
 
     private readonly CookieContainer _cookies = new();
     private readonly HttpClient _client;
+    private readonly string _forwardedClientIp;
 
     public AuthHttpSession(AuthWebApplicationFactory factory)
     {
+        // Isolate in-memory rate-limit partitions across tests (MH-SEC-055): each session gets a unique
+        // X-Forwarded-For. Loopback is trusted by default ForwardedHeaders, so RemoteIpAddress updates.
+        var n = Interlocked.Increment(ref _forwardedIpCounter);
+        _forwardedClientIp = $"198.51.100.{(n % 250) + 1}";
+
         // TestServer requires a DelegatingHandler chain; CookieContainer is applied manually.
         _ = factory.Services;
-        _client = new HttpClient(new CookieContainerHandler(_cookies)
+        _client = new HttpClient(new CookieContainerHandler(_cookies, _forwardedClientIp)
         {
             InnerHandler = factory.Server.CreateHandler()
         })
@@ -33,6 +41,7 @@ public sealed class AuthHttpSession
 
     public CookieContainer Cookies => _cookies;
     public HttpClient Client => _client;
+    public string ForwardedClientIp => _forwardedClientIp;
     public string? LastCsrfToken { get; private set; }
     public HttpResponseMessage? LastResponse { get; private set; }
 
@@ -167,8 +176,13 @@ public sealed class AuthHttpSession
     private sealed class CookieContainerHandler : DelegatingHandler
     {
         private readonly CookieContainer _cookies;
+        private readonly string _forwardedClientIp;
 
-        public CookieContainerHandler(CookieContainer cookies) => _cookies = cookies;
+        public CookieContainerHandler(CookieContainer cookies, string forwardedClientIp)
+        {
+            _cookies = cookies;
+            _forwardedClientIp = forwardedClientIp;
+        }
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -178,6 +192,9 @@ public sealed class AuthHttpSession
             var cookieHeader = _cookies.GetCookieHeader(uri);
             if (!string.IsNullOrEmpty(cookieHeader))
                 request.Headers.TryAddWithoutValidation("Cookie", cookieHeader);
+
+            request.Headers.Remove("X-Forwarded-For");
+            request.Headers.TryAddWithoutValidation("X-Forwarded-For", _forwardedClientIp);
 
             var response = await base.SendAsync(request, cancellationToken);
             if (response.Headers.TryGetValues("Set-Cookie", out var setCookies))
