@@ -26,7 +26,7 @@ public class AuthCookieService
 
     public void SetAuthCookies(HttpResponse response, string accessToken, string refreshToken)
     {
-        var secure = !_environment.IsDevelopment();
+        var secure = RequiresSecureCookies();
         var accessExpires = DateTimeOffset.UtcNow.AddMinutes(_jwtSettings.ExpirationInMinutes);
         var refreshExpires = DateTimeOffset.UtcNow.AddDays(_jwtSettings.RefreshTokenExpirationInDays);
 
@@ -36,18 +36,25 @@ public class AuthCookieService
 
     public void SetCsrfSignatureCookie(HttpResponse response, string signature)
     {
-        var secure = !_environment.IsDevelopment();
+        var secure = RequiresSecureCookies();
         var expires = DateTimeOffset.UtcNow.AddDays(_jwtSettings.RefreshTokenExpirationInDays);
         response.Cookies.Append(AuthCookieNames.CsrfSignature, signature, BuildCookieOptions(expires, secure, path: "/"));
     }
 
     public void ClearAuthCookies(HttpResponse response)
     {
-        var secure = !_environment.IsDevelopment();
+        var secure = RequiresSecureCookies();
         response.Cookies.Delete(AuthCookieNames.AccessToken, BuildClearOptions(secure));
         response.Cookies.Delete(AuthCookieNames.RefreshToken, BuildClearOptions(secure));
         response.Cookies.Delete(AuthCookieNames.CsrfSignature, BuildClearOptions(secure));
     }
+
+    /// <summary>
+    /// Production/Staging keep Secure cookies. Development and Testing allow HTTP test hosts (MH-SEC-051).
+    /// </summary>
+    private bool RequiresSecureCookies()
+        => !_environment.IsDevelopment()
+           && !_environment.IsEnvironment("Testing");
 
     public string? TryGetRefreshToken(HttpRequest request)
         => request.Cookies.TryGetValue(AuthCookieNames.RefreshToken, out var token) ? token : null;

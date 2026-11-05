@@ -98,6 +98,42 @@ public class AppDbContext : DbContext
         AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
         base.OnModelCreating(modelBuilder);
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
+
+        // MH-SEC-051: allow isolated SQLite integration hosts without changing PostgreSQL production mapping.
+        if (string.Equals(Database.ProviderName, "Microsoft.EntityFrameworkCore.Sqlite", StringComparison.Ordinal))
+            ApplySqliteIntegrationCompatibility(modelBuilder);
+    }
+
+    /// <summary>
+    /// Softens PostgreSQL-only store types / identity annotations so auth HTTP integration tests can host on SQLite.
+    /// </summary>
+    private static void ApplySqliteIntegrationCompatibility(ModelBuilder modelBuilder)
+    {
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            foreach (var property in entityType.GetProperties())
+            {
+                var columnType = property.GetColumnType();
+                if (columnType is not null
+                    && (columnType.Equals("citext", StringComparison.OrdinalIgnoreCase)
+                        || columnType.Equals("jsonb", StringComparison.OrdinalIgnoreCase)
+                        || columnType.Equals("inet", StringComparison.OrdinalIgnoreCase)))
+                {
+                    property.SetColumnType("TEXT");
+                }
+
+                if (property.FindAnnotation("Npgsql:ValueGenerationStrategy") is not null)
+                {
+                    property.RemoveAnnotation("Npgsql:ValueGenerationStrategy");
+                    if (property.ClrType == typeof(int) || property.ClrType == typeof(long))
+                        property.ValueGenerated = Microsoft.EntityFrameworkCore.Metadata.ValueGenerated.OnAdd;
+                }
+            }
+        }
+
+        modelBuilder.Entity<AuditEvent>().Property(e => e.IPAddress).HasConversion(
+            v => v == null ? null : v.ToString(),
+            v => string.IsNullOrWhiteSpace(v) ? null : System.Net.IPAddress.Parse(v));
     }
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)

@@ -88,7 +88,8 @@ app.MapHealthChecks("/health").DisableRateLimiting();
 #region ================== DATABASE SEED ==================
 
 // Design-time EF commands build this entry point. Seeding here would migrate before review.
-if (!EF.IsDesignTime)
+// Testing hosts (MH-SEC-051) supply an isolated DB and their own seed — never Migrate/Seed here.
+if (!EF.IsDesignTime && !app.Environment.IsEnvironment("Testing"))
 {
     using var scope = app.Services.CreateScope();
     var services = scope.ServiceProvider;
