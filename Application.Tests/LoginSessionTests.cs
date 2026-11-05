@@ -165,14 +165,19 @@ public class LoginSessionTests
     }
 
     [Fact]
-    public async Task Locked_account_creates_no_session()
+    public async Task Locked_account_matches_invalid_credentials_client_contract_and_creates_no_session()
     {
-        var harness = new Harness(ActiveUser(), SignInResult.Failed, new[] { Center("A", CenterA) }, lockedNow: true);
+        var unknown = new Harness(null, SignInResult.Failed, Array.Empty<AssignedCenterDto>());
+        var unknownError = await Assert.ThrowsAsync<InvalidCredentialsException>(() =>
+            unknown.Service.LoginAsync(Request("missing-user")));
 
-        var error = await Assert.ThrowsAsync<UserAccountLockedException>(() =>
+        var harness = new Harness(ActiveUser(), SignInResult.Failed, new[] { Center("A", CenterA) }, lockedNow: true);
+        var error = await Assert.ThrowsAsync<InvalidCredentialsException>(() =>
             harness.Service.LoginAsync(Request("doctor")));
 
-        Assert.Equal(30, error.RetryAfterSeconds);
+        Assert.Equal(unknownError.Message, error.Message);
+        Assert.Equal(unknownError.ErrorCode, error.ErrorCode);
+        Assert.Equal(401, error.Status);
         Assert.DoesNotContain("doctor", error.Message, StringComparison.OrdinalIgnoreCase);
         harness.Tokens.Verify(t => t.GenerateTokensAsync(It.IsAny<string>(), It.IsAny<Guid?>()), Times.Never);
         harness.SignIn.Verify(s => s.CheckPasswordSignInAsync(It.IsAny<User>(), It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
@@ -180,6 +185,24 @@ public class LoginSessionTests
         Assert.Equal("FAILURE", audit.Result);
         Assert.Equal("فشل تسجيل الدخول بسبب القفل المؤقت", audit.ReasonText);
         AssertNoSecrets(audit);
+    }
+
+    [Fact]
+    public async Task Password_failure_that_triggers_lockout_still_applies_progressive_lock_with_generic_client_error()
+    {
+        var harness = new Harness(ActiveUser(), SignInResult.LockedOut, new[] { Center("A", CenterA) });
+        harness.Lockout
+            .Setup(l => l.ApplyProgressiveLockoutAsync("user-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(60);
+
+        var error = await Assert.ThrowsAsync<InvalidCredentialsException>(() =>
+            harness.Service.LoginAsync(Request("doctor")));
+
+        Assert.Equal(401, error.Status);
+        Assert.Equal("AUTH_INVALID_CREDENTIALS", error.ErrorCode);
+        harness.Lockout.Verify(l => l.ApplyProgressiveLockoutAsync("user-1", It.IsAny<CancellationToken>()), Times.Once);
+        harness.Tokens.Verify(t => t.GenerateTokensAsync(It.IsAny<string>(), It.IsAny<Guid?>()), Times.Never);
+        Assert.Equal("فشل تسجيل الدخول بسبب القفل المؤقت", Assert.Single(harness.Audits).ReasonText);
     }
 
     [Fact]
@@ -324,6 +347,7 @@ public class LoginSessionTests
     {
         public Mock<ITokenService> Tokens { get; }
         public Mock<SignInManager<User>> SignIn { get; }
+        public Mock<ILoginLockoutService> Lockout { get; }
         public List<AuditEvent> Audits { get; } = new();
         public AuthService Service { get; }
 
@@ -371,7 +395,8 @@ public class LoginSessionTests
                 .Setup(a => a.GetActiveCentersAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(centers);
 
-            var lockout = new Mock<ILoginLockoutService>();
+            Lockout = new Mock<ILoginLockoutService>();
+            var lockout = Lockout;
             lockout.Setup(l => l.GetRetryAfterSeconds(It.IsAny<User>())).Returns(30);
             lockout.Setup(l => l.EnsureTierDecayAsync(It.IsAny<User>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
             lockout.Setup(l => l.ResetAfterSuccessfulLoginAsync(It.IsAny<User>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);

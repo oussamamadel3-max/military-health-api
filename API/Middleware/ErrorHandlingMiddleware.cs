@@ -50,18 +50,18 @@ public class ErrorHandlingMiddleware
             // =========================================================================
             // 1. Custom Business Exceptions (Domain & Application Logic Errors)
             // =========================================================================
+            // MH-SEC-061: locked accounts must not emit a distinguishable client contract.
+            // Prefer InvalidCredentialsException from AuthService; if UserAccountLockedException
+            // still surfaces, map it to the same 401 AUTH_INVALID_CREDENTIALS shape (no Retry-After).
             case UserAccountLockedException lockedEx:
-                if (!context.Response.HasStarted)
-                    context.Response.Headers["Retry-After"] = lockedEx.RetryAfterSeconds.ToString();
-
                 response = ApiResponse.Error(
-                    message: lockedEx.Message,
-                    code: lockedEx.ErrorCode,
-                    meta: MergeMeta(lockedEx.Meta, correlationId),
-                    status: lockedEx.Status);
+                    message: new InvalidCredentialsException().Message,
+                    code: "AUTH_INVALID_CREDENTIALS",
+                    meta: safeMeta,
+                    status: (int)HttpStatusCode.Unauthorized);
 
                 _logger.LogWarning(
-                    "LOGIN LOCKOUT: CorrelationId={CorrelationId}, Code={ErrorCode}, RetryAfter={RetryAfter}, Message={Message}",
+                    "LOGIN LOCKOUT (client-generic): CorrelationId={CorrelationId}, InternalCode={ErrorCode}, RetryAfter={RetryAfter}, Message={Message}",
                     correlationId, lockedEx.ErrorCode, lockedEx.RetryAfterSeconds, lockedEx.Message);
                 break;
 

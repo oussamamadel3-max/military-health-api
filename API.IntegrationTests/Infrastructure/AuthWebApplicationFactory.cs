@@ -63,10 +63,11 @@ public sealed class AuthWebApplicationFactory : WebApplicationFactory<Program>, 
         builder.UseSetting("JwtSettings:Audience", "mh-sec-051-tests");
         builder.UseSetting("JwtSettings:ExpirationInMinutes", "30");
         builder.UseSetting("JwtSettings:RefreshTokenExpirationInDays", "2");
-        builder.UseSetting("RateLimiting:Login:PermitLimit", "100");
+        // Login/Refresh budgets match Testing policy; unique X-Forwarded-For per session avoids cross-test bleed.
+        builder.UseSetting("RateLimiting:Login:PermitLimit", "5");
         builder.UseSetting("RateLimiting:Login:WindowSeconds", "60");
         builder.UseSetting("RateLimiting:Login:SegmentsPerWindow", "6");
-        // MH-SEC-055 / D3 Testing budget (2/60s). Sessions use unique X-Forwarded-For to avoid cross-test bleed.
+        // MH-SEC-055 / D3 Testing budget (2/60s).
         builder.UseSetting("RateLimiting:Refresh:PermitLimit", "2");
         builder.UseSetting("RateLimiting:Refresh:WindowSeconds", "60");
         builder.UseSetting("RateLimiting:Refresh:SegmentsPerWindow", "6");

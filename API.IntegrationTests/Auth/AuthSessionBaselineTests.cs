@@ -99,6 +99,76 @@ public sealed class AuthSessionBaselineTests
     }
 
     [Fact]
+    [Trait("Regression", "MH-SEC-061")]
+    public async Task Locked_account_login_matches_unknown_user_401_contract()
+    {
+        await _factory.WithDbAsync(async db =>
+        {
+            var user = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+                .SingleAsync(db.Users, u => u.UserName == AuthTestSeed.ActiveUserName);
+            user.LockoutEnd = DateTimeOffset.UtcNow.AddMinutes(10);
+            user.AccessFailedCount = 0;
+            await db.SaveChangesAsync();
+        });
+
+        try
+        {
+            var session = _factory.CreateSession();
+            var locked = await session.LoginAsync(AuthTestSeed.ActiveUserName, AuthTestSeed.ActivePassword);
+            var unknown = await session.LoginAsync("missing.user.lockcheck", "Wrong!Pass9");
+
+            Assert.Equal(HttpStatusCode.Unauthorized, locked.StatusCode);
+            Assert.Equal(unknown.StatusCode, locked.StatusCode);
+            Assert.False(locked.Headers.Contains("Retry-After"));
+            Assert.False(unknown.Headers.Contains("Retry-After"));
+
+            using var lockedDoc = await session.ReadJsonAsync(locked);
+            using var unknownDoc = await session.ReadJsonAsync(unknown);
+            Assert.Equal(
+                unknownDoc.RootElement.GetProperty("error").GetProperty("code").GetString(),
+                lockedDoc.RootElement.GetProperty("error").GetProperty("code").GetString());
+            Assert.Equal(
+                unknownDoc.RootElement.GetProperty("error").GetProperty("message").GetString(),
+                lockedDoc.RootElement.GetProperty("error").GetProperty("message").GetString());
+            Assert.Equal("AUTH_INVALID_CREDENTIALS",
+                lockedDoc.RootElement.GetProperty("error").GetProperty("code").GetString());
+            Assert.False(session.HasCookie(AuthCookieNames.AccessToken));
+        }
+        finally
+        {
+            await _factory.WithDbAsync(async db =>
+            {
+                var user = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+                    .SingleAsync(db.Users, u => u.UserName == AuthTestSeed.ActiveUserName);
+                user.LockoutEnd = null;
+                user.AccessFailedCount = 0;
+                user.LoginLockoutTier = 0;
+                await db.SaveChangesAsync();
+            });
+        }
+    }
+
+    [Fact]
+    [Trait("Regression", "MH-SEC-061")]
+    public async Task Login_source_rate_limit_still_returns_429_not_generic_401()
+    {
+        // Testing/factory Login PermitLimit=5 — 6th request must be source 429 (not lockout-shaped 401).
+        var session = _factory.CreateSession();
+        for (var i = 0; i < 5; i++)
+        {
+            var response = await session.LoginAsync("rate.limit.probe.user", "Wrong!Pass9");
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        var limited = await session.LoginAsync("rate.limit.probe.user", "Wrong!Pass9");
+        Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
+        var body = await limited.Content.ReadAsStringAsync();
+        Assert.Contains("rate_limit_exceeded", body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("AUTH_INVALID_CREDENTIALS", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("login_temporarily_locked", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     [Trait("Regression", "MH-SEC-055")]
     public async Task Refresh_rate_limit_returns_429_after_testing_permit_limit()
     {

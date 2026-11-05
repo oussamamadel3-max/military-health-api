@@ -84,6 +84,12 @@ public class UserAccountDisabledException : BusinessException
     }
 }
 
+/// <summary>
+/// Legacy lockout signal retained for internal/logging compatibility.
+/// MH-SEC-061: must not be returned as a distinguishable client contract — middleware maps it
+/// to the same 401 AUTH_INVALID_CREDENTIALS shape as <see cref="InvalidCredentialsException"/>.
+/// Prefer throwing <see cref="InvalidCredentialsException"/> from Login after recording audit.
+/// </summary>
 public class UserAccountLockedException : BusinessException
 {
     public const string ErrorCodeValue = "login_temporarily_locked";
