@@ -352,6 +352,7 @@ namespace Application.Services.AuthServices
                 Result = succeeded ? "SUCCESS" : "FAILURE",
                 EntityType = actor == null ? null : nameof(User),
                 EntityId = actor,
+                TargetUserId = actor,
                 ReasonText = reasonText,
                 UserAgent = _currentUser.UserAgent,
                 CorrelationId = _currentUser.CorrelationId == Guid.Empty

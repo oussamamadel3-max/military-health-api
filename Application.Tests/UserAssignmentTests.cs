@@ -363,7 +363,8 @@ public class UserAssignmentTests
             uow,
             gate.Object,
             current,
-            new TestCenter(unrestrictedActor ? null : CenterA, unrestrictedActor));
+            new TestCenter(unrestrictedActor ? null : CenterA, unrestrictedActor),
+            Mock.Of<IAuditLogRepository>());
     }
 
     private static async Task SeedCentralActorAsync(AppDbContext db, string actorId)

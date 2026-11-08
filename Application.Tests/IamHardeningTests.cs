@@ -65,7 +65,7 @@ public class IamHardeningTests
 
         var service = new UserService(
             manager.Object, null!, users.Object, roles.Object, null!, null!, tokens.Object, access.Object, uow.Object,
-            gate.Object, null!, actor, null!, null!, null!, new TestCenter(null, true));
+            gate.Object, null!, actor, null!, null!, null!, new TestCenter(null, true), Mock.Of<IAuditLogRepository>());
 
         await service.Delete(user.Id);
 

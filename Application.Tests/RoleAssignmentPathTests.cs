@@ -423,7 +423,7 @@ public class RoleAssignmentPathTests
             manager.Object, null!, users.Object, Mock.Of<IRoleRepository>(), permissions.Object, null!,
             Mock.Of<IRefreshTokenRepository>(), access.Object, Mock.Of<IUnitOfWork>(), gate.Object, null!,
             actor, Mock.Of<ITextInputSanitizer>(), Mock.Of<IMapper>(), Mock.Of<IMedicalCenterRepository>(),
-            new TestCenter(CenterA, false));
+            new TestCenter(CenterA, false), Mock.Of<IAuditLogRepository>());
 
         await Assert.ThrowsAsync<ForbiddenPermissionException>(() =>
             service.TogglePermissionsForUserAsync(new AssignPermissionToUserDto
@@ -578,7 +578,8 @@ public class RoleAssignmentPathTests
             sanitizer.Object,
             mapper.Object,
             new MedicalCenterRepository(db),
-            new TestCenter(central ? null : CenterA, central));
+            new TestCenter(central ? null : CenterA, central),
+            Mock.Of<IAuditLogRepository>());
 
         return new UserHarness(service, manager);
     }

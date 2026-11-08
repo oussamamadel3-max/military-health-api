@@ -285,7 +285,8 @@ public class UserManagementAlignmentTests
             null!,
             null!,
             null!,
-            new TestCenter(null, true));
+            new TestCenter(null, true),
+            Mock.Of<IAuditLogRepository>());
 
         return new AdminHarness(service, manager, gate, target, refreshToken);
     }

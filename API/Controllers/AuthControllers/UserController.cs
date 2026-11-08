@@ -18,17 +18,20 @@ namespace API.Controllers.AuthControllers
         private readonly IUserAssignmentService _userAssignments;
         private readonly IUserClinicAssignmentService _userClinicAssignments;
         private readonly IUserEffectiveAccessService _effectiveAccess;
+        private readonly IUserAdminOperationsService _adminOperations;
 
         public UserController(
             IUserService userService,
             IUserAssignmentService userAssignments,
             IUserClinicAssignmentService userClinicAssignments,
-            IUserEffectiveAccessService effectiveAccess)
+            IUserEffectiveAccessService effectiveAccess,
+            IUserAdminOperationsService adminOperations)
         {
             _userService = userService;
             _userAssignments = userAssignments;
             _userClinicAssignments = userClinicAssignments;
             _effectiveAccess = effectiveAccess;
+            _adminOperations = adminOperations;
         }
 
         [HttpPost("[action]")]
@@ -77,6 +80,25 @@ namespace API.Controllers.AuthControllers
         {
             var user = await _userService.GetUserAsync(id);
             return ApiResponse.Success("تم جلب بيانات المستخدم بنجاح.", user);
+        }
+
+        /// <summary>
+        /// آخر العمليات الإدارية على حساب المستخدم (Read Model فوق AuditEvent).
+        /// يتطلب AuditLog.Read مع التحقق من نطاق إدارة المستخدم المستهدف.
+        /// </summary>
+        [HttpGet("[action]/{userId}")]
+        [AuthorizePermission(SystemPermissions.AuditLog.Read)]
+        public async Task<IResult> GetAdminOperations(
+            string userId,
+            [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
+            [FromQuery][Range(1, 100)] int pageSize = 20,
+            CancellationToken cancellationToken = default)
+        {
+            var result = await _adminOperations.GetForUserAsync(userId, pageNumber, pageSize, cancellationToken);
+            var message = result.TotalCount == 0
+                ? "لا توجد عمليات إدارية مسجّلة لهذا الحساب."
+                : "تم جلب آخر العمليات الإدارية بنجاح.";
+            return ApiResponse.Success(message, result);
         }
 
         [HttpPatch("[action]/{id}")]

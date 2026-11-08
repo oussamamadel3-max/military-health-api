@@ -15,6 +15,10 @@ public class AuditEvent
     public string Result { get; set; } = "SUCCESS";
     public string? EntityType { get; set; }
     public string? EntityId { get; set; }
+    /// <summary>
+    /// المستخدم المستهدف بالعملية الإدارية عند اختلاف المنفّذ عن صاحب الحساب، أو عند أحداث الأمان على الحساب.
+    /// </summary>
+    public string? TargetUserId { get; set; }
     public string? ReasonText { get; set; }
     public string? OldValues { get; set; }
     public string? NewValues { get; set; }

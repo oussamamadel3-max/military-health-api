@@ -407,7 +407,8 @@ public class MinimumActiveRoleTests
             sanitizer.Object,
             mapper.Object,
             new MedicalCenterRepository(db),
-            new TestCenter(central ? null : CenterA, central));
+            new TestCenter(central ? null : CenterA, central),
+            Mock.Of<IAuditLogRepository>());
 
         return new UserHarness(service, manager);
     }
@@ -449,7 +450,8 @@ public class MinimumActiveRoleTests
             uow ?? new SavingUnitOfWork(db),
             gate.Object,
             current,
-            new TestCenter(unrestrictedActor ? null : CenterA, unrestrictedActor));
+            new TestCenter(unrestrictedActor ? null : CenterA, unrestrictedActor),
+            Mock.Of<IAuditLogRepository>());
 
         return new AssignmentHarness(service, manager);
     }

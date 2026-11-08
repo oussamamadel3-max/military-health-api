@@ -22,8 +22,10 @@ public class AuditEventConfiguration : IEntityTypeConfiguration<AuditEvent>
         builder.HasIndex(x => new { x.ActorUserId, x.OccurredAt });
         builder.HasIndex(x => new { x.CenterId, x.OccurredAt });
         builder.HasIndex(x => new { x.EntityType, x.EntityId });
+        builder.HasIndex(x => new { x.TargetUserId, x.OccurredAt });
         builder.HasIndex(x => new { x.ContextScope, x.OccurredAt });
         builder.HasOne(x => x.ActorUser).WithMany().HasForeignKey(x => x.ActorUserId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<Domain.Entities.Auth.User>().WithMany().HasForeignKey(x => x.TargetUserId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.Center).WithMany().HasForeignKey(x => x.CenterId).OnDelete(DeleteBehavior.Restrict);
         builder.ToTable(t => t.HasCheckConstraint("ckAuditEventContext",
             "(\"contextScope\" = 'CENTER' AND \"centerId\" IS NOT NULL) OR (\"contextScope\" = 'CENTRAL' AND \"centerId\" IS NULL)"));

@@ -280,7 +280,8 @@ public class ChangeOwnPasswordTests
             null!,
             null!,
             null!,
-            new TestCenter(null, true));
+            new TestCenter(null, true),
+            Mock.Of<IAuditLogRepository>());
 
         return new Harness(service, manager, tokens, uow, user, refreshToken);
     }

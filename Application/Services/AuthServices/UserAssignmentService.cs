@@ -24,6 +24,7 @@ public class UserAssignmentService : IUserAssignmentService
     private readonly IPermissionGate _permissionGate;
     private readonly ICurrentUserService _currentUserService;
     private readonly ICurrentCenterService _currentCenter;
+    private readonly IAuditLogRepository _auditLog;
 
     public UserAssignmentService(
         UserManager<User> userManager,
@@ -35,7 +36,8 @@ public class UserAssignmentService : IUserAssignmentService
         IUnitOfWork unitOfWork,
         IPermissionGate permissionGate,
         ICurrentUserService currentUserService,
-        ICurrentCenterService currentCenter)
+        ICurrentCenterService currentCenter,
+        IAuditLogRepository auditLog)
     {
         _userManager = userManager;
         _userRepository = userRepository;
@@ -47,6 +49,7 @@ public class UserAssignmentService : IUserAssignmentService
         _permissionGate = permissionGate;
         _currentUserService = currentUserService;
         _currentCenter = currentCenter;
+        _auditLog = auditLog;
     }
 
     public async Task<UserAssignmentsDto> GetAssignmentsAsync(
@@ -147,7 +150,10 @@ public class UserAssignmentService : IUserAssignmentService
 
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await SecurityStampHelper.InvalidateUserTokensAsync(
-                _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id);
+                _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id,
+                _auditLog, _currentUserService,
+                "إبطال الجلسات بعد تغيير إسناد المركز",
+                _currentCenter.IsCentralContext ? null : _currentCenter.CenterId);
             await tx.CommitAsync(cancellationToken);
 
             var saved = await _userRepository.QueryUserCenters()
@@ -202,7 +208,10 @@ public class UserAssignmentService : IUserAssignmentService
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
             await SecurityStampHelper.InvalidateUserTokensAsync(
-                _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id);
+                _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id,
+                _auditLog, _currentUserService,
+                "إبطال الجلسات بعد تغيير إسناد المستخدم",
+                _currentCenter.IsCentralContext ? null : _currentCenter.CenterId);
 
             await tx.CommitAsync(cancellationToken);
         }
@@ -304,7 +313,10 @@ public class UserAssignmentService : IUserAssignmentService
                 _userRepository, _roleRepository, user.Id, afterPerms, cancellationToken);
 
             await SecurityStampHelper.InvalidateUserTokensAsync(
-                _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id);
+                _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id,
+                _auditLog, _currentUserService,
+                "إبطال الجلسات بعد تغيير إسناد المستخدم",
+                _currentCenter.IsCentralContext ? null : _currentCenter.CenterId);
 
             await tx.CommitAsync(cancellationToken);
 
@@ -415,7 +427,10 @@ public class UserAssignmentService : IUserAssignmentService
                 _userRepository, _roleRepository, user.Id, afterPerms, cancellationToken);
 
             await SecurityStampHelper.InvalidateUserTokensAsync(
-                _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id);
+                _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id,
+                _auditLog, _currentUserService,
+                "إبطال الجلسات بعد تغيير إسناد المستخدم",
+                _currentCenter.IsCentralContext ? null : _currentCenter.CenterId);
 
             await tx.CommitAsync(cancellationToken);
         }

@@ -104,6 +104,8 @@ namespace Infrastructure.Persistence
                 ? null
                 : currentUser.UserId;
 
+            var entityType = entry.Entity.GetType().Name;
+            var entityId = ResolveEntityId(entry);
             auditEvents.Add(new AuditEvent
             {
                 OccurredAt = DateTimeOffset.Now,
@@ -112,8 +114,9 @@ namespace Infrastructure.Persistence
                 CenterId = centerId,
                 EventType = effectiveState.ToString(),
                 Result = "SUCCESS",
-                EntityType = entry.Entity.GetType().Name,
-                EntityId = ResolveEntityId(entry),
+                EntityType = entityType,
+                EntityId = entityId,
+                TargetUserId = ResolveTargetUserId(entry, entityType, entityId),
                 ReasonText = reason,
                 OldValues = oldValue,
                 NewValues = newValue,
@@ -152,6 +155,32 @@ namespace Infrastructure.Persistence
                 .ToArray();
 
             return parts.Length == 0 ? null : string.Join(":", parts);
+        }
+
+        /// <summary>
+        /// يربط الحدث بحساب المستخدم المستهدف عند توفره (User أو خاصية UserId).
+        /// </summary>
+        private static string? ResolveTargetUserId(EntityEntry entry, string entityType, string? entityId)
+        {
+            if (string.Equals(entityType, nameof(Domain.Entities.Auth.User), StringComparison.Ordinal))
+                return entityId;
+
+            var userIdProp = entry.Properties.FirstOrDefault(p =>
+                string.Equals(p.Metadata.Name, "UserId", StringComparison.Ordinal));
+            var fromProp = userIdProp?.CurrentValue?.ToString()
+                ?? userIdProp?.OriginalValue?.ToString();
+            if (!string.IsNullOrWhiteSpace(fromProp))
+                return fromProp;
+
+            if (!string.IsNullOrWhiteSpace(entityId) &&
+                string.Equals(entityType, nameof(Domain.Entities.Auth.UserCenter), StringComparison.Ordinal))
+            {
+                var colon = entityId.IndexOf(':');
+                if (colon > 0)
+                    return entityId[..colon];
+            }
+
+            return null;
         }
 
         private static IPAddress? ParseIp(string? value)

@@ -1,5 +1,7 @@
+using Application.Common.Security;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
+using Application.Interfaces.Services;
 using Domain.Entities.Auth;
 using Microsoft.AspNetCore.Identity;
 
@@ -19,7 +21,11 @@ namespace Application.Common.Permissions
             IRefreshTokenRepository refreshTokenRepository,
             IUnitOfWork unitOfWork,
             UserManager<User> userManager,
-            string userId)
+            string userId,
+            IAuditLogRepository? auditLog = null,
+            ICurrentUserService? currentUser = null,
+            string? reasonText = null,
+            Guid? centerId = null)
         {
             var user = await userRepository.FindByIdAsync(userId);
             if (user == null) return;
@@ -30,6 +36,17 @@ namespace Application.Common.Permissions
             foreach (var token in refreshTokens)
             {
                 refreshTokenRepository.MarkRevoked(token);
+            }
+
+            if (auditLog is not null && currentUser is not null)
+            {
+                auditLog.Add(UserAccountAdminAudit.Create(
+                    currentUser,
+                    UserAccountAdminEventTypes.SessionsInvalidated,
+                    userId,
+                    reasonText ?? "إبطال الجلسات النشطة بعد تغيير أمني على الحساب",
+                    details: new { reason = reasonText ?? "security-stamp" },
+                    centerId: centerId));
             }
 
             await unitOfWork.SaveChangesAsync();

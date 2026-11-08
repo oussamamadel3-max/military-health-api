@@ -16,10 +16,12 @@ namespace API.Controllers.AuthControllers
     public class RolesController : ControllerBase
     {
         private readonly IRoleService _roleService;
+        private readonly IRoleAdminOperationsService _adminOperations;
 
-        public RolesController(IRoleService roleService)
+        public RolesController(IRoleService roleService, IRoleAdminOperationsService adminOperations)
         {
             _roleService = roleService;
+            _adminOperations = adminOperations;
         }
 
         [HttpPost("[action]")]
@@ -52,6 +54,25 @@ namespace API.Controllers.AuthControllers
         {
             var role = await _roleService.GetById(id);
             return ApiResponse.Success("تم جلب بيانات الدور بنجاح.", role);
+        }
+
+        /// <summary>
+        /// آخر العمليات الإدارية على الدور (Read Model فوق AuditEvent).
+        /// يتطلب AuditLog.Read.
+        /// </summary>
+        [HttpGet("[action]/{roleId}")]
+        [AuthorizePermission(SystemPermissions.AuditLog.Read)]
+        public async Task<IResult> GetAdminOperations(
+            string roleId,
+            [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
+            [FromQuery][Range(1, 100)] int pageSize = 20,
+            CancellationToken cancellationToken = default)
+        {
+            var result = await _adminOperations.GetForRoleAsync(roleId, pageNumber, pageSize, cancellationToken);
+            var message = result.TotalCount == 0
+                ? "لا توجد عمليات إدارية مسجّلة لهذا الدور."
+                : "تم جلب آخر العمليات الإدارية للدور بنجاح.";
+            return ApiResponse.Success(message, result);
         }
 
         [HttpGet("[action]")]

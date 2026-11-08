@@ -60,6 +60,7 @@ public class AuditLoggerTests
         Assert.DoesNotContain("secret-hash", audit.OldValues);
         Assert.DoesNotContain("new-secret", audit.NewValues);
         Assert.DoesNotContain("PasswordHash", audit.NewValues);
+        Assert.Null(audit.TargetUserId);
     }
 
     [Fact]
@@ -349,12 +350,15 @@ internal sealed class ProbeDb : DbContext
         modelBuilder.Entity<LongProbe>().HasKey(x => x.Id);
         modelBuilder.Entity<StringProbe>().HasKey(x => x.Code);
         modelBuilder.Entity<CompositeProbe>().HasKey(x => new { x.PartA, x.PartB });
+        modelBuilder.Ignore<User>();
         modelBuilder.Entity<AuditEvent>().HasKey(x => x.EventId);
         modelBuilder.Entity<CrossCenterAccess>().HasKey(x => x.AccessId);
         modelBuilder.Entity<CrossCenterAccess>().Ignore(x => x.AuditEvent);
         modelBuilder.Entity<CrossCenterAccess>().Ignore(x => x.TargetCenter);
         modelBuilder.Entity<AuditEvent>().Ignore(x => x.ActorUser);
         modelBuilder.Entity<AuditEvent>().Ignore(x => x.Center);
+        // TargetUserId يُعامل كعمود عادي في ProbeDb دون علاقة FK إلى User.
+        modelBuilder.Entity<AuditEvent>().Property(x => x.TargetUserId);
     }
 }
 

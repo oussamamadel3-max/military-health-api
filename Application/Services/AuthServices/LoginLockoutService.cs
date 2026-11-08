@@ -1,3 +1,6 @@
+using Application.Common.Security;
+using Application.Interfaces;
+using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Application.Options;
 using Domain.Entities.Auth;
@@ -14,15 +17,24 @@ public sealed class LoginLockoutService : ILoginLockoutService
     private readonly UserManager<User> _userManager;
     private readonly IOptions<LoginLockoutSettings> _options;
     private readonly ILogger<LoginLockoutService> _logger;
+    private readonly IAuditLogRepository _auditLog;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserService _currentUser;
 
     public LoginLockoutService(
         UserManager<User> userManager,
         IOptions<LoginLockoutSettings> options,
-        ILogger<LoginLockoutService> logger)
+        ILogger<LoginLockoutService> logger,
+        IAuditLogRepository auditLog,
+        IUnitOfWork unitOfWork,
+        ICurrentUserService currentUser)
     {
         _userManager = userManager;
         _options = options;
         _logger = logger;
+        _auditLog = auditLog;
+        _unitOfWork = unitOfWork;
+        _currentUser = currentUser;
     }
 
     public int GetRetryAfterSeconds(User user)
@@ -108,6 +120,15 @@ public sealed class LoginLockoutService : ILoginLockoutService
             user = await _userManager.FindByIdAsync(userId)
                 ?? throw new InvalidOperationException($"User '{userId}' was not found after lockout reset.");
 
+            _auditLog.Add(UserAccountAdminAudit.Create(
+                _currentUser,
+                UserAccountAdminEventTypes.AccountLocked,
+                userId,
+                "قفل الحساب مؤقتاً بعد محاولات دخول فاشلة",
+                details: new { durationSeconds },
+                systemActor: true));
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
             return GetRetryAfterSeconds(user);
         }
 
@@ -125,6 +146,8 @@ public sealed class LoginLockoutService : ILoginLockoutService
     {
         ArgumentNullException.ThrowIfNull(user);
 
+        var wasLocked = user.LockoutEnd is not null && user.LockoutEnd > DateTimeOffset.UtcNow;
+
         var resetFails = await _userManager.ResetAccessFailedCountAsync(user);
         EnsureSucceeded(resetFails, nameof(_userManager.ResetAccessFailedCountAsync), user.Id);
 
@@ -140,6 +163,17 @@ public sealed class LoginLockoutService : ILoginLockoutService
         {
             var clear = await _userManager.SetLockoutEndDateAsync(user, null);
             EnsureSucceeded(clear, nameof(_userManager.SetLockoutEndDateAsync), user.Id);
+        }
+
+        if (wasLocked)
+        {
+            _auditLog.Add(UserAccountAdminAudit.Create(
+                _currentUser,
+                UserAccountAdminEventTypes.AccountUnlocked,
+                user.Id,
+                "فك قفل الحساب بعد تسجيل دخول ناجح",
+                systemActor: true));
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
     }
 

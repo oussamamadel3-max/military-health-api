@@ -36,6 +36,7 @@ public class UserService : IUserService
     private readonly IMapper _mapper;
     private readonly IMedicalCenterRepository _centers;
     private readonly ICurrentCenterService _currentCenter;
+    private readonly IAuditLogRepository _auditLog;
 
     public UserService(
         UserManager<User> userManager,
@@ -53,7 +54,8 @@ public class UserService : IUserService
         ITextInputSanitizer textSanitizer,
         IMapper mapper,
         IMedicalCenterRepository centers,
-        ICurrentCenterService currentCenter)
+        ICurrentCenterService currentCenter,
+        IAuditLogRepository auditLog)
     {
         _userManager = userManager;
         _roleManager = roleManager;
@@ -71,6 +73,7 @@ public class UserService : IUserService
         _mapper = mapper;
         _centers = centers;
         _currentCenter = currentCenter;
+        _auditLog = auditLog;
     }
 
     #region الانشاء 
@@ -664,7 +667,10 @@ public class UserService : IUserService
         if (wasActive && !user.IsActive)
         {
             await SecurityStampHelper.InvalidateUserTokensAsync(
-                _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, id);
+                _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, id,
+                _auditLog, _currentUserService,
+                "إبطال الجلسات بعد تعطيل الحساب",
+                _currentCenter.IsCentralContext ? null : _currentCenter.CenterId);
         }
         else if (!wasActive && user.IsActive)
         {
@@ -790,8 +796,19 @@ public class UserService : IUserService
         if (!flagResult.Succeeded)
             throw new InvalidUserDataException(string.Join(", ", flagResult.Errors.Select(e => e.Description)));
 
+        _auditLog.Add(UserAccountAdminAudit.Create(
+            _currentUserService,
+            UserAccountAdminEventTypes.PasswordReset,
+            user.Id,
+            "إعادة تعيين كلمة المرور إدارياً مع فرض التغيير عند الدخول التالي",
+            details: new { mustChangePassword = true },
+            centerId: _currentCenter.IsCentralContext ? null : _currentCenter.CenterId));
+
         await SecurityStampHelper.InvalidateUserTokensAsync(
-            _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id);
+            _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id,
+            _auditLog, _currentUserService,
+            "إبطال الجلسات بعد إعادة تعيين كلمة المرور",
+            _currentCenter.IsCentralContext ? null : _currentCenter.CenterId);
     }
     #endregion
 

@@ -144,6 +144,10 @@ namespace Infrastructure.Migrations
                         .HasColumnType("citext")
                         .HasColumnName("result");
 
+                    b.Property<string>("TargetUserId")
+                        .HasColumnType("text")
+                        .HasColumnName("targetUserId");
+
                     b.Property<string>("UserAgent")
                         .HasColumnType("text")
                         .HasColumnName("userAgent");
@@ -159,6 +163,8 @@ namespace Infrastructure.Migrations
                     b.HasIndex("ContextScope", "OccurredAt");
 
                     b.HasIndex("EntityType", "EntityId");
+
+                    b.HasIndex("TargetUserId", "OccurredAt");
 
                     b.ToTable("event", "audit", t =>
                         {
@@ -3559,9 +3565,16 @@ namespace Infrastructure.Migrations
                         .HasForeignKey("CenterId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("Domain.Entities.Auth.User", "TargetUser")
+                        .WithMany()
+                        .HasForeignKey("TargetUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("ActorUser");
 
                     b.Navigation("Center");
+
+                    b.Navigation("TargetUser");
                 });
 
             modelBuilder.Entity("Domain.Entities.Audit.CrossCenterAccess", b =>
