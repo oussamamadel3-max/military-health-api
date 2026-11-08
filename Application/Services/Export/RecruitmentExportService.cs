@@ -323,19 +323,6 @@ public class RecruitmentExportService : IRecruitmentExportService
             trackedBatch.CompletedAt = completedAt;
 
             var memberIds = eligible.Select(e => e.Member.MemberId).ToList();
-            var trackedMembers = await _members.Query(asNoTracking: false)
-                .Where(m => memberIds.Contains(m.MemberId) && m.CurrentMedicalCenterId == centerId)
-                .ToListAsync(cancellationToken);
-
-            foreach (var member in trackedMembers)
-            {
-                // لا تُعلَّم حالة التصدير إلا بعد نجاح توليد الملف وربطه.
-                member.ExportStatus = FinalDecisionService.ExportStatusExported;
-                member.LastExportedRevision = member.DataRevision;
-                member.LastExportedAt = completedAt;
-                member.UpdatedAt = completedAt;
-                member.UpdatedByUserId = userId;
-            }
 
             RecordAudit(
                 userId,
@@ -350,20 +337,36 @@ public class RecruitmentExportService : IRecruitmentExportService
                 {
                     batchId,
                     fileAssetId,
-                    RecordCount = trackedMembers.Count,
+                    RecordCount = memberIds.Count,
                     // لا يُسجَّل StorageKey ولا محتوى الملف.
                     OriginalName = SanitizeFileName(file.FileName),
                     SizeBytes = size
                 }));
 
+            // أولاً احفظ الدفعة/الملف/التدقيق، ثم علّم التصدير بأعمدة التصدير فقط
+            // حتى لا يطلق trgMemberRevisionOnMaterialUpdate زيادة dataRevision ويعيد UNEXPORTED.
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            var marked = await _members.MarkExportedForRecruitmentAsync(
+                centerId,
+                memberIds,
+                userId,
+                completedAt,
+                cancellationToken);
+            if (marked != memberIds.Count)
+            {
+                throw new InvalidRecruitmentExportDataException(
+                    "تعذّر تعليم بعض المنتسبين كمصدَّرين بعد توليد الملف.",
+                    new { Expected = memberIds.Count, Marked = marked });
+            }
+
             await tx.CommitAsync(cancellationToken);
 
             return new RecruitmentExportBatchResultDto
             {
                 ExportBatchId = batchId,
                 Status = StatusCompleted,
-                RecordCount = trackedMembers.Count,
+                RecordCount = memberIds.Count,
                 ExcludedCount = exclusions.Count,
                 Exclusions = exclusions,
                 GeneratedFileId = fileAssetId,
@@ -769,7 +772,8 @@ public class RecruitmentExportService : IRecruitmentExportService
         List<RecruitmentExportExclusionDto> exclusions,
         CancellationToken cancellationToken)
     {
-        var members = await _members.Query(asNoTracking: false)
+        // asNoTracking: أهلية التصدير قراءة فقط؛ تعليم EXPORTED يتم لاحقاً عبر تحديث أعمدة التصدير فقط.
+        var members = await _members.Query(asNoTracking: true)
             .Include(m => m.RecruitmentCenter)
             .Where(m => memberIds.Contains(m.MemberId) && m.CurrentMedicalCenterId == centerId)
             .ToListAsync(cancellationToken);

@@ -87,4 +87,16 @@ public interface IMemberRepository
     Task<MemberTransfer?> GetLastTransferAsync(
         Guid memberId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// يعلّم المنتسبين كمصدَّرين للتجنيد بتحديث أعمدة التصدير فقط
+    /// (<c>exportStatus</c> / <c>lastExportedRevision</c> / <c>lastExportedAt</c> / التدقيق الزمني)
+    /// دون المساس ببقية حقول الملف، حتى لا يطلق PostgreSQL زيادة <c>dataRevision</c>.
+    /// </summary>
+    Task<int> MarkExportedForRecruitmentAsync(
+        Guid centerId,
+        IReadOnlyCollection<Guid> memberIds,
+        string updatedByUserId,
+        DateTimeOffset exportedAt,
+        CancellationToken cancellationToken = default);
 }

@@ -333,9 +333,54 @@ public class MemberRepository : IMemberRepository
         return transferId;
     }
 
+    /// <inheritdoc />
+    public async Task<int> MarkExportedForRecruitmentAsync(
+        Guid centerId,
+        IReadOnlyCollection<Guid> memberIds,
+        string updatedByUserId,
+        DateTimeOffset exportedAt,
+        CancellationToken cancellationToken = default)
+    {
+        if (memberIds.Count == 0)
+            return 0;
+
+        var query = _context.Members
+            .Where(m => memberIds.Contains(m.MemberId) && m.CurrentMedicalCenterId == centerId);
+
+        // PostgreSQL: تحديث أعمدة التصدير فقط حتى لا يطلق prepareMemberRevision زيادة dataRevision.
+        // InMemory/غير العلائقي: مسار مكافئ عبر ChangeTracker (لا محفزات مراجعة).
+        if (!IsRelationalProvider())
+        {
+            var members = await query.ToListAsync(cancellationToken);
+            foreach (var member in members)
+            {
+                member.ExportStatus = "EXPORTED";
+                member.LastExportedRevision = member.DataRevision;
+                member.LastExportedAt = exportedAt;
+                member.UpdatedAt = exportedAt;
+                member.UpdatedByUserId = updatedByUserId;
+            }
+
+            await _context.SaveChangesAsync(cancellationToken);
+            return members.Count;
+        }
+
+        return await query.ExecuteUpdateAsync(
+            setters => setters
+                .SetProperty(m => m.ExportStatus, "EXPORTED")
+                .SetProperty(m => m.LastExportedRevision, m => m.DataRevision)
+                .SetProperty(m => m.LastExportedAt, exportedAt)
+                .SetProperty(m => m.UpdatedAt, exportedAt)
+                .SetProperty(m => m.UpdatedByUserId, updatedByUserId),
+            cancellationToken);
+    }
+
     private bool IsNpgsqlProvider()
         => _context.Database.ProviderName is { } name
            && name.Contains("Npgsql", StringComparison.OrdinalIgnoreCase);
+
+    private bool IsRelationalProvider()
+        => _context.Database.IsRelational();
 
     private static IQueryable<Member> IncludeLookups(IQueryable<Member> query)
         => query
