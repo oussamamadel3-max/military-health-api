@@ -7,6 +7,7 @@ using Application.Interfaces.Services;
 using Application.Services;
 using Application.Services.OperationalReports;
 using Application.Services.Supervisor;
+using Domain.Entities.Archive;
 using Domain.Entities.Clinical;
 using Domain.Entities.Core;
 using Infrastructure.Persistence;
@@ -62,7 +63,28 @@ public class OperationalReportsServiceTests
         Assert.Equal(1, kpi.RejectedCount);
         Assert.Equal(1, kpi.DeferredCount);
         Assert.Equal(1, kpi.WaitingCount);
+        Assert.Equal(0, kpi.ArchivedCount);
         Assert.Equal(CenterA, kpi.CenterId);
+    }
+
+    [Fact]
+    public async Task LocalKpis_counts_archived_within_filtered_center_members()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+
+        var archivedA = await CreateMemberWithDecisionAsync(db, CenterA, "KPI-ARC-A", 1);
+        await CreateMemberWithDecisionAsync(db, CenterA, "KPI-NO-ARC", 1);
+        await CreateMemberAsync(db, CenterA, "KPI-WAIT-NO-ARC");
+        var archivedB = await CreateMemberWithDecisionAsync(db, CenterB, "KPI-ARC-B", 1);
+
+        await ArchiveMemberAsync(db, archivedA, CenterA);
+        await ArchiveMemberAsync(db, archivedB, CenterB);
+
+        var kpi = await CreateService(db, CenterA).GetLocalKpisAsync(new LocalKpiQuery());
+
+        Assert.Equal(3, kpi.TotalMembers);
+        Assert.Equal(1, kpi.ArchivedCount);
     }
 
     [Fact]
@@ -78,6 +100,8 @@ public class OperationalReportsServiceTests
 
         Assert.Equal(1, a.TotalMembers);
         Assert.Equal(1, b.TotalMembers);
+        Assert.Equal(0, a.ArchivedCount);
+        Assert.Equal(0, b.ArchivedCount);
         Assert.Equal(CenterA, a.CenterId);
         Assert.Equal(CenterB, b.CenterId);
     }
@@ -794,6 +818,26 @@ public class OperationalReportsServiceTests
 
         await db.SaveChangesAsync();
         return memberId;
+    }
+
+    private static async Task ArchiveMemberAsync(AppDbContext db, Guid memberId, Guid centerId)
+    {
+        var decision = await db.FinalDecisions.SingleAsync(d =>
+            d.MemberId == memberId && d.CenterId == centerId);
+        var center = await db.MedicalCenters.SingleAsync(c => c.CenterId == centerId);
+        var seq = await db.MemberArchives.CountAsync(a => a.CenterId == centerId) + 1;
+        var now = DateTimeOffset.UtcNow;
+        db.MemberArchives.Add(new MemberArchive
+        {
+            ArchiveId = Guid.NewGuid(),
+            MemberId = memberId,
+            FinalDecisionId = decision.FinalDecisionId,
+            CenterId = centerId,
+            ArchiveNumber = $"{center.Code}-{seq:D8}",
+            ArchivedAt = now,
+            UpdatedAt = now
+        });
+        await db.SaveChangesAsync();
     }
 
     private static async Task<Guid> CreateMemberAsync(AppDbContext db, Guid centerId, string recruitment)

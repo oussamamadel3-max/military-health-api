@@ -40,6 +40,13 @@ public class CenterKpiDto
     public int UnexportedCount { get; set; }
     public int CompleteExamsCount { get; set; }
     public int IncompleteExamsCount { get; set; }
+
+    /// <summary>
+    /// عدد المنتسبين ضمن مجموعة المؤشر الحالية الذين يملكون سجل أرشيف في نفس المركز.
+    /// خاصية تراكمية على عقد KPI؛ لا تغيّر الحقول السابقة.
+    /// </summary>
+    public int ArchivedCount { get; set; }
+
     public IReadOnlyList<DeferredActionBreakdownDto> DeferredByAction { get; set; } =
         Array.Empty<DeferredActionBreakdownDto>();
 }

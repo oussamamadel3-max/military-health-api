@@ -765,6 +765,16 @@ public class OperationalReportsService : IOperationalReportsService
 
         var deferredBreakdown = await BuildDeferredBreakdownAsync(center.CenterId, range, cancellationToken);
 
+        // عدّ الأرشيف ضمن نفس مجموعة المنتسبين المصفّاة — استعلام Count واحد على MemberId + CenterId.
+        var archivedCount = 0;
+        if (memberIds.Count > 0)
+        {
+            archivedCount = await _archives.Query(asNoTracking: true)
+                .CountAsync(
+                    a => a.CenterId == center.CenterId && memberIds.Contains(a.MemberId),
+                    cancellationToken);
+        }
+
         return new CenterKpiDto
         {
             CenterId = center.CenterId,
@@ -781,6 +791,7 @@ public class OperationalReportsService : IOperationalReportsService
                 string.Equals(m.ExportStatus, FinalDecisionService.ExportStatusUnexported, StringComparison.OrdinalIgnoreCase)),
             CompleteExamsCount = complete,
             IncompleteExamsCount = incomplete,
+            ArchivedCount = archivedCount,
             DeferredByAction = deferredBreakdown
         };
     }
@@ -858,6 +869,7 @@ public class OperationalReportsService : IOperationalReportsService
             UnexportedCount = centers.Sum(c => c.UnexportedCount),
             CompleteExamsCount = centers.Sum(c => c.CompleteExamsCount),
             IncompleteExamsCount = centers.Sum(c => c.IncompleteExamsCount),
+            ArchivedCount = centers.Sum(c => c.ArchivedCount),
             DeferredByAction = Array.Empty<DeferredActionBreakdownDto>()
         };
     }
