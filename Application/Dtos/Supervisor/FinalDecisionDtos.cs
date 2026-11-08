@@ -131,3 +131,36 @@ public class FinalDecisionDeferredActionDto
     public string FollowupNote { get; set; } = null!;
     public string Status { get; set; } = null!;
 }
+
+/// <summary>
+/// طلب تأكيد مراجعة النسخة الحالية من ملف المنتسب دون تغيير القرار الطبي
+/// (امتداد تشغيلي مكمّل لـ FR-058).
+/// </summary>
+public class ConfirmCurrentRevisionRequest
+{
+    /// <summary>
+    /// مراجعة بيانات المنتسب المتوقعة؛ إلزامية لحماية التزامن.
+    /// عند عدم التطابق يُرفض الطلب بـ 409.
+    /// </summary>
+    public long ExpectedDataRevision { get; set; }
+}
+
+/// <summary>نتيجة تأكيد مراجعة النسخة الحالية دون تعديل القرار النهائي.</summary>
+public class ConfirmCurrentRevisionDto
+{
+    public Guid MemberId { get; set; }
+    public Guid CenterId { get; set; }
+    public Guid FinalDecisionId { get; set; }
+    public short ResultStatusId { get; set; }
+    public string? ResultStatusNameAr { get; set; }
+    public string ExportStatus { get; set; } = null!;
+    public long DataRevision { get; set; }
+    public long ReviewedRevision { get; set; }
+    public DateTimeOffset ReviewedAt { get; set; }
+    public string ReviewedByUserId { get; set; } = null!;
+
+    /// <summary>
+    /// true عندما تكون النسخة مُراجَعة والنتيجة قبول/رفض وحالة التصدير غير مصدَّر.
+    /// </summary>
+    public bool EligibleForRecruitmentExport { get; set; }
+}

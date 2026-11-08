@@ -19,12 +19,14 @@ namespace Application.Services.Supervisor;
 
 /// <summary>
 /// إصدار وتعديل القرار الطبي النهائي المعتمد مع مبرر الاختلاف،
-/// ربط DeferredAction، وسجل تاريخ التغيّر، وإنشاء/تحديث الأرشيف (FR-053…FR-056، FR-069).
+/// ربط DeferredAction، وسجل تاريخ التغيّر، وإنشاء/تحديث الأرشيف (FR-053…FR-056، FR-069)،
+/// وتأكيد مراجعة النسخة الحالية كامتداد تشغيلي مكمّل لـ FR-058.
 /// </summary>
 public class FinalDecisionService : IFinalDecisionService
 {
     public const string FinalDecisionIssuedEventType = "FinalDecisionIssued";
     public const string FinalDecisionAmendedEventType = "FinalDecisionAmended";
+    public const string MemberCurrentRevisionConfirmedEventType = "MemberCurrentRevisionConfirmed";
     public const string MemberArchiveCreatedEventType = "MemberArchiveCreated";
     public const string MemberArchiveUpdatedEventType = "MemberArchiveUpdated";
     public const string TargetScopeOneClinic = "ONE_CLINIC";
@@ -490,6 +492,111 @@ public class FinalDecisionService : IFinalDecisionService
             ChangeReason = changeReason,
             ExportResetPerformed = true,
             PreviousExportStatus = previousExportStatus
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<ConfirmCurrentRevisionDto> ConfirmCurrentRevisionAsync(
+        Guid memberId,
+        ConfirmCurrentRevisionRequest request,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (memberId == Guid.Empty)
+            throw new InvalidFinalDecisionDataException("معرّف المنتسب مطلوب.");
+
+        if (request is null)
+            throw new InvalidFinalDecisionDataException("بيانات تأكيد مراجعة النسخة مطلوبة.");
+
+        var centerId = await _permissionGate.EnsureLocalAsync(
+            MilitaryHealthPermissions.Clinical.FinalDecision,
+            clientCenterId,
+            cancellationToken);
+
+        var userId = RequireUserId();
+
+        Member member;
+        FinalDecision decision;
+        long? previousReviewedRevision;
+        DateTimeOffset? previousReviewedAt;
+        string? previousReviewedByUserId;
+
+        await using var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            await _members.LockMemberForUpdateAsync(memberId, cancellationToken);
+
+            member = await _members.GetByIdInCenterAsync(
+                memberId,
+                centerId,
+                asNoTracking: false,
+                cancellationToken)
+                ?? throw new MemberNotFoundException();
+
+            if (member.DataRevision != request.ExpectedDataRevision)
+                throw new FinalDecisionConcurrencyException();
+
+            if (!string.Equals(
+                    member.ExportStatus,
+                    ExportStatusUnexported,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new FinalDecisionReviewBlockedForExportedMemberException();
+            }
+
+            decision = await _clinicWorkspace.QueryFinalDecisions(asNoTracking: true)
+                .FirstOrDefaultAsync(
+                    d => d.MemberId == memberId && d.CenterId == centerId,
+                    cancellationToken)
+                ?? throw new FinalDecisionNotFoundException();
+
+            previousReviewedRevision = member.ReviewedRevision;
+            previousReviewedAt = member.ReviewedAt;
+            previousReviewedByUserId = member.ReviewedByUserId;
+
+            var now = DateTimeOffset.UtcNow;
+            // لا تُغيَّر النتيجة الطبية ولا DataRevision؛ فقط علامة مراجعة النسخة الحالية.
+            MarkMemberReviewed(member, userId, now);
+
+            RecordCurrentRevisionConfirmedAudit(
+                userId,
+                centerId,
+                member,
+                decision,
+                previousReviewedRevision,
+                previousReviewedAt,
+                previousReviewedByUserId);
+
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await tx.RollbackAsync(cancellationToken);
+            throw;
+        }
+
+        var statusName = await _referenceData.ResultStatuses(asNoTracking: true)
+            .Where(s => s.StatusId == decision.ResultStatusId)
+            .Select(s => s.NameAr)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return new ConfirmCurrentRevisionDto
+        {
+            MemberId = member.MemberId,
+            CenterId = centerId,
+            FinalDecisionId = decision.FinalDecisionId,
+            ResultStatusId = decision.ResultStatusId,
+            ResultStatusNameAr = statusName,
+            ExportStatus = member.ExportStatus,
+            DataRevision = member.DataRevision,
+            ReviewedRevision = member.ReviewedRevision!.Value,
+            ReviewedAt = member.ReviewedAt!.Value,
+            ReviewedByUserId = member.ReviewedByUserId!,
+            EligibleForRecruitmentExport = IsEligibleForRecruitmentExport(
+                decision.ResultStatusId,
+                member.ExportStatus)
+                && IsCurrentRevisionReviewed(member.DataRevision, member.ReviewedRevision)
         };
     }
 
@@ -1010,6 +1117,54 @@ public class FinalDecisionService : IFinalDecisionService
                 archive.ArchiveNumber,
                 archive.ArchivedAt,
                 archive.UpdatedAt
+            }),
+            UserAgent = _currentUser.UserAgent,
+            CorrelationId = _currentUser.CorrelationId == Guid.Empty
+                ? Guid.NewGuid()
+                : _currentUser.CorrelationId,
+            IPAddress = IPAddress.TryParse(_currentUser.IPAddress, out var ip) ? ip : null
+        });
+    }
+
+    private void RecordCurrentRevisionConfirmedAudit(
+        string userId,
+        Guid centerId,
+        Member member,
+        FinalDecision decision,
+        long? previousReviewedRevision,
+        DateTimeOffset? previousReviewedAt,
+        string? previousReviewedByUserId)
+    {
+        _audit.Add(new AuditEvent
+        {
+            OccurredAt = DateTimeOffset.UtcNow,
+            ActorUserId = userId,
+            ContextScope = CenterClaimTypes.Center,
+            CenterId = centerId,
+            EventType = MemberCurrentRevisionConfirmedEventType,
+            Result = "SUCCESS",
+            EntityType = nameof(Member),
+            EntityId = member.MemberId.ToString(),
+            ReasonText = $"تأكيد مراجعة النسخة الحالية للمنتسب {member.MemberId:D} عند المراجعة {member.DataRevision}",
+            OldValues = JsonSerializer.Serialize(new
+            {
+                ReviewedRevision = previousReviewedRevision,
+                ReviewedAt = previousReviewedAt,
+                ReviewedByUserId = previousReviewedByUserId,
+                member.DataRevision,
+                member.ExportStatus
+            }),
+            NewValues = JsonSerializer.Serialize(new
+            {
+                member.MemberId,
+                decision.FinalDecisionId,
+                decision.ResultStatusId,
+                member.DataRevision,
+                member.ReviewedRevision,
+                member.ReviewedAt,
+                member.ReviewedByUserId,
+                member.ExportStatus,
+                DecisionUnchanged = true
             }),
             UserAgent = _currentUser.UserAgent,
             CorrelationId = _currentUser.CorrelationId == Guid.Empty

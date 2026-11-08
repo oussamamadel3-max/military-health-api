@@ -84,3 +84,18 @@ public class FinalDecisionUnchangedException : BusinessException
     {
     }
 }
+
+/// <summary>
+/// يُرمى عند محاولة تأكيد مراجعة النسخة الحالية لملف سبق تصديره
+/// (امتداد تشغيلي لـ FR-058؛ المراجعة موجّهة لملفات غير مصدَّرة).
+/// </summary>
+public class FinalDecisionReviewBlockedForExportedMemberException : BusinessException
+{
+    public FinalDecisionReviewBlockedForExportedMemberException()
+        : base(
+            "لا يمكن تأكيد مراجعة النسخة لملف سبق تصديره؛ عدّل القرار النهائي أولاً لإعادته إلى غير مصدَّر عند الحاجة.",
+            "FINAL_DECISION_REVIEW_BLOCKED_EXPORTED",
+            400)
+    {
+    }
+}

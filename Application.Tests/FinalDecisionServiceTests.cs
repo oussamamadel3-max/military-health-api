@@ -885,6 +885,167 @@ public class FinalDecisionServiceTests
         Assert.Equal(0, await db.FinalDecisionHistories.CountAsync());
     }
 
+    [Fact]
+    public async Task ConfirmCurrentRevision_marks_reviewed_without_changing_decision_or_data_revision()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, CenterA, "FD-REV-OK");
+        await SeedAllAssessmentsAsync(db, memberId, CenterA, resultStatusId: 1);
+
+        var service = CreateService(db, CenterA, allow: true);
+        var issued = await service.IssueAsync(memberId, new IssueFinalDecisionRequest
+        {
+            ResultStatusId = 1,
+            ExpectedDataRevision = 1
+        });
+
+        var member = await db.Members.SingleAsync(m => m.MemberId == memberId);
+        member.ReviewedRevision = null;
+        member.ReviewedAt = null;
+        member.ReviewedByUserId = null;
+        member.DataRevision = 74;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var confirmed = await service.ConfirmCurrentRevisionAsync(
+            memberId,
+            new ConfirmCurrentRevisionRequest { ExpectedDataRevision = 74 });
+
+        Assert.Equal(memberId, confirmed.MemberId);
+        Assert.Equal(CenterA, confirmed.CenterId);
+        Assert.Equal(issued.FinalDecisionId, confirmed.FinalDecisionId);
+        Assert.Equal((short)1, confirmed.ResultStatusId);
+        Assert.Equal("مقبول", confirmed.ResultStatusNameAr);
+        Assert.Equal(FinalDecisionService.ExportStatusUnexported, confirmed.ExportStatus);
+        Assert.Equal(74, confirmed.DataRevision);
+        Assert.Equal(74, confirmed.ReviewedRevision);
+        Assert.Equal("actor-1", confirmed.ReviewedByUserId);
+        Assert.True(confirmed.EligibleForRecruitmentExport);
+
+        member = await db.Members.SingleAsync(m => m.MemberId == memberId);
+        Assert.Equal(74, member.DataRevision);
+        Assert.Equal(74, member.ReviewedRevision);
+        Assert.Equal("actor-1", member.ReviewedByUserId);
+        Assert.NotNull(member.ReviewedAt);
+
+        var decision = await db.FinalDecisions.SingleAsync(d => d.MemberId == memberId);
+        Assert.Equal((short)1, decision.ResultStatusId);
+        Assert.Equal(0, await db.FinalDecisionHistories.CountAsync());
+        Assert.Equal(1, await db.AuditEvents.CountAsync(e =>
+            e.EventType == FinalDecisionService.MemberCurrentRevisionConfirmedEventType
+            && e.Result == "SUCCESS"
+            && e.EntityType == nameof(Domain.Entities.Patient.Member)));
+    }
+
+    [Fact]
+    public async Task ConfirmCurrentRevision_rejects_stale_expected_revision()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, CenterA, "FD-REV-STALE");
+        await SeedAllAssessmentsAsync(db, memberId, CenterA, resultStatusId: 1);
+
+        var service = CreateService(db, CenterA, allow: true);
+        await service.IssueAsync(memberId, new IssueFinalDecisionRequest { ResultStatusId = 1 });
+
+        var member = await db.Members.SingleAsync(m => m.MemberId == memberId);
+        member.ReviewedRevision = null;
+        member.DataRevision = 10;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        await Assert.ThrowsAsync<FinalDecisionConcurrencyException>(() =>
+            service.ConfirmCurrentRevisionAsync(
+                memberId,
+                new ConfirmCurrentRevisionRequest { ExpectedDataRevision = 9 }));
+
+        member = await db.Members.SingleAsync(m => m.MemberId == memberId);
+        Assert.Null(member.ReviewedRevision);
+        Assert.Equal(0, await db.AuditEvents.CountAsync(e =>
+            e.EventType == FinalDecisionService.MemberCurrentRevisionConfirmedEventType));
+    }
+
+    [Fact]
+    public async Task ConfirmCurrentRevision_rejects_missing_permission()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, CenterA, "FD-REV-PERM");
+        await SeedAllAssessmentsAsync(db, memberId, CenterA, resultStatusId: 1);
+
+        var issuer = CreateService(db, CenterA, allow: true);
+        await issuer.IssueAsync(memberId, new IssueFinalDecisionRequest { ResultStatusId = 1 });
+
+        var denied = CreateService(db, CenterA, allow: false);
+        await Assert.ThrowsAsync<ForbiddenPermissionException>(() =>
+            denied.ConfirmCurrentRevisionAsync(
+                memberId,
+                new ConfirmCurrentRevisionRequest { ExpectedDataRevision = 2 }));
+    }
+
+    [Fact]
+    public async Task ConfirmCurrentRevision_rejects_exported_member()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, CenterA, "FD-REV-EXP");
+        await SeedAllAssessmentsAsync(db, memberId, CenterA, resultStatusId: 1);
+
+        var service = CreateService(db, CenterA, allow: true);
+        var issued = await service.IssueAsync(memberId, new IssueFinalDecisionRequest { ResultStatusId = 1 });
+
+        var member = await db.Members.SingleAsync(m => m.MemberId == memberId);
+        member.ExportStatus = FinalDecisionService.ExportStatusExported;
+        member.LastExportedAt = DateTimeOffset.UtcNow;
+        member.LastExportedRevision = member.DataRevision;
+        member.ReviewedRevision = null;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        await Assert.ThrowsAsync<FinalDecisionReviewBlockedForExportedMemberException>(() =>
+            service.ConfirmCurrentRevisionAsync(
+                memberId,
+                new ConfirmCurrentRevisionRequest { ExpectedDataRevision = issued.MemberDataRevision }));
+    }
+
+    [Fact]
+    public async Task ConfirmCurrentRevision_rejects_when_no_final_decision()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, CenterA, "FD-REV-NONE");
+
+        var service = CreateService(db, CenterA, allow: true);
+        await Assert.ThrowsAsync<FinalDecisionNotFoundException>(() =>
+            service.ConfirmCurrentRevisionAsync(
+                memberId,
+                new ConfirmCurrentRevisionRequest { ExpectedDataRevision = 1 }));
+    }
+
+    [Fact]
+    public async Task ConfirmCurrentRevision_rejects_cross_center()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, CenterA, "FD-REV-XCTR");
+        await SeedAllAssessmentsAsync(db, memberId, CenterA, resultStatusId: 1);
+
+        var serviceA = CreateService(db, CenterA, allow: true);
+        await serviceA.IssueAsync(memberId, new IssueFinalDecisionRequest { ResultStatusId = 1 });
+
+        var member = await db.Members.SingleAsync(m => m.MemberId == memberId);
+        member.ReviewedRevision = null;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var serviceB = CreateService(db, CenterB, allow: true);
+        await Assert.ThrowsAsync<MemberNotFoundException>(() =>
+            serviceB.ConfirmCurrentRevisionAsync(
+                memberId,
+                new ConfirmCurrentRevisionRequest { ExpectedDataRevision = member.DataRevision }));
+    }
+
     #region Helpers
 
     private static IssueFinalDecisionRequest ValidDeferredRequest(

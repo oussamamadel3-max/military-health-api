@@ -9,7 +9,8 @@ using Microsoft.AspNetCore.Mvc;
 namespace API.Controllers;
 
 /// <summary>
-/// إصدار وتعديل القرار النهائي المعتمد ضمن مساحة عمل المشرف (FR-053…FR-056).
+/// إصدار وتعديل القرار النهائي المعتمد ضمن مساحة عمل المشرف (FR-053…FR-056)،
+/// وتأكيد مراجعة النسخة الحالية كامتداد تشغيلي مكمّل لـ FR-058.
 /// </summary>
 [ApiController]
 [Authorize]
@@ -60,6 +61,26 @@ public class SupervisorFinalDecisionController : ControllerBase
             cancellationToken);
 
         return ApiResponse.Success("تم تعديل القرار النهائي وتسجيل التغير بنجاح.", amended);
+    }
+
+    /// <summary>
+    /// يؤكّد مراجعة النسخة الحالية دون تغيير القرار الطبي أو زيادة DataRevision
+    /// (امتداد تشغيلي مكمّل لـ FR-058).
+    /// </summary>
+    [HttpPost("members/{memberId:guid}/final-decision/confirm-current-revision")]
+    [AuthorizeOperation(MilitaryHealthPermissions.Clinical.FinalDecision, OperationScope.Local)]
+    public async Task<IResult> ConfirmCurrentRevision(
+        Guid memberId,
+        [FromBody] ConfirmCurrentRevisionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var confirmed = await _finalDecisions.ConfirmCurrentRevisionAsync(
+            memberId,
+            request,
+            ClientCenterBinding.Read(Request),
+            cancellationToken);
+
+        return ApiResponse.Success("تم تأكيد مراجعة النسخة الحالية بنجاح.", confirmed);
     }
 
     /// <summary>

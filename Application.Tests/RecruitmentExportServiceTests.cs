@@ -1,6 +1,7 @@
 using Application.Common.Permissions;
 using Application.Dtos.Export;
 using Application.Dtos.Members;
+using Application.Dtos.Supervisor;
 using Application.Exceptions;
 using Application.Interfaces;
 using Application.Interfaces.Services;
@@ -63,6 +64,35 @@ public class RecruitmentExportServiceTests
 
         Assert.Equal(1, page.TotalCount);
         Assert.Equal(reviewed, page.Items.Single().MemberId);
+    }
+
+    [Fact]
+    public async Task ListPending_includes_member_after_confirm_current_revision()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberWithDecisionAsync(db, CenterA, "EXP-CONFIRM", 1);
+        var member = await db.Members.SingleAsync(m => m.MemberId == memberId);
+        member.ReviewedRevision = null;
+        member.ReviewedAt = null;
+        member.ReviewedByUserId = null;
+        member.DataRevision = 74;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var before = await CreateService(db, CenterA).ListPendingAsync(new RecruitmentExportPendingQuery());
+        Assert.Equal(0, before.TotalCount);
+
+        var decisions = CreateFinalDecisionService(db, CenterA);
+        var confirmed = await decisions.ConfirmCurrentRevisionAsync(
+            memberId,
+            new ConfirmCurrentRevisionRequest { ExpectedDataRevision = 74 });
+
+        Assert.True(confirmed.EligibleForRecruitmentExport);
+
+        var after = await CreateService(db, CenterA).ListPendingAsync(new RecruitmentExportPendingQuery());
+        Assert.Equal(1, after.TotalCount);
+        Assert.Equal(memberId, after.Items.Single().MemberId);
     }
 
     [Fact]
@@ -398,6 +428,41 @@ public class RecruitmentExportServiceTests
         storage.Setup(s => s.ReadFileBytes(It.IsAny<string>())).Returns(bytes);
         storage.Setup(s => s.DeleteFileAsync(It.IsAny<string>())).ReturnsAsync(true);
         return storage;
+    }
+
+    private static FinalDecisionService CreateFinalDecisionService(AppDbContext db, Guid centerId)
+    {
+        var gate = new Mock<IPermissionGate>();
+        gate.Setup(g => g.EnsureLocalAsync(
+                MilitaryHealthPermissions.Clinical.FinalDecision,
+                It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(centerId);
+
+        var currentUser = new TestCurrentUser();
+        currentUser.SetUser("actor-1", "actor", "127.0.0.1");
+
+        var postgresSession = new Mock<IPostgresSessionGuard>();
+        postgresSession.SetupGet(s => s.DefersFinalDecisionHistoryToDatabase).Returns(false);
+        postgresSession.Setup(s => s.ApplyForFinalDecisionWriteAsync(
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<bool>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        return new FinalDecisionService(
+            gate.Object,
+            currentUser,
+            new MemberRepository(db),
+            new ClinicWorkspaceRepository(db),
+            new CenterClinicRepository(db),
+            new ReferenceDataRepository(db),
+            new MedicalCenterRepository(db),
+            new MemberArchiveRepository(db),
+            new AuditLogRepository(db),
+            new ExportTestUnitOfWork(db),
+            postgresSession.Object);
     }
 
     private static RecruitmentExportService CreateService(

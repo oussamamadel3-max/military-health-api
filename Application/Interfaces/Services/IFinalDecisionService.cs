@@ -4,7 +4,8 @@ namespace Application.Interfaces.Services;
 
 /// <summary>
 /// إصدار وتعديل القرار النهائي المعتمد للمنتسب ضمن المركز النشط
-/// (FR-053 / FR-054 / FR-055 / FR-056).
+/// (FR-053 / FR-054 / FR-055 / FR-056)، مع تأكيد مراجعة النسخة الحالية
+/// كامتداد تشغيلي مكمّل لـ FR-058.
 /// </summary>
 public interface IFinalDecisionService
 {
@@ -25,6 +26,16 @@ public interface IFinalDecisionService
     Task<AmendFinalDecisionDto> AmendAsync(
         Guid memberId,
         AmendFinalDecisionRequest request,
+        Guid? clientCenterId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// يؤكّد مراجعة النسخة الحالية من ملف المنتسب دون تغيير القرار الطبي
+    /// أو زيادة DataRevision (امتداد تشغيلي لـ FR-058).
+    /// </summary>
+    Task<ConfirmCurrentRevisionDto> ConfirmCurrentRevisionAsync(
+        Guid memberId,
+        ConfirmCurrentRevisionRequest request,
         Guid? clientCenterId = null,
         CancellationToken cancellationToken = default);
 

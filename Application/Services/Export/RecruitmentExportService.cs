@@ -816,7 +816,7 @@ public class RecruitmentExportService : IRecruitmentExportService
                 exclusions.Add(new RecruitmentExportExclusionDto
                 {
                     MemberId = id,
-                    ReasonAr = "النسخة الحالية من الملف غير مُراجَعة؛ تُسجَّل المراجعة عند اعتماد/تعديل القرار النهائي."
+                    ReasonAr = "النسخة الحالية من الملف غير مُراجَعة؛ أكّد مراجعة النسخة الحالية أو اعتمد/عدّل القرار النهائي."
                 });
                 continue;
             }
