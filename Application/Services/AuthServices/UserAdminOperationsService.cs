@@ -1,5 +1,6 @@
 using Application.Common.Localization;
 using Application.Common.Permissions;
+using Application.Common.Persistence;
 using Application.Common.Results;
 using Application.Common.Security;
 using Application.Dtos.AuthDtos;
@@ -121,13 +122,14 @@ public sealed class UserAdminOperationsService : IUserAdminOperationsService
         var needle = "\"UserId\":\"" + userId + "\"";
         var centerPrefix = userId + ":";
 
+        // jsonb لا يقبل عامل LIKE مباشرة؛ AuditJsonbText.Contains يُترجم إلى (jsonb)::text LIKE.
         return query.Where(e =>
             e.TargetUserId == userId
             || (explicitTypes.Contains(e.EventType) && e.EntityId == userId)
             || (e.EntityType == nameof(User) && e.EntityId == userId)
             || (related.Contains(e.EntityType!) && (
-                (e.NewValues != null && e.NewValues.Contains(needle))
-                || (e.OldValues != null && e.OldValues.Contains(needle))
+                AuditJsonbText.Contains(e.NewValues, needle)
+                || AuditJsonbText.Contains(e.OldValues, needle)
                 || (e.EntityType == nameof(UserCenter) && e.EntityId != null && e.EntityId.StartsWith(centerPrefix)))));
     }
 

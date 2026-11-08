@@ -113,6 +113,40 @@ public class UserAdminOperationsServiceTests
     }
 
     [Fact]
+    public void QueryForTargetUser_matches_legacy_json_payload_without_target_user_id()
+    {
+        var targetId = "legacy-user";
+        var events = new List<AuditEvent>
+        {
+            new()
+            {
+                EventId = 10,
+                EventType = "Added",
+                EntityType = nameof(UserRoleAssociation),
+                EntityId = Guid.NewGuid().ToString(),
+                NewValues = "{\"UserId\":\"" + targetId + "\",\"RoleId\":\"r1\"}",
+                Result = "SUCCESS",
+                OccurredAt = DateTimeOffset.UtcNow,
+                CorrelationId = Guid.NewGuid()
+            },
+            new()
+            {
+                EventId = 11,
+                EventType = "Added",
+                EntityType = nameof(UserRoleAssociation),
+                EntityId = Guid.NewGuid().ToString(),
+                NewValues = "{\"UserId\":\"other\",\"RoleId\":\"r1\"}",
+                Result = "SUCCESS",
+                OccurredAt = DateTimeOffset.UtcNow,
+                CorrelationId = Guid.NewGuid()
+            }
+        };
+
+        var filtered = UserAdminOperationsService.QueryForTargetUser(events.AsQueryable(), targetId).ToList();
+        Assert.Equal(10, Assert.Single(filtered).EventId);
+    }
+
+    [Fact]
     public async Task GetForUser_rejects_without_manage_scope()
     {
         var audit = new Mock<IAuditLogRepository>();

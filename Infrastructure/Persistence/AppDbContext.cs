@@ -1,5 +1,5 @@
-using Application.Interfaces.Services;
 using Application.Dtos.AuthDtos;
+using Application.Interfaces.Services;
 using Domain.Entities.Archive;
 using Domain.Entities.Audit;
 using Domain.Entities.Auth;
@@ -10,6 +10,7 @@ using Domain.Entities.Medical;
 using Domain.Entities.Patient;
 using Domain.Interfaces;
 using Microsoft.EntityFrameworkCore;
+
 namespace Infrastructure.Persistence;
 
 public class AppDbContext : DbContext
@@ -99,6 +100,7 @@ public class AppDbContext : DbContext
         AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
         base.OnModelCreating(modelBuilder);
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
+        AuditJsonbTextDbFunction.Register(modelBuilder);
 
         // MH-SEC-051: allow isolated SQLite integration hosts without changing PostgreSQL production mapping.
         if (string.Equals(Database.ProviderName, "Microsoft.EntityFrameworkCore.Sqlite", StringComparison.Ordinal))

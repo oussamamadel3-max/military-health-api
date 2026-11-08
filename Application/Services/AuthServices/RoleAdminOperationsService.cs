@@ -1,5 +1,6 @@
 using Application.Common.Localization;
 using Application.Common.Permissions;
+using Application.Common.Persistence;
 using Application.Common.Results;
 using Application.Dtos.AuthDtos;
 using Application.Exceptions;
@@ -94,14 +95,15 @@ public sealed class RoleAdminOperationsService : IRoleAdminOperationsService
     public static IQueryable<AuditEvent> QueryForTargetRole(IQueryable<AuditEvent> query, string roleId)
     {
         var needle = "\"RoleId\":\"" + roleId + "\"";
+        // jsonb لا يقبل عامل LIKE مباشرة؛ AuditJsonbText.Contains يُترجم إلى (jsonb)::text LIKE.
         return query.Where(e =>
             (e.EntityType == nameof(Role) && e.EntityId == roleId)
             || (e.EntityType == nameof(RolePermission) && (
-                (e.NewValues != null && e.NewValues.Contains(needle))
-                || (e.OldValues != null && e.OldValues.Contains(needle))))
+                AuditJsonbText.Contains(e.NewValues, needle)
+                || AuditJsonbText.Contains(e.OldValues, needle)))
             || (e.EntityType == nameof(RoleFieldPermission) && (
-                (e.NewValues != null && e.NewValues.Contains(needle))
-                || (e.OldValues != null && e.OldValues.Contains(needle)))));
+                AuditJsonbText.Contains(e.NewValues, needle)
+                || AuditJsonbText.Contains(e.OldValues, needle))));
     }
 
     private async Task FillActorNamesAsync(List<UserAdminOperationDto> items, CancellationToken cancellationToken)
