@@ -12,23 +12,29 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Application.Services.Centers;
 
+/// <summary>
+/// إدارة المراكز الصحية. إنشاء أو تفعيل مركز نشط ثانٍ يتوقف على تحقق ترحيل السجلات التاريخية.
+/// </summary>
 public class MedicalCenterService : IMedicalCenterService
 {
     private readonly IMedicalCenterRepository _centers;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IMapper _mapper;
     private readonly IPermissionGate _permissionGate;
+    private readonly IHistoricalCenterMigrationService _historicalMigration;
 
     public MedicalCenterService(
         IMedicalCenterRepository centers,
         IUnitOfWork unitOfWork,
         IMapper mapper,
-        IPermissionGate permissionGate)
+        IPermissionGate permissionGate,
+        IHistoricalCenterMigrationService historicalMigration)
     {
         _centers = centers;
         _unitOfWork = unitOfWork;
         _mapper = mapper;
         _permissionGate = permissionGate;
+        _historicalMigration = historicalMigration;
     }
 
     public async Task<PaginatedList<MedicalCenterListItemDto>> GetCentersAsync(
@@ -92,6 +98,9 @@ public class MedicalCenterService : IMedicalCenterService
         if (await _centers.CodeExistsAsync(code, cancellationToken: cancellationToken))
             throw new MedicalCenterCodeAlreadyExistsException(code);
 
+        if (dto.IsActive)
+            await _historicalMigration.EnsureAdditionalActiveCenterAllowedAsync(cancellationToken);
+
         var now = DateTimeOffset.UtcNow;
         var center = _mapper.Map<MedicalCenter>(dto);
         center.CenterId = Guid.NewGuid();
@@ -151,6 +160,8 @@ public class MedicalCenterService : IMedicalCenterService
 
         if (center.IsActive)
             return await ToDetailsAsync(center, cancellationToken);
+
+        await _historicalMigration.EnsureAdditionalActiveCenterAllowedAsync(cancellationToken);
 
         center.IsActive = true;
         center.DeactivationReason = null;

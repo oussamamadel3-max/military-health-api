@@ -48,6 +48,7 @@ public class AppDbContext : DbContext
     public DbSet<UserContact> UserContacts { get; set; } = null!;
 
     public DbSet<MedicalCenter> MedicalCenters { get; set; } = null!;
+    public DbSet<HistoricalCenterMigrationCompletion> HistoricalCenterMigrationCompletions { get; set; } = null!;
     public DbSet<RecruitmentCenter> RecruitmentCenters { get; set; } = null!;
     public DbSet<Clinic> Clinics { get; set; } = null!;
     public DbSet<CenterClinic> CenterClinics { get; set; } = null!;
