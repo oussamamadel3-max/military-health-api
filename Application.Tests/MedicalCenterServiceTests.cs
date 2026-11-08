@@ -257,6 +257,7 @@ public class MedicalCenterServiceTests
         var service = CreateService(db, allowManage: true);
 
         await service.CreateAsync(new CreateMedicalCenterDto { Code = "EAST-1", NameAr = "الشرق", IsActive = true });
+        await MarkVerifiedAsync(db);
         await service.CreateAsync(new CreateMedicalCenterDto { Code = "WEST-1", NameAr = "الغرب", IsActive = true });
         await service.CreateAsync(new CreateMedicalCenterDto
         {
@@ -269,6 +270,22 @@ public class MedicalCenterServiceTests
         var page = await service.GetCentersAsync(1, 10, search: "شرق", isActive: true);
         Assert.Equal(1, page.TotalCount);
         Assert.Equal("EAST-1", Assert.Single(page.Items).Code);
+    }
+
+    private static async Task MarkVerifiedAsync(AppDbContext db)
+    {
+        var centerId = await db.MedicalCenters.Select(c => c.CenterId).FirstAsync();
+        db.HistoricalCenterMigrationCompletions.Add(new HistoricalCenterMigrationCompletion
+        {
+            Id = Guid.NewGuid(),
+            TargetCenterId = centerId,
+            VerifiedAt = DateTimeOffset.UtcNow,
+            VerifiedByUserId = "actor-1",
+            SummaryJson = "[]",
+            ActiveCenterCountAtVerification = 1,
+            PreExistingMultiCenterDetected = false
+        });
+        await db.SaveChangesAsync();
     }
 
     private static MedicalCenterService CreateService(AppDbContext db, bool allowManage)
@@ -293,8 +310,17 @@ public class MedicalCenterServiceTests
             new MedicalCenterRepository(db),
             new TestUnitOfWork(db),
             mapper,
-            gate.Object);
+            gate.Object,
+            CreateMigration(db, gate.Object));
     }
+
+    private static HistoricalCenterMigrationService CreateMigration(AppDbContext db, IPermissionGate gate)
+        => new(
+            new HistoricalCenterMigrationRepository(db),
+            new TestUnitOfWork(db),
+            new AuditLogRepository(db),
+            new TestCurrentUser(),
+            gate);
 
     private static AppDbContext CreateDb()
     {

@@ -2183,6 +2183,48 @@ namespace Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Domain.Entities.Core.HistoricalCenterMigrationCompletion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("ActiveCenterCountAtVerification")
+                        .HasColumnType("integer")
+                        .HasColumnName("activeCenterCountAtVerification");
+
+                    b.Property<bool>("PreExistingMultiCenterDetected")
+                        .HasColumnType("boolean")
+                        .HasColumnName("preExistingMultiCenterDetected");
+
+                    b.Property<string>("SummaryJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("summaryJson");
+
+                    b.Property<Guid>("TargetCenterId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("targetCenterId");
+
+                    b.Property<DateTimeOffset>("VerifiedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("verifiedAt");
+
+                    b.Property<string>("VerifiedByUserId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("verifiedByUserId");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TargetCenterId");
+
+                    b.HasIndex("VerifiedAt");
+
+                    b.ToTable("historicalCenterMigrationCompletion", "core");
+                });
+
             modelBuilder.Entity("Domain.Entities.Core.InvestigationType", b =>
                 {
                     b.Property<short>("InvestigationTypeId")
@@ -4316,6 +4358,17 @@ namespace Infrastructure.Migrations
                     b.Navigation("Center");
 
                     b.Navigation("UploadedByUser");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Core.HistoricalCenterMigrationCompletion", b =>
+                {
+                    b.HasOne("Domain.Entities.Core.MedicalCenter", "TargetCenter")
+                        .WithMany()
+                        .HasForeignKey("TargetCenterId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("TargetCenter");
                 });
 
             modelBuilder.Entity("Domain.Entities.Core.ValidationRule", b =>
