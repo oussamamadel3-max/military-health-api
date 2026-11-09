@@ -335,6 +335,70 @@ public class MemberServiceTests
     }
 
     [Fact]
+    public async Task Update_exported_member_material_change_resets_export_without_clearing_last_exported_revision()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var service = CreateService(db, CenterA, allowCreate: true, allowView: true);
+        var created = await service.CreateAsync(ValidCreate(recruitment: "EXP-MAT"));
+        const int exportedRevision = 5;
+        var exportedAt = DateTimeOffset.UtcNow.AddDays(-1);
+
+        var row = await db.Members.SingleAsync(m => m.MemberId == created.MemberId);
+        row.DataRevision = exportedRevision;
+        row.ReviewedRevision = exportedRevision;
+        row.LastExportedRevision = exportedRevision;
+        row.ExportStatus = "EXPORTED";
+        row.LastExportedAt = exportedAt;
+        row.ReviewedByUserId = "actor-1";
+        row.ReviewedAt = exportedAt;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var request = ToUpdate(created, fullName: "بعد التصدير");
+        await service.UpdateAsync(created.MemberId, request);
+
+        db.ChangeTracker.Clear();
+        row = await db.Members.SingleAsync(m => m.MemberId == created.MemberId);
+        Assert.Equal("UNEXPORTED", row.ExportStatus);
+        Assert.Equal(exportedRevision + 1, row.DataRevision);
+        Assert.Equal(exportedRevision, row.ReviewedRevision);
+        Assert.Equal(exportedRevision, row.LastExportedRevision);
+        Assert.Null(row.LastExportedAt);
+        Assert.Equal("بعد التصدير", row.FullName);
+    }
+
+    [Fact]
+    public async Task Update_exported_member_without_material_change_preserves_export_and_revision()
+    {
+        await using var db = CreateDb();
+        await SeedReferencesAsync(db);
+        var service = CreateService(db, CenterA, allowCreate: true, allowView: true);
+        var created = await service.CreateAsync(ValidCreate(recruitment: "EXP-NOOP"));
+        const int exportedRevision = 8;
+        var exportedAt = DateTimeOffset.UtcNow.AddDays(-2);
+
+        var row = await db.Members.SingleAsync(m => m.MemberId == created.MemberId);
+        row.DataRevision = exportedRevision;
+        row.ReviewedRevision = exportedRevision;
+        row.LastExportedRevision = exportedRevision;
+        row.ExportStatus = "EXPORTED";
+        row.LastExportedAt = exportedAt;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var request = ToUpdate(created, fullName: created.FullName);
+        await service.UpdateAsync(created.MemberId, request);
+
+        db.ChangeTracker.Clear();
+        row = await db.Members.SingleAsync(m => m.MemberId == created.MemberId);
+        Assert.Equal("EXPORTED", row.ExportStatus);
+        Assert.Equal(exportedRevision, row.DataRevision);
+        Assert.Equal(exportedRevision, row.LastExportedRevision);
+        Assert.Equal(exportedAt, row.LastExportedAt);
+    }
+
+    [Fact]
     public async Task Update_with_final_decision_rejects_medical_field_change()
     {
         await using var db = CreateDb();

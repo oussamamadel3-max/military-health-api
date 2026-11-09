@@ -344,12 +344,7 @@ public class MemberService : IMemberService
             if (await _members.RecruitmentNumberExistsAsync(recruitmentNumber, excludingMemberId: memberId, cancellationToken))
                 throw new MemberRecruitmentNumberExistsException(recruitmentNumber);
 
-            var preservedExportStatus = member.ExportStatus;
-            var preservedLastExportedRevision = member.LastExportedRevision;
-            var preservedLastExportedAt = member.LastExportedAt;
-            var preservedReviewedBy = member.ReviewedByUserId;
-            var preservedReviewedAt = member.ReviewedAt;
-            var preservedReviewedRevision = member.ReviewedRevision;
+            var materialChanged = HasMaterialMemberDataChanged(member, request, afterFinalDecision, recruitmentNumber);
 
             var oldSnapshot = BuildMemberAuditSnapshot(member, finalDecision?.FinalDecisionId);
 
@@ -384,13 +379,15 @@ public class MemberService : IMemberService
             member.QueueMedicalCenterId = preservedQueueCenter;
             member.QueueDate = preservedQueueDate;
             member.QueueNumber = preservedQueueNumber;
-            member.ExportStatus = preservedExportStatus;
-            member.LastExportedRevision = preservedLastExportedRevision;
-            member.LastExportedAt = preservedLastExportedAt;
-            member.ReviewedByUserId = preservedReviewedBy;
-            member.ReviewedAt = preservedReviewedAt;
-            member.ReviewedRevision = preservedReviewedRevision;
-            member.DataRevision += 1;
+
+            if (materialChanged)
+            {
+                member.ExportStatus = "UNEXPORTED";
+                member.LastExportedAt = null;
+                if (!_members.MaterialMemberRevisionManagedByDatabase())
+                    member.DataRevision += 1;
+            }
+
             member.UpdatedByUserId = userId;
             member.UpdatedAt = DateTimeOffset.UtcNow;
 
@@ -1200,6 +1197,54 @@ public class MemberService : IMemberService
     /// <summary>
     /// يرفض أي اختلاف حقيقي في الحقول الطبية بعد تطبيع متماثل (null والنصوص المقصوصة).
     /// </summary>
+    /// <summary>
+    /// يطابق قائمة أعمدة <c>prepareMemberRevision</c> القابلة للتعديل عبر هذه الخدمة
+    /// (دون أرقام الملف/الدور أو المركز التي تبقى ثابتة في <c>UpdateAsync</c>).
+    /// </summary>
+    private static bool HasMaterialMemberDataChanged(
+        Member member,
+        UpdateMemberRequest request,
+        bool afterFinalDecision,
+        string recruitmentNumberTrimmed)
+    {
+        if (!string.Equals(member.FullName.Trim(), request.FullName.Trim(), StringComparison.Ordinal))
+            return true;
+        if (!string.Equals(member.MotherName.Trim(), request.MotherName.Trim(), StringComparison.Ordinal))
+            return true;
+        if (member.BirthDate != request.BirthDate)
+            return true;
+        if (member.MaritalStatusId != request.MaritalStatusId)
+            return true;
+        if (!string.Equals(member.Occupation.Trim(), request.Occupation.Trim(), StringComparison.Ordinal))
+            return true;
+        if (!string.Equals(member.RecruitmentNumber.Trim(), recruitmentNumberTrimmed, StringComparison.Ordinal))
+            return true;
+        if (member.RecruitmentCenterId != request.RecruitmentCenterId)
+            return true;
+
+        if (afterFinalDecision)
+            return false;
+
+        if (member.BloodTypeId != request.BloodTypeId)
+            return true;
+        if (member.BloodSugarMgDl != request.BloodSugarMgDl)
+            return true;
+        if (member.HeightCm != request.HeightCm)
+            return true;
+        if (member.WeightKg != request.WeightKg)
+            return true;
+        if (!string.Equals(TrimOrNull(member.BloodPressure), TrimOrNull(request.BloodPressure), StringComparison.Ordinal))
+            return true;
+        if (member.PulseBpm != request.PulseBpm)
+            return true;
+        if (member.HasTattoo != request.HasTattoo)
+            return true;
+        if (!string.Equals(TrimOrNull(member.DistinguishingMarks), TrimOrNull(request.DistinguishingMarks), StringComparison.Ordinal))
+            return true;
+
+        return false;
+    }
+
     private static void EnsureMedicalFieldsUnchanged(Member member, UpdateMemberRequest request)
     {
         var bloodPressureEqual = string.Equals(

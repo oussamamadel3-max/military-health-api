@@ -89,6 +89,12 @@ public interface IMemberRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// يحدّد ما إذا كان رفع <c>dataRevision</c> عند التعديل المادي يُنفَّذ عبر محفز PostgreSQL
+    /// (<c>prepareMemberRevision</c>) بدلاً من طبقة التطبيق (InMemory وغير Npgsql).
+    /// </summary>
+    bool MaterialMemberRevisionManagedByDatabase();
+
+    /// <summary>
     /// يعلّم المنتسبين كمصدَّرين للتجنيد بتحديث أعمدة التصدير فقط
     /// (<c>exportStatus</c> / <c>lastExportedRevision</c> / <c>lastExportedAt</c> / التدقيق الزمني)
     /// دون المساس ببقية حقول الملف، حتى لا يطلق PostgreSQL زيادة <c>dataRevision</c>.

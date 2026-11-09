@@ -334,6 +334,10 @@ public class MemberRepository : IMemberRepository
     }
 
     /// <inheritdoc />
+    public bool MaterialMemberRevisionManagedByDatabase()
+        => IsRelationalProvider() && IsNpgsqlProvider();
+
+    /// <inheritdoc />
     public async Task<int> MarkExportedForRecruitmentAsync(
         Guid centerId,
         IReadOnlyCollection<Guid> memberIds,
@@ -347,7 +351,8 @@ public class MemberRepository : IMemberRepository
         var query = _context.Members
             .Where(m => memberIds.Contains(m.MemberId) && m.CurrentMedicalCenterId == centerId);
 
-        // PostgreSQL: تحديث أعمدة التصدير فقط حتى لا يطلق prepareMemberRevision زيادة dataRevision.
+        // PostgreSQL: تحديث أعمدة التصدير فقط؛ prepareMemberRevision يقارن قائمة صريحة من الأعمدة المادية
+        // (بدون bmi المولَّد وحقول التصدير/المراجعة/التدقيق).
         // InMemory/غير العلائقي: مسار مكافئ عبر ChangeTracker (لا محفزات مراجعة).
         if (!IsRelationalProvider())
         {

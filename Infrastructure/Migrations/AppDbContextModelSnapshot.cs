@@ -3565,7 +3565,7 @@ namespace Infrastructure.Migrations
                         .HasForeignKey("CenterId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("Domain.Entities.Auth.User", "TargetUser")
+                    b.HasOne("Domain.Entities.Auth.User", null)
                         .WithMany()
                         .HasForeignKey("TargetUserId")
                         .OnDelete(DeleteBehavior.Restrict);
@@ -3573,8 +3573,6 @@ namespace Infrastructure.Migrations
                     b.Navigation("ActorUser");
 
                     b.Navigation("Center");
-
-                    b.Navigation("TargetUser");
                 });
 
             modelBuilder.Entity("Domain.Entities.Audit.CrossCenterAccess", b =>

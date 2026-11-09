@@ -913,6 +913,9 @@ BEFORE UPDATE OR DELETE ON audit."crossCenterAccess"
 FOR EACH ROW EXECUTE FUNCTION audit."preventRowMutation"();
 
 -- 6.23 Member revision/export-state control
+-- قائمة صريحة بالأعمدة المادية فقط. لا تُقارن الأعمدة المولَّدة (bmi) ولا حقول
+-- التصدير/المراجعة/التدقيق التقني؛ مقارنة to_jsonb للصف كاملاً كانت تُظهر فرقاً
+-- وهمياً على bmi في BEFORE UPDATE وتعيد UNEXPORTED بعد تعليم التصدير.
 CREATE OR REPLACE FUNCTION patient."prepareMemberRevision"()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -925,17 +928,47 @@ BEGIN
     END IF;
 
     IF (
-        to_jsonb(NEW) - ARRAY[
-            'dataRevision','exportStatus','lastExportedRevision','lastExportedAt',
-            'reviewedByUserId','reviewedAt','reviewedRevision',
-            'updatedByUserId','updatedAt'
-        ]
+        NEW."fileNumber",
+        NEW."recruitmentNumber",
+        NEW."fullName",
+        NEW."motherName",
+        NEW."birthDate",
+        NEW."maritalStatusId",
+        NEW."occupation",
+        NEW."recruitmentCenterId",
+        NEW."bloodTypeId",
+        NEW."bloodSugarMgDl",
+        NEW."heightCm",
+        NEW."weightKg",
+        NEW."bloodPressure",
+        NEW."pulseBpm",
+        NEW."hasTattoo",
+        NEW."distinguishingMarks",
+        NEW."currentMedicalCenterId",
+        NEW."queueMedicalCenterId",
+        NEW."queueDate",
+        NEW."queueNumber"
     ) IS DISTINCT FROM (
-        to_jsonb(OLD) - ARRAY[
-            'dataRevision','exportStatus','lastExportedRevision','lastExportedAt',
-            'reviewedByUserId','reviewedAt','reviewedRevision',
-            'updatedByUserId','updatedAt'
-        ]
+        OLD."fileNumber",
+        OLD."recruitmentNumber",
+        OLD."fullName",
+        OLD."motherName",
+        OLD."birthDate",
+        OLD."maritalStatusId",
+        OLD."occupation",
+        OLD."recruitmentCenterId",
+        OLD."bloodTypeId",
+        OLD."bloodSugarMgDl",
+        OLD."heightCm",
+        OLD."weightKg",
+        OLD."bloodPressure",
+        OLD."pulseBpm",
+        OLD."hasTattoo",
+        OLD."distinguishingMarks",
+        OLD."currentMedicalCenterId",
+        OLD."queueMedicalCenterId",
+        OLD."queueDate",
+        OLD."queueNumber"
     ) THEN
         NEW."dataRevision" := OLD."dataRevision" + 1;
         NEW."exportStatus" := 'UNEXPORTED';

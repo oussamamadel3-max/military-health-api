@@ -173,6 +173,8 @@ public class RecruitmentExportServiceTests
         await using var db = MemberServiceTests.CreateDb();
         await SeedAsync(db);
         var memberId = await CreateMemberWithDecisionAsync(db, CenterA, "EXP-ONE", 1);
+        var before = await db.Members.AsNoTracking().SingleAsync(m => m.MemberId == memberId);
+        var revisionBefore = before.DataRevision;
         var storage = CreateStorageMock(out var savedPaths);
 
         var result = await CreateService(db, CenterA, fileStorage: storage.Object)
@@ -190,7 +192,9 @@ public class RecruitmentExportServiceTests
         var member = await db.Members.SingleAsync(m => m.MemberId == memberId);
         Assert.Equal(FinalDecisionService.ExportStatusExported, member.ExportStatus);
         Assert.NotNull(member.LastExportedAt);
+        Assert.Equal(revisionBefore, member.DataRevision);
         Assert.Equal(member.DataRevision, member.LastExportedRevision);
+        Assert.Equal(member.DataRevision, member.ReviewedRevision);
 
         var batch = await db.RecruitmentExportBatches.SingleAsync();
         Assert.Equal(RecruitmentExportService.StatusCompleted, batch.Status);
@@ -206,6 +210,90 @@ public class RecruitmentExportServiceTests
     }
 
     [Fact]
+    public void PrepareMemberRevision_sql_uses_explicit_material_column_allowlist()
+    {
+        // قائمة صريحة تتجنب فرق bmi الوهمي ومقارنة الصف بالكامل.
+        var functionBody = ReadPrepareMemberRevisionSql();
+        var compareEnd = functionBody.IndexOf(") THEN", StringComparison.Ordinal);
+        Assert.True(compareEnd > 0, "material compare block terminator missing");
+        var compareBlock = functionBody[..compareEnd];
+
+        Assert.DoesNotContain("to_jsonb(NEW)", functionBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("to_jsonb(OLD)", functionBody, StringComparison.Ordinal);
+        Assert.Contains("IS DISTINCT FROM", compareBlock, StringComparison.Ordinal);
+        Assert.Contains("NEW.\"fullName\"", compareBlock, StringComparison.Ordinal);
+        Assert.Contains("NEW.\"heightCm\"", compareBlock, StringComparison.Ordinal);
+        Assert.Contains("NEW.\"weightKg\"", compareBlock, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"bmi\"", compareBlock, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"exportStatus\"", compareBlock, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"reviewedRevision\"", compareBlock, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"lastExportedRevision\"", compareBlock, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"updatedAt\"", compareBlock, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"updatedByUserId\"", compareBlock, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CreateBatch_member_with_height_weight_marks_exported_without_revision_bump()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberWithDecisionAsync(
+            db, CenterA, "EXP-BMI", 1, heightCm: 170, weightKg: 70);
+        var before = await db.Members.AsNoTracking().SingleAsync(m => m.MemberId == memberId);
+
+        await CreateService(db, CenterA).CreateBatchAsync(
+            new CreateRecruitmentExportBatchRequest { MemberIds = [memberId] });
+
+        var after = await db.Members.SingleAsync(m => m.MemberId == memberId);
+        Assert.Equal(FinalDecisionService.ExportStatusExported, after.ExportStatus);
+        Assert.Equal(before.DataRevision, after.DataRevision);
+        Assert.Equal(after.DataRevision, after.LastExportedRevision);
+        Assert.NotNull(after.LastExportedAt);
+    }
+
+    [Fact]
+    public async Task CreateBatch_member_without_height_weight_marks_exported()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberWithDecisionAsync(
+            db, CenterA, "EXP-NOBMI", 1, heightCm: null, weightKg: null);
+        var before = await db.Members.AsNoTracking().SingleAsync(m => m.MemberId == memberId);
+
+        await CreateService(db, CenterA).CreateBatchAsync(
+            new CreateRecruitmentExportBatchRequest { MemberIds = [memberId] });
+
+        var after = await db.Members.SingleAsync(m => m.MemberId == memberId);
+        Assert.Equal(FinalDecisionService.ExportStatusExported, after.ExportStatus);
+        Assert.Equal(before.DataRevision, after.DataRevision);
+        Assert.Equal(after.DataRevision, after.LastExportedRevision);
+        Assert.Null(after.HeightCm);
+        Assert.Null(after.WeightKg);
+    }
+
+    [Fact]
+    public async Task MarkExported_only_updates_export_columns_without_revision_bump()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberWithDecisionAsync(db, CenterA, "EXP-MARK", 1);
+        var before = await db.Members.AsNoTracking().SingleAsync(m => m.MemberId == memberId);
+        var exportedAt = DateTimeOffset.UtcNow;
+
+        var marked = await new MemberRepository(db).MarkExportedForRecruitmentAsync(
+            CenterA, [memberId], "actor-1", exportedAt);
+
+        Assert.Equal(1, marked);
+        var after = await db.Members.SingleAsync(m => m.MemberId == memberId);
+        Assert.Equal(FinalDecisionService.ExportStatusExported, after.ExportStatus);
+        Assert.Equal(before.DataRevision, after.DataRevision);
+        Assert.Equal(before.DataRevision, after.LastExportedRevision);
+        Assert.Equal(exportedAt, after.LastExportedAt);
+        Assert.Equal(before.FullName, after.FullName);
+        Assert.Equal(before.ReviewedRevision, after.ReviewedRevision);
+    }
+
+    [Fact]
     public async Task CreateBatch_export_all_pending_exports_multiple()
     {
         await using var db = MemberServiceTests.CreateDb();
@@ -213,18 +301,24 @@ public class RecruitmentExportServiceTests
         var a = await CreateMemberWithDecisionAsync(db, CenterA, "EXP-M1", 1);
         var b = await CreateMemberWithDecisionAsync(db, CenterA, "EXP-M2", 2, rejectionReason: "رفض");
         await CreateMemberWithDecisionAsync(db, CenterA, "EXP-M3", 3, rejectionReason: "مؤجل");
+        var revA = (await db.Members.AsNoTracking().SingleAsync(m => m.MemberId == a)).DataRevision;
+        var revB = (await db.Members.AsNoTracking().SingleAsync(m => m.MemberId == b)).DataRevision;
 
         var result = await CreateService(db, CenterA).CreateBatchAsync(
             new CreateRecruitmentExportBatchRequest { ExportAllPending = true });
 
         Assert.Equal(2, result.RecordCount);
-        var exported = await db.Members
-            .Where(m => m.ExportStatus == FinalDecisionService.ExportStatusExported)
-            .Select(m => m.MemberId)
+        var members = await db.Members
+            .Where(m => m.MemberId == a || m.MemberId == b)
             .ToListAsync();
-        Assert.Equal(2, exported.Count);
-        Assert.Contains(a, exported);
-        Assert.Contains(b, exported);
+        Assert.All(members, m =>
+        {
+            Assert.Equal(FinalDecisionService.ExportStatusExported, m.ExportStatus);
+            Assert.Equal(m.DataRevision, m.LastExportedRevision);
+            Assert.NotNull(m.LastExportedAt);
+        });
+        Assert.Equal(revA, members.Single(m => m.MemberId == a).DataRevision);
+        Assert.Equal(revB, members.Single(m => m.MemberId == b).DataRevision);
     }
 
     [Fact]
@@ -332,6 +426,70 @@ public class RecruitmentExportServiceTests
 
         Assert.Contains(await db.AuditEvents.ToListAsync(),
             e => e.EventType == RecruitmentExportService.ReexportEventType);
+    }
+
+    [Fact]
+    public async Task Reexport_after_new_review_sets_lastExportedRevision_to_exported_revision()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberWithDecisionAsync(db, CenterA, "EXP-REREV", 1);
+
+        await CreateService(db, CenterA).CreateBatchAsync(
+            new CreateRecruitmentExportBatchRequest { MemberIds = [memberId] });
+
+        var member = await db.Members.SingleAsync(m => m.MemberId == memberId);
+        member.ExportStatus = FinalDecisionService.ExportStatusUnexported;
+        member.LastExportedAt = null;
+        member.DataRevision += 1;
+        member.ReviewedRevision = member.DataRevision;
+        member.ReviewedAt = DateTimeOffset.UtcNow;
+        member.ReviewedByUserId = "actor-1";
+        var exportedRevision = member.DataRevision;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        await CreateService(db, CenterA).CreateBatchAsync(
+            new CreateRecruitmentExportBatchRequest { MemberIds = [memberId] });
+
+        var after = await db.Members.SingleAsync(m => m.MemberId == memberId);
+        Assert.Equal(FinalDecisionService.ExportStatusExported, after.ExportStatus);
+        Assert.Equal(exportedRevision, after.DataRevision);
+        Assert.Equal(exportedRevision, after.LastExportedRevision);
+        Assert.Equal(exportedRevision, after.ReviewedRevision);
+        Assert.NotNull(after.LastExportedAt);
+    }
+
+    private static string ReadPrepareMemberRevisionSql()
+    {
+        var upSql = File.ReadAllText(Path.Combine(
+            FindRepoRoot(),
+            "Infrastructure", "Persistence", "Sql", "InitialDatabaseObjects.Up.sql"));
+
+        var start = upSql.IndexOf(
+            "CREATE OR REPLACE FUNCTION patient.\"prepareMemberRevision\"",
+            StringComparison.Ordinal);
+        Assert.True(start >= 0, "prepareMemberRevision function missing from InitialDatabaseObjects.Up.sql");
+
+        var end = upSql.IndexOf(
+            "CREATE TRIGGER \"trgMemberRevisionOnMaterialUpdate\"",
+            start,
+            StringComparison.Ordinal);
+        Assert.True(end > start, "trgMemberRevisionOnMaterialUpdate not found after prepareMemberRevision");
+        return upSql[start..end];
+    }
+
+    private static string FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "Backend.sln")))
+                return dir.FullName;
+            dir = dir.Parent;
+        }
+
+        throw new InvalidOperationException("Could not locate Backend.sln from test base directory.");
     }
 
     [Fact]
@@ -532,9 +690,11 @@ public class RecruitmentExportServiceTests
         Guid centerId,
         string recruitment,
         short resultStatusId,
-        string? rejectionReason = null)
+        string? rejectionReason = null,
+        decimal? heightCm = 170,
+        decimal? weightKg = 70)
     {
-        var memberId = await CreateMemberAsync(db, centerId, recruitment);
+        var memberId = await CreateMemberAsync(db, centerId, recruitment, heightCm, weightKg);
         await SeedAllAssessmentsAsync(db, memberId, centerId, resultStatusId == 3 ? (short)1 : resultStatusId);
 
         var now = DateTimeOffset.UtcNow;
@@ -561,7 +721,12 @@ public class RecruitmentExportServiceTests
         return memberId;
     }
 
-    private static async Task<Guid> CreateMemberAsync(AppDbContext db, Guid centerId, string recruitment)
+    private static async Task<Guid> CreateMemberAsync(
+        AppDbContext db,
+        Guid centerId,
+        string recruitment,
+        decimal? heightCm = 170,
+        decimal? weightKg = 70)
     {
         var members = MemberServiceTests.CreateService(db, centerId, allowCreate: true, allowView: true);
         var created = await members.CreateAsync(new CreateMemberRequest
@@ -574,8 +739,8 @@ public class RecruitmentExportServiceTests
             RecruitmentNumber = recruitment,
             RecruitmentCenterId = RecruitmentCenterId,
             BloodTypeId = 1,
-            HeightCm = 170,
-            WeightKg = 70,
+            HeightCm = heightCm,
+            WeightKg = weightKg,
             BloodPressure = "120/80",
             PulseBpm = 72,
             HasTattoo = false
