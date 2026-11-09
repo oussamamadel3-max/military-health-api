@@ -25,6 +25,7 @@ public class MemberConfiguration : IEntityTypeConfiguration<Member>
         builder.HasIndex(x => x.RecruitmentNumber).IsUnique();
         builder.HasIndex(x => new { x.QueueMedicalCenterId, x.QueueDate, x.QueueNumber }).IsUnique();
         builder.HasIndex(x => new { x.CurrentMedicalCenterId, x.CreatedAt });
+        // مطابقة تامة/ترتيب فقط. بحث '%نص%' يستخدم IX_member_fullName_trgm في الترحيل (pg_trgm على lower(fullName)).
         builder.HasIndex(x => x.FullName);
         builder.HasIndex(x => new { x.CurrentMedicalCenterId, x.ExportStatus });
         builder.HasIndex(x => x.RecruitmentCenterId);

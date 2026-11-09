@@ -9,6 +9,7 @@ using Application.Exceptions;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
+using Application.Services.Time;
 using Application.Services.Members;
 using Application.Services.Supervisor;
 using Domain.Entities.Audit;
@@ -51,6 +52,7 @@ public class OperationalReportsService : IOperationalReportsService
     private readonly ICrossCenterAccessService _crossCenterAccess;
     private readonly IAuditLogRepository _audit;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IBusinessClock _clock;
 
     public OperationalReportsService(
         IPermissionGate permissionGate,
@@ -65,7 +67,8 @@ public class OperationalReportsService : IOperationalReportsService
         IExportService export,
         ICrossCenterAccessService crossCenterAccess,
         IAuditLogRepository audit,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IBusinessClock? businessClock = null)
     {
         _permissionGate = permissionGate;
         _currentUser = currentUser;
@@ -80,6 +83,7 @@ public class OperationalReportsService : IOperationalReportsService
         _crossCenterAccess = crossCenterAccess;
         _audit = audit;
         _unitOfWork = unitOfWork;
+        _clock = businessClock ?? BusinessClock.Utc;
     }
 
     #region Public — KPIs
@@ -1663,7 +1667,7 @@ public class OperationalReportsService : IOperationalReportsService
         return _currentUser.UserId;
     }
 
-    private static DateRange NormalizeRange(OperationalDateRangeQuery query)
+    private DateRange NormalizeRange(OperationalDateRangeQuery query)
     {
         if (query.Date.HasValue && (query.FromDate.HasValue || query.ToDate.HasValue))
             throw new InvalidOperationalReportFilterException("لا تجمع بين تاريخ محدد ومجال زمني.");
@@ -1673,12 +1677,8 @@ public class OperationalReportsService : IOperationalReportsService
         if (from.HasValue && to.HasValue && from > to)
             throw new InvalidOperationalReportFilterException("تاريخ البداية بعد تاريخ النهاية.");
 
-        DateTimeOffset? fromOffset = from.HasValue
-            ? new DateTimeOffset(from.Value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc), TimeSpan.Zero)
-            : null;
-        DateTimeOffset? toExclusive = to.HasValue
-            ? new DateTimeOffset(to.Value.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc), TimeSpan.Zero)
-            : null;
+        DateTimeOffset? fromOffset = from.HasValue ? _clock.StartOfDay(from.Value) : null;
+        DateTimeOffset? toExclusive = to.HasValue ? _clock.EndOfDayExclusive(to.Value) : null;
 
         return new DateRange(fromOffset, toExclusive, from, to);
     }

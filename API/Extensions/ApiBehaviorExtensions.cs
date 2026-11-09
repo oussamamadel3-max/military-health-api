@@ -1,5 +1,5 @@
 using API.Infrastructure;
-using Microsoft.AspNetCore.Http;
+using API.Validation;
 using Microsoft.AspNetCore.Mvc;
 
 namespace API.Extensions;
@@ -16,7 +16,7 @@ public static class ApiBehaviorExtensions
                     .Where(kvp => kvp.Value?.Errors.Count > 0)
                     .ToDictionary(
                         kvp => string.IsNullOrEmpty(kvp.Key) ? "general" : char.ToLowerInvariant(kvp.Key[0]) + kvp.Key[1..],
-                        kvp => kvp.Value!.Errors.Select(e => string.IsNullOrEmpty(e.ErrorMessage) ? "Invalid value." : e.ErrorMessage).ToArray()
+                        kvp => kvp.Value!.Errors.Select(e => ValidationErrorText.Localize(kvp.Key, e.ErrorMessage)).ToArray()
                     );
 
                 return new UnprocessableEntityObjectResult(new
@@ -25,7 +25,7 @@ public static class ApiBehaviorExtensions
                     error = new
                     {
                         code = "VALIDATION_ERROR",
-                        message = "Validation error",
+                        message = ValidationErrorText.EnvelopeMessage,
                         meta = new { errors }
                     }
                 });

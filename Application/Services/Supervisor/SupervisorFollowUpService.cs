@@ -10,6 +10,7 @@ using Application.Exceptions;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
+using Application.Services.Time;
 using Application.Services.Members;
 using Domain.Entities.Audit;
 using Domain.Entities.Clinical;
@@ -43,6 +44,7 @@ public class SupervisorFollowUpService : ISupervisorFollowUpService
     private readonly IExportService _export;
     private readonly IAuditLogRepository _audit;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IBusinessClock _clock;
 
     public SupervisorFollowUpService(
         IPermissionGate permissionGate,
@@ -54,7 +56,8 @@ public class SupervisorFollowUpService : ISupervisorFollowUpService
         IMedicalCenterRepository centers,
         IExportService export,
         IAuditLogRepository audit,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IBusinessClock? businessClock = null)
     {
         _permissionGate = permissionGate;
         _currentUser = currentUser;
@@ -66,6 +69,7 @@ public class SupervisorFollowUpService : ISupervisorFollowUpService
         _export = export;
         _audit = audit;
         _unitOfWork = unitOfWork;
+        _clock = businessClock ?? BusinessClock.Utc;
     }
 
     /// <inheritdoc />
@@ -655,7 +659,7 @@ public class SupervisorFollowUpService : ISupervisorFollowUpService
         return membersQuery.OrderByDescending(m => m.UpdatedAt).ThenByDescending(m => m.FileNumber);
     }
 
-    private static IQueryable<Member> ApplyCreatedAtFilter(
+    private IQueryable<Member> ApplyCreatedAtFilter(
         IQueryable<Member> query,
         DateOnly? date,
         DateOnly? fromDate,
@@ -663,21 +667,20 @@ public class SupervisorFollowUpService : ISupervisorFollowUpService
     {
         if (date.HasValue)
         {
-            var start = new DateTimeOffset(date.Value.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
-            var end = start.AddDays(1);
+            var start = _clock.StartOfDay(date.Value);
+            var end = _clock.EndOfDayExclusive(date.Value);
             return query.Where(m => m.CreatedAt >= start && m.CreatedAt < end);
         }
 
         if (fromDate.HasValue)
         {
-            var start = new DateTimeOffset(fromDate.Value.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            var start = _clock.StartOfDay(fromDate.Value);
             query = query.Where(m => m.CreatedAt >= start);
         }
 
         if (toDate.HasValue)
         {
-            var endExclusive = new DateTimeOffset(toDate.Value.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero)
-                .AddDays(1);
+            var endExclusive = _clock.EndOfDayExclusive(toDate.Value);
             query = query.Where(m => m.CreatedAt < endExclusive);
         }
 

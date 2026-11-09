@@ -70,6 +70,31 @@ public class MemberRepository : IMemberRepository
         return query.AnyAsync(cancellationToken);
     }
 
+    /// <inheritdoc />
+    public async Task<IReadOnlySet<string>> FindExistingRecruitmentNumbersAsync(
+        IReadOnlyCollection<string> recruitmentNumbers,
+        CancellationToken cancellationToken = default)
+    {
+        if (recruitmentNumbers.Count == 0)
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var normalized = recruitmentNumbers
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Select(n => n.Trim().ToLowerInvariant())
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        if (normalized.Length == 0)
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var found = await _context.Members.AsNoTracking()
+            .Where(m => normalized.Contains(m.RecruitmentNumber.ToLower()))
+            .Select(m => m.RecruitmentNumber)
+            .ToListAsync(cancellationToken);
+
+        return found.ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
     /// <summary>
     /// يخصص رقم ملف عالمي ورقم دور يومي للمركز ضمن المعاملة الحالية.
     /// على PostgreSQL يُؤخذ قفل معاملة (pg_advisory_xact_lock) قبل MAX+1 لمنع سباق التزامن؛ يُتخطى على InMemory.

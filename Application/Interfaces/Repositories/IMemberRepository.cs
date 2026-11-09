@@ -28,6 +28,14 @@ public interface IMemberRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// يعيد أرقام التجنيد الموجودة مسبقاً ضمن القائمة في استعلام واحد.
+    /// المقارنة غير حساسة لحالة الأحرف، بما يوافق فحص الوجود المستخدم عند الإنشاء والاستيراد.
+    /// </summary>
+    Task<IReadOnlySet<string>> FindExistingRecruitmentNumbersAsync(
+        IReadOnlyCollection<string> recruitmentNumbers,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// يعيد (رقم الملف التالي، رقم الدور التالي لليوم في المركز).
     /// يجب استدعاؤه داخل معاملة مفتوحة؛ على PostgreSQL يُقفل التسلسل حتى نهاية المعاملة.
     /// يحسب التالي من أعلى رقم محفوظ وأعلى رقم معلّق في وحدة العمل الحالية (ChangeTracker).

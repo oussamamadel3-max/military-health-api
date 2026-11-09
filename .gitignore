@@ -371,3 +371,10 @@ storage/
 storage/uploads/
 API/storage/
 API/storage/uploads/
+
+
+# Performance tests
+performance-tests/
+
+# NFR audit
+nfr-audit/

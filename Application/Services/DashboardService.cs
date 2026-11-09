@@ -2,6 +2,7 @@ using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Application.Dtos.DashboardDtos;
+using Application.Services.Time;
 using Domain.Entities.Audit;
 using MapsterMapper;
 using Microsoft.EntityFrameworkCore;
@@ -14,45 +15,32 @@ namespace Application.Services.Dashboard
         private readonly IUserRepository _users;
         private readonly IUserContextService _userCtx;
         private readonly IMapper _mapper;
+        private readonly IBusinessClock _clock;
 
         public DashboardService(
             IAuditLogRepository auditLogRepository,
             IUserRepository users,
             IUserContextService userCtx,
-            IMapper mapper)
+            IMapper mapper,
+            IBusinessClock? businessClock = null)
         {
             _auditLogRepository = auditLogRepository;
             _users = users;
             _userCtx = userCtx;
             _mapper = mapper;
+            _clock = businessClock ?? BusinessClock.Utc;
         }
 
-        // ======== Date Range Helper (Europe/Istanbul -> UTC DateTimeOffset) ========
-        private static (DateTimeOffset? Start, DateTimeOffset? EndExclusive, string? PeriodText)
+        /// <summary>
+        /// يحوّل مجال اللوحة إلى فترة ساعة العمل نفسها المستخدمة في البحث والتقارير.
+        /// </summary>
+        private (DateTimeOffset? Start, DateTimeOffset? EndExclusive, string? PeriodText)
             NormalizeRange(DateTime? from, DateTime? to)
         {
             if (!from.HasValue && !to.HasValue)
                 return (null, null, null);
 
-            var tz = TimeZoneInfo.FindSystemTimeZoneById("Europe/Istanbul");
-
-            DateTimeOffset? start = null;
-            DateTimeOffset? endEx = null;
-
-            if (from.HasValue)
-            {
-                var f = DateTime.SpecifyKind(from.Value, DateTimeKind.Unspecified);
-                start = new DateTimeOffset(f, tz.GetUtcOffset(f));
-            }
-
-            if (to.HasValue)
-            {
-                var t = DateTime.SpecifyKind(to.Value, DateTimeKind.Unspecified);
-                endEx = new DateTimeOffset(t, tz.GetUtcOffset(t));
-
-                if (to.Value.TimeOfDay == TimeSpan.Zero)
-                    endEx = endEx.Value.AddDays(1);
-            }
+            var (start, endEx) = _clock.NormalizeDateTimeRange(from, to);
 
             if (start.HasValue && !endEx.HasValue)
                 endEx = DateTimeOffset.UtcNow;

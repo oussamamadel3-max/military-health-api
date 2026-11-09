@@ -1,6 +1,7 @@
 using Application.Dtos.ExportDtos;
 using Application.Interfaces.Services;
 using Application.Services.Export;
+using Application.Services.Time;
 using ClosedXML.Excel;
 using Microsoft.Extensions.Logging;
 using QuestPDF.Fluent;
@@ -15,16 +16,25 @@ namespace Application.Services
     public class ExportService : IExportService
     {
         private readonly ILogger<ExportService>? _logger;
+        private readonly IBusinessClock _clock;
         private static bool _fontsRegistered;
         private static readonly object FontLock = new();
 
         public ExportService()
+            : this(null, null)
         {
         }
 
         public ExportService(ILogger<ExportService> logger)
+            : this(logger, null)
+        {
+        }
+
+        /// <summary>ينشئ خدمة التصدير مع ساعة العمل لتاريخ الطباعة واسم الملف.</summary>
+        public ExportService(ILogger<ExportService>? logger, IBusinessClock? clock)
         {
             _logger = logger;
+            _clock = clock ?? BusinessClock.Utc;
         }
 
         #region ExportToExcel
@@ -50,7 +60,7 @@ namespace Application.Services
                 props = props.Where(p => !options.ExcludedColumns.Contains(p.Name)).ToArray();
 
             var title = CleanForXml(options.CustomTitle ?? $"تقرير {options.ReportName}");
-            var printDate = DateTime.Now.ToString(options.DateFormat ?? "yyyy/MM/dd HH:mm");
+            var printDate = _clock.Format(DateTimeOffset.UtcNow, options.DateFormat ?? "yyyy/MM/dd HH:mm");
 
             // صفوف الترويسة: شعار / عنوان / تاريخ — فوق نطاق البيانات (بدون دمج داخل الجدول)
             const int logoRow = 1;
@@ -147,7 +157,7 @@ namespace Application.Services
             {
                 FileContents = stream.ToArray(),
                 ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                FileName = $"{safeReportName}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx"
+                FileName = $"{safeReportName}_{_clock.Format(DateTimeOffset.UtcNow, "yyyyMMdd_HHmmss")}.xlsx"
             });
         }
         #endregion
@@ -164,7 +174,7 @@ namespace Application.Services
 
             var list = data?.ToList() ?? new List<T>();
             var titleText = CleanForXml(options.CustomTitle ?? options.ReportName);
-            var printDate = DateTime.Now.ToString(options.DateFormat ?? "yyyy/MM/dd");
+            var printDate = _clock.Format(DateTimeOffset.UtcNow, options.DateFormat ?? "yyyy/MM/dd");
             var metaLine = BuildMetaLine(options);
             var pageSize = props.Length > 5 ? PageSizes.A4.Landscape() : PageSizes.A4;
             var svgContent = options.IncludeLogo
@@ -332,7 +342,7 @@ namespace Application.Services
             {
                 FileContents = pdfBytes,
                 ContentType = "application/pdf",
-                FileName = $"{safeName}_{DateTime.Now:yyyyMMdd_HHmmss}.pdf"
+                FileName = $"{safeName}_{_clock.Format(DateTimeOffset.UtcNow, "yyyyMMdd_HHmmss")}.pdf"
             });
         }
         #endregion

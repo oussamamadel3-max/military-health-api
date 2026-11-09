@@ -1,4 +1,5 @@
 using Application.Dtos.ExportDtos;
+using Application.Services.Time;
 using Application.Services.Export;
 using Domain.Entities.Patient;
 using QuestPDF.Fluent;
@@ -26,7 +27,10 @@ public static class MemberReceiptPdfBuilder
     /// <summary>
     /// يولّد بايتات PDF للإيصال من بيانات المنتسب المحمّلة (يشمل المركز الحالي).
     /// </summary>
-    public static ExportFileDto Build(Member member, DateTimeOffset generatedAtUtc)
+    public static ExportFileDto Build(
+        Member member,
+        DateTimeOffset generatedAtUtc,
+        TimeZoneInfo? displayZone = null)
     {
         ArgumentNullException.ThrowIfNull(member);
 
@@ -36,7 +40,10 @@ public static class MemberReceiptPdfBuilder
         var fileNumberText = member.FileNumber.ToString();
         var centerName = member.CurrentMedicalCenter?.NameAr ?? string.Empty;
         var queueDateText = member.QueueDate.ToString("yyyy/MM/dd");
-        var generatedText = generatedAtUtc.ToLocalTime().ToString("yyyy/MM/dd HH:mm");
+        var generatedText = BusinessClock.Format(
+            generatedAtUtc,
+            displayZone ?? TimeZoneInfo.Utc,
+            "yyyy/MM/dd HH:mm");
         var matrix = EncodeCode128(fileNumberText);
 
         var pdfBytes = Document.Create(container =>

@@ -10,6 +10,7 @@ using Application.Exceptions;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
+using Application.Services.Time;
 using Domain.Entities.Audit;
 using Domain.Entities.Clinical;
 using Domain.Entities.Patient;
@@ -42,6 +43,7 @@ public class ClinicWorkspaceService : IClinicWorkspaceService
     private readonly IPermissionGate _permissionGate;
     private readonly ICurrentUserService _currentUser;
     private readonly ClinicWorkspaceOptions _options;
+    private readonly IBusinessClock _clock;
 
     public ClinicWorkspaceService(
         IMemberService members,
@@ -53,7 +55,8 @@ public class ClinicWorkspaceService : IClinicWorkspaceService
         IUnitOfWork unitOfWork,
         IPermissionGate permissionGate,
         ICurrentUserService currentUser,
-        IOptions<ClinicWorkspaceOptions> options)
+        IOptions<ClinicWorkspaceOptions> options,
+        IBusinessClock? businessClock = null)
     {
         _members = members;
         _memberRepository = memberRepository;
@@ -65,6 +68,7 @@ public class ClinicWorkspaceService : IClinicWorkspaceService
         _permissionGate = permissionGate;
         _currentUser = currentUser;
         _options = options.Value;
+        _clock = businessClock ?? BusinessClock.Utc;
     }
 
     /// <inheritdoc />
@@ -376,15 +380,13 @@ public class ClinicWorkspaceService : IClinicWorkspaceService
 
         if (query.FromDate.HasValue)
         {
-            var from = query.FromDate.Value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
-            var fromOffset = new DateTimeOffset(from);
+            var fromOffset = _clock.StartOfDay(query.FromDate.Value);
             source = source.Where(d => d.RequestedAt >= fromOffset);
         }
 
         if (query.ToDate.HasValue)
         {
-            var toExclusive = query.ToDate.Value.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
-            var toOffset = new DateTimeOffset(toExclusive);
+            var toOffset = _clock.EndOfDayExclusive(query.ToDate.Value);
             source = source.Where(d => d.RequestedAt < toOffset);
         }
 

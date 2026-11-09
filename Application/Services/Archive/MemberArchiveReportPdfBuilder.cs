@@ -1,4 +1,5 @@
 using Application.Dtos.Archive;
+using Application.Services.Time;
 using Application.Dtos.ExportDtos;
 using Application.Services.Export;
 using QuestPDF.Fluent;
@@ -18,14 +19,19 @@ public static class MemberArchiveReportPdfBuilder
     /// <summary>
     /// يولّد بايتات PDF من عقد التقرير الكامل دون مسارات تخزين داخلية.
     /// </summary>
-    public static ExportFileDto Build(MemberFullMedicalReportDto report, DateTimeOffset generatedAtUtc)
+    public static ExportFileDto Build(
+        MemberFullMedicalReportDto report,
+        DateTimeOffset generatedAtUtc,
+        TimeZoneInfo? displayZone = null)
     {
         ArgumentNullException.ThrowIfNull(report);
 
         QuestPDF.Settings.License = LicenseType.Community;
         RegisterBrandFonts();
 
-        var generatedText = generatedAtUtc.ToLocalTime().ToString("yyyy/MM/dd HH:mm");
+        var zone = displayZone ?? TimeZoneInfo.Utc;
+        string Show(DateTimeOffset value, string format) => BusinessClock.Format(value, zone, format);
+        var generatedText = Show(generatedAtUtc, "yyyy/MM/dd HH:mm");
         var fileNumber = report.Member.FileNumber.ToString();
 
         var pdfBytes = Document.Create(container =>
@@ -68,7 +74,7 @@ public static class MemberArchiveReportPdfBuilder
 
                     SectionTitle(col, "هوية الأرشيف والمركز");
                     Field(col, "الرقم الأرشيفي", report.ArchiveNumber);
-                    Field(col, "تاريخ الأرشفة", report.ArchivedAt.ToLocalTime().ToString("yyyy/MM/dd HH:mm"));
+                    Field(col, "تاريخ الأرشفة", Show(report.ArchivedAt, "yyyy/MM/dd HH:mm"));
                     Field(col, "رمز المركز", report.ArchiveCenterCode ?? "—");
                     Field(col, "اسم المركز", report.ArchiveCenterNameAr ?? "—");
 
@@ -90,7 +96,7 @@ public static class MemberArchiveReportPdfBuilder
                         Field(col, "من", m.LastTransfer.FromCenterNameAr ?? m.LastTransfer.FromCenterId.ToString("D"));
                         Field(col, "إلى", m.LastTransfer.ToCenterNameAr ?? m.LastTransfer.ToCenterId.ToString("D"));
                         Field(col, "السبب", m.LastTransfer.TransferReason);
-                        Field(col, "التاريخ", m.LastTransfer.ExecutedAt.ToLocalTime().ToString("yyyy/MM/dd HH:mm"));
+                        Field(col, "التاريخ", Show(m.LastTransfer.ExecutedAt, "yyyy/MM/dd HH:mm"));
                     }
 
                     SectionTitle(col, "تقييمات العيادات");
@@ -127,7 +133,7 @@ public static class MemberArchiveReportPdfBuilder
                                              row.ClinicNameAr,
                                              row.IsMissing ? "ناقص" : (row.ResultStatusNameAr ?? "—"),
                                              row.AssessedByUserName ?? row.AssessedByUserId ?? "—",
-                                             row.AssessedAt?.ToLocalTime().ToString("yyyy/MM/dd") ?? "—"
+                                             row.AssessedAt is { } assessedAt ? Show(assessedAt, "yyyy/MM/dd") : "—"
                                          })
                                 {
                                     table.Cell()
@@ -172,7 +178,7 @@ public static class MemberArchiveReportPdfBuilder
                         {
                             col.Item().Text(note.NoteText);
                             col.Item().Text(
-                                    $"— {note.AuthorUserName ?? note.AuthorUserId} / {note.AuthorClinicNameAr} / {note.WrittenAt.ToLocalTime():yyyy/MM/dd}")
+                                    $"— {note.AuthorUserName ?? note.AuthorUserId} / {note.AuthorClinicNameAr} / {Show(note.WrittenAt, "yyyy/MM/dd")}")
                                 .FontSize(8)
                                 .FontColor(ExportBrandTheme.TextMuted);
                         }
@@ -195,7 +201,7 @@ public static class MemberArchiveReportPdfBuilder
                     SectionTitle(col, "القرار النهائي");
                     var fd = report.FinalDecision;
                     Field(col, "النتيجة", fd.ResultStatusNameAr ?? fd.ResultStatusId.ToString());
-                    Field(col, "تاريخ القرار", fd.DecidedAt.ToLocalTime().ToString("yyyy/MM/dd HH:mm"));
+                    Field(col, "تاريخ القرار", Show(fd.DecidedAt, "yyyy/MM/dd HH:mm"));
                     Field(col, "المشرف", fd.SupervisorUserName ?? fd.SupervisorUserId);
                     if (!string.IsNullOrWhiteSpace(fd.RejectionReason))
                         Field(col, "سبب الرفض", fd.RejectionReason);
@@ -208,7 +214,7 @@ public static class MemberArchiveReportPdfBuilder
                         foreach (var hItem in report.DecisionHistory)
                         {
                             col.Item().Text(
-                                $"{hItem.ChangedAt.ToLocalTime():yyyy/MM/dd HH:mm}: {hItem.OldStatusNameAr} ← {hItem.NewStatusNameAr} — {hItem.ChangeReason}");
+                                $"{Show(hItem.ChangedAt, "yyyy/MM/dd HH:mm")}: {hItem.OldStatusNameAr} ← {hItem.NewStatusNameAr} — {hItem.ChangeReason}");
                         }
                     }
 

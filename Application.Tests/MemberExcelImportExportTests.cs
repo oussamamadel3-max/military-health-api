@@ -120,6 +120,53 @@ public class MemberExcelImportExportTests
     }
 
     [Fact]
+    public async Task Import_preview_flags_multiple_existing_recruitment_numbers_in_one_lookup()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await MemberServiceTests.SeedReferencesAsync(db);
+        var service = MemberServiceTests.CreateService(
+            db, CenterA, allowCreate: true, allowView: true, allowImport: true);
+
+        await service.CreateAsync(new CreateMemberRequest
+        {
+            FullName = "أول",
+            MotherName = "الأم",
+            BirthDate = DateOnly.FromDateTime(DateTime.UtcNow).AddYears(-22),
+            MaritalStatusId = 1,
+            Occupation = "موظف",
+            RecruitmentNumber = "BATCH-1",
+            RecruitmentCenterId = RecruitmentCenterId,
+            HeightCm = 170,
+            WeightKg = 70
+        });
+        await service.CreateAsync(new CreateMemberRequest
+        {
+            FullName = "ثان",
+            MotherName = "الأم",
+            BirthDate = DateOnly.FromDateTime(DateTime.UtcNow).AddYears(-23),
+            MaritalStatusId = 1,
+            Occupation = "موظف",
+            RecruitmentNumber = "batch-2",
+            RecruitmentCenterId = RecruitmentCenterId,
+            HeightCm = 171,
+            WeightKg = 71
+        });
+
+        var form = BuildImportFile(
+            ValidRow("batch-1", fullName: "مكرر أول"),
+            ValidRow("BATCH-2", fullName: "مكرر ثان"),
+            ValidRow("BATCH-3", fullName: "جديد"));
+
+        var preview = await service.PreviewImportAsync(form);
+
+        Assert.Equal(1, preview.ValidCount);
+        Assert.Equal(2, preview.DuplicateCount);
+        Assert.Equal("BATCH-3", Assert.Single(preview.ValidRows).RecruitmentNumber);
+        Assert.Contains(preview.Issues, i => i.RecruitmentNumber == "batch-1" && i.Status == "Duplicate");
+        Assert.Contains(preview.Issues, i => i.RecruitmentNumber == "BATCH-2" && i.Status == "Duplicate");
+    }
+
+    [Fact]
     public async Task Import_preview_flags_invalid_measurement_or_date()
     {
         await using var db = MemberServiceTests.CreateDb();

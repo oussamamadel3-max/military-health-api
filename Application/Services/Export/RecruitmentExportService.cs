@@ -11,6 +11,7 @@ using Application.Exceptions;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
+using Application.Services.Time;
 using Application.Services.Supervisor;
 using Domain.Entities.Audit;
 using Domain.Entities.Core;
@@ -59,6 +60,7 @@ public class RecruitmentExportService : IRecruitmentExportService
     private readonly IFileStorageService _fileStorage;
     private readonly IAuditLogRepository _audit;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IBusinessClock _clock;
 
     public RecruitmentExportService(
         IPermissionGate permissionGate,
@@ -72,7 +74,8 @@ public class RecruitmentExportService : IRecruitmentExportService
         IExportService export,
         IFileStorageService fileStorage,
         IAuditLogRepository audit,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IBusinessClock? businessClock = null)
     {
         _permissionGate = permissionGate;
         _currentUser = currentUser;
@@ -86,6 +89,7 @@ public class RecruitmentExportService : IRecruitmentExportService
         _fileStorage = fileStorage;
         _audit = audit;
         _unitOfWork = unitOfWork;
+        _clock = businessClock ?? BusinessClock.Utc;
     }
 
     #region Public Operations
@@ -455,15 +459,13 @@ public class RecruitmentExportService : IRecruitmentExportService
 
         if (query.FromDate.HasValue)
         {
-            var from = query.FromDate.Value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
-            var fromOffset = new DateTimeOffset(from, TimeSpan.Zero);
+            var fromOffset = _clock.StartOfDay(query.FromDate.Value);
             q = q.Where(b => b.CreatedAt >= fromOffset);
         }
 
         if (query.ToDate.HasValue)
         {
-            var toExclusive = query.ToDate.Value.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
-            var toOffset = new DateTimeOffset(toExclusive, TimeSpan.Zero);
+            var toOffset = _clock.EndOfDayExclusive(query.ToDate.Value);
             q = q.Where(b => b.CreatedAt < toOffset);
         }
 
@@ -878,17 +880,13 @@ public class RecruitmentExportService : IRecruitmentExportService
 
         if (query.DecisionFrom.HasValue)
         {
-            var from = new DateTimeOffset(
-                query.DecisionFrom.Value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
-                TimeSpan.Zero);
+            var from = _clock.StartOfDay(query.DecisionFrom.Value);
             decisionsQ = decisionsQ.Where(d => d.DecidedAt >= from);
         }
 
         if (query.DecisionTo.HasValue)
         {
-            var toExclusive = new DateTimeOffset(
-                query.DecisionTo.Value.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
-                TimeSpan.Zero);
+            var toExclusive = _clock.EndOfDayExclusive(query.DecisionTo.Value);
             decisionsQ = decisionsQ.Where(d => d.DecidedAt < toExclusive);
         }
 
@@ -981,17 +979,13 @@ public class RecruitmentExportService : IRecruitmentExportService
 
         if (query.ExportedFrom.HasValue)
         {
-            var from = new DateTimeOffset(
-                query.ExportedFrom.Value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
-                TimeSpan.Zero);
+            var from = _clock.StartOfDay(query.ExportedFrom.Value);
             q = q.Where(x => x.item.ExportedAt >= from);
         }
 
         if (query.ExportedTo.HasValue)
         {
-            var toExclusive = new DateTimeOffset(
-                query.ExportedTo.Value.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
-                TimeSpan.Zero);
+            var toExclusive = _clock.EndOfDayExclusive(query.ExportedTo.Value);
             q = q.Where(x => x.item.ExportedAt < toExclusive);
         }
 

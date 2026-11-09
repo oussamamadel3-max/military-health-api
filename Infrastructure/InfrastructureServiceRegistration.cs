@@ -19,6 +19,7 @@ using Application.Services.FileStorageService;
 using Application.Services.Reports;
 using Application.Services.Sanitization;
 using Application.Services.Supervisor;
+using Application.Services.Time;
 using Infrastructure.Persistence;
 using Infrastructure.Repositories;
 using Microsoft.Extensions.DependencyInjection;
@@ -30,6 +31,7 @@ public static class InfrastructureServiceRegistration
     public static IServiceCollection ConfigureInfrastructureServices(this IServiceCollection services)
     {
         services.AddSingleton<ITextInputSanitizer, HtmlTextInputSanitizer>();
+        services.AddSingleton<IBusinessClock, BusinessClock>();
 
         services.AddScoped<AuditInterceptor>();
 

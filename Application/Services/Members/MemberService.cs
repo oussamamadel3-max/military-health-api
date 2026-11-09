@@ -9,6 +9,7 @@ using Application.Exceptions;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
+using Application.Services.Time;
 using Domain.Entities.Audit;
 using Domain.Entities.Core;
 using Domain.Entities.Patient;
@@ -45,6 +46,7 @@ public class MemberService : IMemberService
     private readonly IPermissionGate _permissionGate;
     private readonly ICurrentUserService _currentUser;
     private readonly IExportService _export;
+    private readonly IBusinessClock _clock;
 
     public MemberService(
         IMemberRepository members,
@@ -58,7 +60,8 @@ public class MemberService : IMemberService
         IMapper mapper,
         IPermissionGate permissionGate,
         ICurrentUserService currentUser,
-        IExportService export)
+        IExportService export,
+        IBusinessClock? businessClock = null)
     {
         _members = members;
         _importBatches = importBatches;
@@ -72,6 +75,7 @@ public class MemberService : IMemberService
         _permissionGate = permissionGate;
         _currentUser = currentUser;
         _export = export;
+        _clock = businessClock ?? BusinessClock.Utc;
     }
 
     public async Task<PaginatedList<MemberListItemDto>> ListAsync(
@@ -440,7 +444,7 @@ public class MemberService : IMemberService
             ?? throw new MemberNotFoundException();
 
         var generatedAt = DateTimeOffset.UtcNow;
-        var pdf = MemberReceiptPdfBuilder.Build(member, generatedAt);
+        var pdf = MemberReceiptPdfBuilder.Build(member, generatedAt, _clock.TimeZone);
 
         RecordAudit(
             userId,
@@ -510,6 +514,9 @@ public class MemberService : IMemberService
 
         var valid = new List<MemberImportValidRow>();
         var issues = parsed.Issues.ToList();
+        var existingRecruitmentNumbers = await _members.FindExistingRecruitmentNumbersAsync(
+            parsed.ValidRows.Select(r => r.RecruitmentNumber).ToArray(),
+            cancellationToken);
 
         foreach (var row in parsed.ValidRows)
         {
@@ -521,9 +528,7 @@ public class MemberService : IMemberService
                     row.BloodTypeId,
                     cancellationToken);
 
-                if (await _members.RecruitmentNumberExistsAsync(
-                        row.RecruitmentNumber.Trim(),
-                        cancellationToken: cancellationToken))
+                if (existingRecruitmentNumbers.Contains(row.RecruitmentNumber.Trim()))
                 {
                     issues.Add(CreateImportIssue(
                         row.RowNumber,
@@ -622,10 +627,14 @@ public class MemberService : IMemberService
             if (batch.Status != MemberImportBatchStatuses.Previewed)
                 throw new MemberImportAlreadyCommittedException();
 
+            var existingRecruitmentNumbers = await _members.FindExistingRecruitmentNumbersAsync(
+                rows.Select(r => r.RecruitmentNumber).ToArray(),
+                cancellationToken);
+
             foreach (var row in rows)
             {
                 var recruitmentNumber = row.RecruitmentNumber.Trim();
-                if (await _members.RecruitmentNumberExistsAsync(recruitmentNumber, cancellationToken: cancellationToken))
+                if (existingRecruitmentNumbers.Contains(recruitmentNumber))
                 {
                     skippedDuplicate++;
                     continue;
@@ -1090,7 +1099,7 @@ public class MemberService : IMemberService
     private Task<List<BmiCategory>> LoadBmiCategoriesAsync(CancellationToken cancellationToken)
         => _references.BmiCategories().Where(c => c.IsActive).OrderBy(c => c.SortOrder).ToListAsync(cancellationToken);
 
-    private static IQueryable<Member> ApplyCreatedAtFilter(
+    private IQueryable<Member> ApplyCreatedAtFilter(
         IQueryable<Member> query,
         DateOnly? date,
         DateOnly? fromDate,
@@ -1098,20 +1107,20 @@ public class MemberService : IMemberService
     {
         if (date.HasValue)
         {
-            var start = new DateTimeOffset(date.Value.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
-            var end = start.AddDays(1);
+            var start = _clock.StartOfDay(date.Value);
+            var end = _clock.EndOfDayExclusive(date.Value);
             return query.Where(m => m.CreatedAt >= start && m.CreatedAt < end);
         }
 
         if (fromDate.HasValue)
         {
-            var start = new DateTimeOffset(fromDate.Value.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            var start = _clock.StartOfDay(fromDate.Value);
             query = query.Where(m => m.CreatedAt >= start);
         }
 
         if (toDate.HasValue)
         {
-            var endExclusive = new DateTimeOffset(toDate.Value.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero).AddDays(1);
+            var endExclusive = _clock.EndOfDayExclusive(toDate.Value);
             query = query.Where(m => m.CreatedAt < endExclusive);
         }
 

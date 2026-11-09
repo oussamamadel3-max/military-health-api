@@ -11,6 +11,7 @@ using Application.Exceptions;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
+using Application.Services.Time;
 using Application.Services.Members;
 using Application.Services.Supervisor;
 using Domain.Entities.Archive;
@@ -52,6 +53,7 @@ public class MemberArchiveService : IMemberArchiveService
     private readonly IAuditLogRepository _audit;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IMapper _mapper;
+    private readonly IBusinessClock _clock;
 
     public MemberArchiveService(
         IPermissionGate permissionGate,
@@ -67,7 +69,8 @@ public class MemberArchiveService : IMemberArchiveService
         ICrossCenterAccessService crossCenterAccess,
         IAuditLogRepository audit,
         IUnitOfWork unitOfWork,
-        IMapper mapper)
+        IMapper mapper,
+        IBusinessClock? businessClock = null)
     {
         _permissionGate = permissionGate;
         _currentUser = currentUser;
@@ -83,6 +86,7 @@ public class MemberArchiveService : IMemberArchiveService
         _audit = audit;
         _unitOfWork = unitOfWork;
         _mapper = mapper;
+        _clock = businessClock ?? BusinessClock.Utc;
     }
 
     /// <inheritdoc />
@@ -195,7 +199,7 @@ public class MemberArchiveService : IMemberArchiveService
             cancellationToken);
 
         var report = await BuildReportAsync(archiveId, requiredCenterId: centerId, cancellationToken);
-        var file = MemberArchiveReportPdfBuilder.Build(report, DateTimeOffset.UtcNow);
+        var file = MemberArchiveReportPdfBuilder.Build(report, DateTimeOffset.UtcNow, _clock.TimeZone);
         await PersistViewAuditAsync(report, print: true, cancellationToken);
         return file;
     }
@@ -226,7 +230,7 @@ public class MemberArchiveService : IMemberArchiveService
             archiveId.ToString("D"),
             cancellationToken);
 
-        var file = MemberArchiveReportPdfBuilder.Build(report, DateTimeOffset.UtcNow);
+        var file = MemberArchiveReportPdfBuilder.Build(report, DateTimeOffset.UtcNow, _clock.TimeZone);
         await PersistViewAuditAsync(report, print: true, cancellationToken);
         return file;
     }
@@ -281,14 +285,14 @@ public class MemberArchiveService : IMemberArchiveService
 
         if (query.ArchivedFrom.HasValue)
         {
-            var from = ToUtcStart(query.ArchivedFrom.Value);
+            var from = StartOfDay(query.ArchivedFrom.Value);
             archivesQ = archivesQ.Where(a => a.ArchivedAt >= from);
         }
 
         if (query.ArchivedTo.HasValue)
         {
-            var to = ToUtcEnd(query.ArchivedTo.Value);
-            archivesQ = archivesQ.Where(a => a.ArchivedAt <= to);
+            var to = EndOfDayExclusive(query.ArchivedTo.Value);
+            archivesQ = archivesQ.Where(a => a.ArchivedAt < to);
         }
 
         var membersQ = _members.Query(asNoTracking: true);
@@ -313,14 +317,14 @@ public class MemberArchiveService : IMemberArchiveService
 
         if (query.DecisionFrom.HasValue)
         {
-            var from = ToUtcStart(query.DecisionFrom.Value);
+            var from = StartOfDay(query.DecisionFrom.Value);
             decisionsQ = decisionsQ.Where(d => d.DecidedAt >= from);
         }
 
         if (query.DecisionTo.HasValue)
         {
-            var to = ToUtcEnd(query.DecisionTo.Value);
-            decisionsQ = decisionsQ.Where(d => d.DecidedAt <= to);
+            var to = EndOfDayExclusive(query.DecisionTo.Value);
+            decisionsQ = decisionsQ.Where(d => d.DecidedAt < to);
         }
 
         var joined =
@@ -852,11 +856,9 @@ public class MemberArchiveService : IMemberArchiveService
             ["resultStatusId"] = query.ResultStatusId?.ToString()
         });
 
-    private static DateTimeOffset ToUtcStart(DateOnly date)
-        => new(date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc), TimeSpan.Zero);
+    private DateTimeOffset StartOfDay(DateOnly date) => _clock.StartOfDay(date);
 
-    private static DateTimeOffset ToUtcEnd(DateOnly date)
-        => new(date.ToDateTime(new TimeOnly(23, 59, 59), DateTimeKind.Utc), TimeSpan.Zero);
+    private DateTimeOffset EndOfDayExclusive(DateOnly date) => _clock.EndOfDayExclusive(date);
 
     #endregion
 }

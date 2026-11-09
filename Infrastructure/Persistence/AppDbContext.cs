@@ -100,6 +100,7 @@ public class AppDbContext : DbContext
         AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
         base.OnModelCreating(modelBuilder);
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
+        modelBuilder.HasPostgresExtension("pg_trgm");
         AuditJsonbTextDbFunction.Register(modelBuilder);
 
         // MH-SEC-051: allow isolated SQLite integration hosts without changing PostgreSQL production mapping.
