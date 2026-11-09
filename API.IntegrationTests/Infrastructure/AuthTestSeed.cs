@@ -42,7 +42,59 @@ public static class AuthTestSeed
             Description = "IT view effective access",
             IsActive = true
         };
-        db.Permissions.AddRange(resetPermission, viewPermission);
+        var changeStatusPermission = new Permission
+        {
+            Id = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0003"),
+            Name = SystemPermissions.UserManagement.ChangeStatus,
+            Description = "IT change user status",
+            IsActive = true
+        };
+        var assignRolesPermission = new Permission
+        {
+            Id = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0004"),
+            Name = SystemPermissions.UserManagement.AssignRoles,
+            Description = "IT assign roles",
+            IsActive = true
+        };
+        var editUserPermission = new Permission
+        {
+            Id = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0005"),
+            Name = SystemPermissions.UserManagement.Edit,
+            Description = "IT edit users",
+            IsActive = true
+        };
+        var createUserPermission = new Permission
+        {
+            Id = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0007"),
+            Name = SystemPermissions.UserManagement.Create,
+            Description = "IT create users",
+            IsActive = true
+        };
+        var roleCreatePermission = new Permission
+        {
+            Id = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0006"),
+            Name = SystemPermissions.RoleManagement.Create,
+            Description = "IT create roles",
+            IsActive = true
+        };
+        var userCentersManagePermission = new Permission
+        {
+            Id = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0008"),
+            Name = MilitaryHealthPermissions.UserCenters.Manage,
+            Description = "IT manage user centers",
+            IsActive = true
+        };
+        db.Permissions.AddRange(
+            resetPermission,
+            viewPermission,
+            changeStatusPermission,
+            assignRolesPermission,
+            editUserPermission,
+            roleCreatePermission,
+            createUserPermission,
+            userCentersManagePermission);
+
+        await db.SaveChangesAsync();
 
         var adminRole = new Role
         {
@@ -73,24 +125,66 @@ public static class AuthTestSeed
             AssignedAt = DateTimeOffset.UtcNow
         });
 
-        db.RolePermissions.Add(new RolePermission
+        foreach (var permissionId in new[]
+                 {
+                     resetPermission.Id,
+                     changeStatusPermission.Id,
+                     assignRolesPermission.Id,
+                     editUserPermission.Id,
+                     roleCreatePermission.Id,
+                     createUserPermission.Id,
+                     userCentersManagePermission.Id
+                 })
         {
-            RoleId = adminRole.Id,
-            PermissionId = resetPermission.Id,
-            IsActive = true,
-            GrantedByUserId = admin.Id,
-            GrantedAt = DateTimeOffset.UtcNow
-        });
+            db.RolePermissions.Add(new RolePermission
+            {
+                RoleId = adminRole.Id,
+                PermissionId = permissionId,
+                IsActive = true,
+                GrantedByUserId = admin.Id,
+                GrantedAt = DateTimeOffset.UtcNow
+            });
+        }
 
-        db.UserPermissions.Add(new UserPermission
+        var memberRole = new Role
         {
-            UserId = admin.Id,
-            PermissionId = viewPermission.Id,
-            CenterId = null,
+            Id = Guid.NewGuid().ToString(),
+            Name = "IT-Member",
+            NormalizedName = "IT-MEMBER",
             IsActive = true,
-            GrantedByUserId = admin.Id,
-            GrantedAt = DateTimeOffset.UtcNow
-        });
+            Scope = RoleScope.Central,
+            CreatedAt = DateTime.UtcNow,
+            Description = "Integration test member role"
+        };
+        var memberRoleCreate = await roles.CreateAsync(memberRole);
+        if (!memberRoleCreate.Succeeded)
+            throw new InvalidOperationException(string.Join("; ", memberRoleCreate.Errors.Select(e => e.Description)));
+
+        foreach (var subject in new[] { active, second })
+        {
+            db.UserRoleAssociations.Add(new UserRoleAssociation
+            {
+                UserId = subject.Id,
+                RoleId = memberRole.Id,
+                CenterId = null,
+                IsActive = true,
+                AssignedByUserId = admin.Id,
+                AssignedAt = DateTimeOffset.UtcNow
+            });
+        }
+
+        foreach (var permissionId in new[] { viewPermission.Id, createUserPermission.Id })
+        {
+            db.UserPermissions.Add(new UserPermission
+            {
+                UserId = admin.Id,
+                PermissionId = permissionId,
+                CenterId = null,
+                IsActive = true,
+                GrantedByUserId = admin.Id,
+                GrantedAt = DateTimeOffset.UtcNow
+            });
+        }
 
         await db.SaveChangesAsync();
 

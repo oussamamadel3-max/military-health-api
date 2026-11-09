@@ -122,6 +122,99 @@ public sealed class AuthHttpSession
         return await AdminResetPasswordAsync(targetUserId, "N3w!ProbePass1");
     }
 
+    public async Task<HttpResponseMessage> PatchUserStatusAsync(string userId, bool isActive)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Patch, $"/api/User/UpdateUserStatus/{Uri.EscapeDataString(userId)}")
+        {
+            Content = JsonContent.Create(new { isActive })
+        };
+        AttachCsrf(request);
+        var response = await _client.SendAsync(request);
+        LastResponse = response;
+        return response;
+    }
+
+    public async Task<HttpResponseMessage> UpdateMyProfileAsync(string fullName, string email, string employeeNumber, string rankOrTitle)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Put, "/api/User/UpdateMyProfile")
+        {
+            Content = JsonContent.Create(new
+            {
+                fullName,
+                email,
+                employeeNumber,
+                rankOrTitle
+            })
+        };
+        AttachCsrf(request);
+        var response = await _client.SendAsync(request);
+        LastResponse = response;
+        return response;
+    }
+
+    public async Task<HttpResponseMessage> ToggleRolesAsync(object body)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/User/ToggleRolesForUser")
+        {
+            Content = JsonContent.Create(body)
+        };
+        AttachCsrf(request);
+        var response = await _client.SendAsync(request);
+        LastResponse = response;
+        return response;
+    }
+
+    public async Task<HttpResponseMessage> PatchUserAsync(string userId, object body)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Patch, $"/api/User/PatchUser/{Uri.EscapeDataString(userId)}")
+        {
+            Content = JsonContent.Create(body)
+        };
+        AttachCsrf(request);
+        var response = await _client.SendAsync(request);
+        LastResponse = response;
+        return response;
+    }
+
+    public async Task<HttpResponseMessage> CreateRoleAsync(object body)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/Roles/Create")
+        {
+            Content = JsonContent.Create(body)
+        };
+        AttachCsrf(request);
+        var response = await _client.SendAsync(request);
+        LastResponse = response;
+        return response;
+    }
+
+    public async Task<HttpResponseMessage> CreateUserAsync(object body)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/User/Create")
+        {
+            Content = JsonContent.Create(body)
+        };
+        AttachCsrf(request);
+        var response = await _client.SendAsync(request);
+        LastResponse = response;
+        return response;
+    }
+
+    public async Task<HttpResponseMessage> PostRawJsonAsync(string path, string? json, string? contentType = "application/json")
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, path);
+        if (json is null)
+            request.Content = null;
+        else
+            request.Content = new StringContent(json, System.Text.Encoding.UTF8, contentType ?? "application/json");
+        if (path.StartsWith("/api/User", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/api/Roles", StringComparison.OrdinalIgnoreCase))
+            AttachCsrf(request);
+        var response = await _client.SendAsync(request);
+        LastResponse = response;
+        return response;
+    }
+
     public void DropRefreshCookie()
         => CookieHeaderAssertions.RemoveCookie(_cookies, _client.BaseAddress!, AuthCookieNames.RefreshToken);
 

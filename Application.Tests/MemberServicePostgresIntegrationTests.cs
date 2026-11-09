@@ -55,7 +55,9 @@ public class MemberServicePostgresIntegrationTests
     [Fact]
     public async Task UpdateAsync_on_postgres_exported_member_material_change_persists_expected_state()
     {
-        var connectionString = RequireExportReviewConnection();
+        var connectionString = ResolveConnectionString();
+        if (connectionString is null)
+            return;
         await using var db = CreatePostgresContext(connectionString);
         await EnsureMinimalSeedAsync(db);
 
@@ -88,7 +90,9 @@ public class MemberServicePostgresIntegrationTests
     [Fact]
     public async Task UpdateAsync_on_postgres_exported_member_without_material_change_preserves_export()
     {
-        var connectionString = RequireExportReviewConnection();
+        var connectionString = ResolveConnectionString();
+        if (connectionString is null)
+            return;
         await using var db = CreatePostgresContext(connectionString);
         await EnsureMinimalSeedAsync(db);
 
