@@ -82,13 +82,12 @@ public class UpdateUserPatchRequest
     public bool? isActive { get; set; }
 
     /// <summary>
-    /// null / omitted: leave roles unchanged. Empty list is rejected (not an implicit clear).
-    /// Non-empty list triggers scoped sync with MinimumActiveRoleGuard.
+    /// لم يعد هذا الحقل يغيّر الإسنادات. أي قيمة، بما فيها القائمة الفارغة، تُرفض بـ 422.
     /// </summary>
     public List<RoleLiteDto>? roles { get; set; }
 
     /// <summary>
-    /// نطاق مزامنة الأدوار. لمدير المركز يجب أن يطابق المركز النشط أو يُترك فارغاً.
+    /// لم يعد هذا الحقل يغيّر إسناد المركز. أي قيمة تُرفض بـ 422.
     /// </summary>
     public Guid? centerId { get; set; }
 }
@@ -201,14 +200,8 @@ public class UpdateUserWithRolesDto
     [StringLength(254)]
     public required string Email { get; set; }
 
-    /// <summary>
-    /// null: leave roles unchanged. Empty list is rejected; use explicit revoke to remove roles.
-    /// </summary>
     public List<string>? RoleIds { get; set; }
 
-    /// <summary>
-    /// نطاق مزامنة الأدوار. فارغ مع أدوار مركزية يعني الإسناد المركزي المقصود.
-    /// </summary>
     public Guid? CenterId { get; set; }
 }
 

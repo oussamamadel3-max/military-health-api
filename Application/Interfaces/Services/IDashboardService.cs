@@ -17,6 +17,12 @@ namespace Application.Interfaces.Services
         [Range(1, 120, ErrorMessage = "عدد أشهر النمو يجب أن يكون بين 1 و 120.")]
         public int GrowthMonths { get; set; } = 6;
 
+        /// <summary>
+        /// تصفية اختيارية. في السياق المحلي يجب أن تطابق المركز النشط، وإلا يُرفض الطلب.
+        /// في السياق المركزي مع AuditLog.Read تضيّق النتائج ولا توسّعها.
+        /// </summary>
+        public Guid? CenterId { get; set; }
+
         public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
         {
             if (From.HasValue && To.HasValue && From > To)

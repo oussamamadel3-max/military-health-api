@@ -36,6 +36,19 @@ public class MedicalCenterRepository : IMedicalCenterRepository
 
     public void Add(MedicalCenter center) => _context.MedicalCenters.Add(center);
 
+    /// <inheritdoc />
+    public async Task LockAsync(Guid centerId, CancellationToken cancellationToken = default)
+    {
+        var provider = _context.Database.ProviderName ?? string.Empty;
+        if (!provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        await _context.Database.ExecuteSqlRawAsync(
+            "SELECT \"centerId\" FROM core.\"medicalCenter\" WHERE \"centerId\" = {0} FOR UPDATE",
+            new object[] { centerId },
+            cancellationToken);
+    }
+
     public Task<int> CountActiveUsersAsync(Guid centerId, CancellationToken cancellationToken = default)
         => _context.UserCenters.AsNoTracking()
             .CountAsync(uc => uc.CenterId == centerId && uc.IsActive, cancellationToken);

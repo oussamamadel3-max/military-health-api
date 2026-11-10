@@ -224,6 +224,10 @@ public class UserManagementAlignmentTests
         var roles = new Mock<IRoleRepository>();
         roles.Setup(r => r.GetRolePermissionsForRolesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<RolePermission>());
+        roles.Setup(r => r.QueryRoles(It.IsAny<bool>()))
+            .Returns(new List<Role>().AsQueryable());
+        users.Setup(r => r.QueryRoleAssociations(It.IsAny<bool>()))
+            .Returns(new List<UserRoleAssociation>().AsQueryable());
 
         var tokens = new Mock<IRefreshTokenRepository>();
         tokens.Setup(r => r.GetActiveByUserIdAsync(target.Id, It.IsAny<CancellationToken>()))

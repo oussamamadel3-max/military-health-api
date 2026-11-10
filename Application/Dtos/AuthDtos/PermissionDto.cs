@@ -37,6 +37,30 @@ namespace Application.Dtos.AuthDtos
         public Guid? CenterId { get; set; }
     }
 
+    /// <summary>
+    /// مزامنة المجموعة النهائية للصلاحيات المباشرة ضمن نطاق مركز واحد أو النطاق المركزي.
+    /// القائمة الفارغة تسحب الصلاحيات المباشرة التي يملك المنفّذ تفويض سحبها داخل ذلك النطاق.
+    /// </summary>
+    public class SyncDirectPermissionsDto
+    {
+        [Required(ErrorMessage = "معرف المستخدم مطلوب.")]
+        [StringLength(450, MinimumLength = 1)]
+        public string UserId { get; set; } = string.Empty;
+
+        public List<Guid> PermissionIds { get; set; } = new();
+
+        /// <summary>نفس معنى CenterId في التبديل: فارغ للمدير المحلي يعني المركز النشط.</summary>
+        public Guid? CenterId { get; set; }
+    }
+
+    /// <summary>نتيجة مزامنة الصلاحيات المباشرة.</summary>
+    public sealed class DirectPermissionSyncResultDto
+    {
+        public int Added { get; set; }
+        public int Removed { get; set; }
+        public bool SessionsInvalidated { get; set; }
+    }
+
 
     public class PermissionWithRolesDto
     {

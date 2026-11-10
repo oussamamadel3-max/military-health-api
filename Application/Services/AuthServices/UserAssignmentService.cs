@@ -204,6 +204,9 @@ public class UserAssignmentService : IUserAssignmentService
                 throw new InvalidUserDataException(
                     "إلغاء آخر مركز فعّال يجعل الحساب غير قابل للعمل التشغيلي. أعد الطلب مع تأكيد إلغاء آخر مركز.");
 
+            await CenterManagerContinuityGuard.EnsureRevokingCenterAsync(
+                _userRepository, _roleRepository, _centers, user.Id, dto.CenterId, cancellationToken);
+
             IamRetention.Revoke(row, actorId, reason);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -414,6 +417,9 @@ public class UserAssignmentService : IUserAssignmentService
                 removing: new[] { new MinimumActiveRoleGuard.ActiveRoleKey(row.RoleId, row.CenterId) },
                 adding: Array.Empty<MinimumActiveRoleGuard.ActiveRoleKey>());
 
+            await CenterManagerContinuityGuard.EnsureRevokingRoleLinkAsync(
+                _userRepository, _roleRepository, _centers, user.Id, role.Name ?? string.Empty, scopeCenterId, cancellationToken);
+
             IamRetention.Revoke(row, actorId, reason);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -461,7 +467,8 @@ public class UserAssignmentService : IUserAssignmentService
             .Select(r => new DropdownRoleDto
             {
                 roleId = r.Id,
-                name = r.Name ?? string.Empty
+                name = r.Name ?? string.Empty,
+                scope = r.Scope
             })
             .ToListAsync(cancellationToken);
     }

@@ -9,6 +9,7 @@ using Application.Exceptions;
 using Domain.Entities.Auth;
 using MapsterMapper;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 
 namespace Application.Services.AuthServices
 {
@@ -129,7 +130,7 @@ namespace Application.Services.AuthServices
         {
             _permissionGate.EnsureAll(SystemPermissions.RoleManagement.AssignPermissions);
 
-            _ = await _roleManager.FindByIdAsync(roleId)
+            var role = await _roleManager.FindByIdAsync(roleId)
                 ?? throw new RoleNotFoundException("الدور غير موجود.");
 
             var permission = await _permissionRepository.FindByIdAsync(permissionId)
@@ -152,7 +153,8 @@ namespace Application.Services.AuthServices
                     _userRepository, _roleRepository, roleId, afterNames, previousNames);
 
                 IamRetention.Revoke(existing, AssignmentStamp.RequireActor(_currentUserService.UserId), IamRetention.RolePermissionWithdrawn);
-                await _unitOfWork.SaveChangesAsync();
+                role.PermissionSetVersion++;
+                await SaveRolePermissionChangeAsync();
                 await SecurityStampHelper.InvalidateUsersWithRoleAsync(
                     _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, roleId);
                 return;
@@ -175,7 +177,8 @@ namespace Application.Services.AuthServices
             if (existing != null)
             {
                 IamRetention.Reactivate(existing, AssignmentStamp.RequireActor(_currentUserService.UserId), DateTimeOffset.UtcNow);
-                await _unitOfWork.SaveChangesAsync();
+                role.PermissionSetVersion++;
+                await SaveRolePermissionChangeAsync();
                 await SecurityStampHelper.InvalidateUsersWithRoleAsync(
                     _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, roleId);
                 return;
@@ -191,7 +194,8 @@ namespace Application.Services.AuthServices
             };
 
             _permissionRepository.AddRolePermission(rolePermission);
-            await _unitOfWork.SaveChangesAsync();
+            role.PermissionSetVersion++;
+            await SaveRolePermissionChangeAsync();
 
             await SecurityStampHelper.InvalidateUsersWithRoleAsync(
                 _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, roleId);
@@ -210,6 +214,18 @@ namespace Application.Services.AuthServices
 
             await SecurityStampHelper.InvalidateUsersWithPermissionAsync(
                 _permissionRepository, _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, permissionId);
+        }
+
+        private async Task SaveRolePermissionChangeAsync()
+        {
+            try
+            {
+                await _unitOfWork.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                throw new RolePermissionConcurrencyException();
+            }
         }
         #endregion
     }

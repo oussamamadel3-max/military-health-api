@@ -142,6 +142,8 @@ namespace Application.Services.AuthServices
                 return;
 
             ReservedRoleGuard.EnsureCanDeactivate(role.Name);
+            await CenterManagerContinuityGuard.EnsureDeactivatingRoleAsync(
+                _userRepository, _roleRepository, role.Name ?? string.Empty);
 
             await IamAdminGuard.EnsureAtLeastOneIamAdminRemainsAfterRolePermissionChangeAsync(
                 _userRepository,
@@ -309,7 +311,7 @@ namespace Application.Services.AuthServices
 
 
         #region         اسناد صلاحية الى دور 
-        public async Task<string> SyncPermissionsForRoleAsync(AssignPermissionsDto dto)
+        public async Task<RolePermissionSyncResultDto> SyncPermissionsForRoleAsync(AssignPermissionsDto dto)
         {
             _permissionGate.EnsureAll(SystemPermissions.RoleManagement.AssignPermissions);
 
@@ -319,8 +321,8 @@ namespace Application.Services.AuthServices
             var role = await _roleManager.FindByIdAsync(dto.RoleId)
                 ?? throw new RoleNotFoundException("الدور غير موجود.");
 
-            role.UpdatedAt = DateTime.Now;
-            role.UpdatedBy = _currentUserService.UserId;
+            if (role.PermissionSetVersion != dto.PermissionSetVersion)
+                throw new RolePermissionConcurrencyException();
 
             var requestedIds = (dto.PermissionsIds ?? new List<Guid>())
                 .Where(x => x != Guid.Empty)
@@ -396,14 +398,36 @@ namespace Application.Services.AuthServices
                     _roleRepository.AddRolePermissions(addRows);
                 }
 
+                var changed = toAdd.Count > 0 || toRemove.Count > 0;
+                if (changed)
+                {
+                    role.PermissionSetVersion++;
+                    role.UpdatedAt = DateTime.Now;
+                    role.UpdatedBy = _currentUserService.UserId;
+                }
+
                 await _unitOfWork.SaveChangesAsync();
 
-                await SecurityStampHelper.InvalidateUsersWithRoleAsync(
-                    _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, dto.RoleId);
+                if (changed)
+                {
+                    await SecurityStampHelper.InvalidateUsersWithRoleAsync(
+                        _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, dto.RoleId);
+                }
 
                 await tx.CommitAsync();
 
-                return $"تم تحديث الصلاحيات بنجاح. (إضافة: {toAdd.Count} | حذف: {toRemove.Count})";
+                return new RolePermissionSyncResultDto
+                {
+                    Message = $"تم تحديث الصلاحيات بنجاح. (إضافة: {toAdd.Count} | حذف: {toRemove.Count})",
+                    PermissionSetVersion = role.PermissionSetVersion,
+                    Added = toAdd.Count,
+                    Removed = toRemove.Count
+                };
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                await tx.RollbackAsync();
+                throw new RolePermissionConcurrencyException();
             }
             catch
             {
@@ -550,6 +574,8 @@ namespace Application.Services.AuthServices
             if (willDeactivate)
             {
                 ReservedRoleGuard.EnsureCanDeactivate(role.Name);
+                await CenterManagerContinuityGuard.EnsureDeactivatingRoleAsync(
+                    _userRepository, _roleRepository, role.Name ?? string.Empty);
 
                 var currentPermNames = (await _roleRepository.GetRolePermissionsForRolesAsync(new[] { role.Id }))
                     .Select(rp => rp.Permission?.Name)

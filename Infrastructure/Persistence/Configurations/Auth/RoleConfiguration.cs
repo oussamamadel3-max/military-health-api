@@ -15,6 +15,9 @@ public class RoleConfiguration : IEntityTypeConfiguration<Role>
             .HasDefaultValue(RoleScope.Center)
             .IsRequired();
         builder.HasIndex(r => r.Scope);
+        builder.Property(r => r.PermissionSetVersion)
+            .IsConcurrencyToken()
+            .HasDefaultValue(0L);
         builder.HasMany(r => r.RolePermissions)
             .WithOne(rp => rp.Role)
             .HasForeignKey(rp => rp.RoleId);

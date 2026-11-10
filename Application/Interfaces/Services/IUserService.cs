@@ -13,12 +13,14 @@ namespace Application.Interfaces.Services
             int pageSize,
             string? q = null,
             bool? isActive = null,
-            string? roleId = null);
+            string? roleId = null,
+            Guid? centerId = null);
         Task<UserListItemDto> GetUserAsync(string id);
         Task ChangeOwnPasswordAsync(ChangePasswordRequest request);
         Task ResetUserPasswordAsync(AdminChangePasswordRequest request);
         Task ToggleRolesForUserAsync(AssignRolesDto dto);
         Task TogglePermissionsForUserAsync(AssignPermissionToUserDto dto);
+        Task<DirectPermissionSyncResultDto> SyncDirectPermissionsAsync(SyncDirectPermissionsDto dto);
         Task RemoveFieldPermissionsFromUserAsync(RemoveFieldPermissionsDto dto);
         Task<UserListItemDto> UpdateUserAsync(string id, UpdateUserPatchRequest dto);
         Task<UpdateUserStatusRequest> UpdateUserStatusAsync(string id, UpdateUserStatusRequest request);

@@ -307,29 +307,33 @@ public class RoleAssignmentPathTests
             RoleIds = [doctor]
         });
 
-        await harness.Service.UpdateUserAsync("target-1", new UpdateUserPatchRequest
-        {
-            fullName = "مستخدم",
-            username = "nurse",
-            email = "nurse@example.com",
-            employeeNumber = "EMP-nurse",
-            rankOrTitle = "موظف استقبال",
-            roles = [new RoleLiteDto(clerk, "ReceptionClerk")]
-        });
+        var profileError = await Assert.ThrowsAsync<InvalidUserDataException>(() =>
+            harness.Service.UpdateUserAsync("target-1", new UpdateUserPatchRequest
+            {
+                fullName = "مستخدم",
+                username = "nurse",
+                email = "nurse@example.com",
+                employeeNumber = "EMP-nurse",
+                rankOrTitle = "موظف استقبال",
+                roles = [new RoleLiteDto(clerk, "ReceptionClerk")]
+            }));
+        Assert.Equal(UserService.ProfileDoesNotChangeAssignmentsMessage, profileError.Message);
 
-        await harness.Service.UpdateUserWithRolesAsync("target-1", new UpdateUserWithRolesDto
-        {
-            UserName = "nurse",
-            Email = "nurse@example.com",
-            RoleIds = [supervisor],
-            CenterId = CenterA
-        });
+        var combinedError = await Assert.ThrowsAsync<InvalidUserDataException>(() =>
+            harness.Service.UpdateUserWithRolesAsync("target-1", new UpdateUserWithRolesDto
+            {
+                UserName = "nurse",
+                Email = "nurse@example.com",
+                RoleIds = [supervisor],
+                CenterId = CenterA
+            }));
+        Assert.Equal(UserService.ProfileDoesNotChangeAssignmentsMessage, combinedError.Message);
 
         var links = await db.UserRoleAssociations.Where(x => x.UserId == "target-1" && x.IsActive).ToListAsync();
-        var nurse = await db.Users.SingleAsync(u => u.Id == "target-1");
-        Assert.NotNull(nurse.UpdatedAt);
-        Assert.Contains(links, x => x.RoleId == supervisor && x.CenterId == CenterA);
+        Assert.Contains(links, x => x.RoleId == doctor && x.CenterId == CenterA);
         Assert.Contains(links, x => x.RoleId == supervisor && x.CenterId == CenterB);
+        Assert.DoesNotContain(links, x => x.RoleId == supervisor && x.CenterId == CenterA);
+        Assert.DoesNotContain(links, x => x.RoleId == clerk);
         Assert.DoesNotContain(links, x => x.CenterId == null);
         Assert.Equal(0, await db.UserPermissions.CountAsync(x => x.UserId == "target-1"));
     }
@@ -360,7 +364,7 @@ public class RoleAssignmentPathTests
                 UserId = "target-1",
                 RoleIds = [superAdmin]
             }));
-        await Assert.ThrowsAsync<ForbiddenPermissionException>(() =>
+        var profileError = await Assert.ThrowsAsync<InvalidUserDataException>(() =>
             harness.Service.UpdateUserAsync("target-1", new UpdateUserPatchRequest
             {
                 username = "nurse",
@@ -369,6 +373,7 @@ public class RoleAssignmentPathTests
                 rankOrTitle = "موظف",
                 roles = [new RoleLiteDto(officer, "CenterOfficer")]
             }));
+        Assert.Equal(UserService.ProfileDoesNotChangeAssignmentsMessage, profileError.Message);
         await Assert.ThrowsAsync<ForbiddenPermissionException>(() =>
             harness.Service.UpdateUserWithRolesAsync("outsider", new UpdateUserWithRolesDto
             {
@@ -499,6 +504,140 @@ public class RoleAssignmentPathTests
             p.UserId == "target-1" && p.IsActive && p.CenterId == null);
         Assert.Equal(permissionId, centralGrant.PermissionId);
         Assert.Equal(CenterA, revoked.CenterId);
+    }
+
+    [Fact]
+    public async Task Disable_rejects_the_last_active_center_manager_and_allows_a_substitute()
+    {
+        await using var db = CreateDb();
+        await SeedCenterAsync(db, CenterA, true);
+        await SeedUserAsync(db, "actor-1", "admin");
+        await SeedRoleLinkAsync(db, "actor-1", "SuperAdmin", null);
+        await SeedUserAsync(db, "manager-1", "manager1");
+        await SeedUserCenterAsync(db, "manager-1", CenterA);
+        await SeedRoleLinkAsync(db, "manager-1", "CenterManager", CenterA);
+        await SeedIamKeeperAsync(db);
+
+        var harness = CreateUserService(db, central: true);
+        harness.UserManager.Setup(m => m.UpdateAsync(It.IsAny<User>())).ReturnsAsync(IdentityResult.Success);
+
+        var rejected = await Assert.ThrowsAsync<ForbiddenPermissionException>(() =>
+            harness.Service.UpdateUserStatusAsync("manager-1", new UpdateUserStatusRequest { isActive = false }));
+        Assert.Equal(CenterManagerContinuityGuard.LastCenterManagerMessage, rejected.Message);
+        Assert.True((await db.Users.SingleAsync(u => u.Id == "manager-1")).IsActive);
+
+        await SeedUserAsync(db, "manager-2", "manager2");
+        await SeedUserCenterAsync(db, "manager-2", CenterA);
+        await SeedRoleLinkAsync(db, "manager-2", "CenterManager", CenterA);
+
+        await harness.Service.UpdateUserStatusAsync("manager-1", new UpdateUserStatusRequest { isActive = false });
+        Assert.False((await db.Users.SingleAsync(u => u.Id == "manager-1")).IsActive);
+        Assert.True((await db.Users.SingleAsync(u => u.Id == "manager-2")).IsActive);
+    }
+
+    [Fact]
+    public async Task Sync_direct_permissions_is_idempotent_and_keeps_other_centers()
+    {
+        await using var db = CreateDb();
+        await SeedCenterAsync(db, CenterA, true);
+        await SeedCenterAsync(db, CenterB, true);
+        await SeedUserAsync(db, "actor-1", "manager");
+        await SeedUserAsync(db, "target-1", "nurse");
+        await SeedUserCenterAsync(db, "actor-1", CenterA);
+        await SeedUserCenterAsync(db, "target-1", CenterA);
+        await SeedUserCenterAsync(db, "target-1", CenterB);
+        await SeedRoleLinkAsync(db, "actor-1", "CenterManager", CenterA);
+        await SeedIamKeeperAsync(db);
+        var viewId = await SeedPermissionAsync(db, "Members.View");
+        var foreignId = await SeedPermissionAsync(db, "Archive.ViewPrint");
+        db.UserPermissions.Add(new UserPermission
+        {
+            Id = Guid.NewGuid(),
+            UserId = "target-1",
+            PermissionId = foreignId,
+            CenterId = CenterB,
+            IsActive = true,
+            GrantedByUserId = "actor-1",
+            GrantedAt = DateTimeOffset.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var gate = new Mock<IPermissionGate>();
+        gate.Setup(g => g.GetPermissions()).Returns(new[] { "Members.View" });
+        var harness = CreateUserService(db, central: false, gate: gate.Object);
+        var stamps = 0;
+        harness.UserManager.Setup(m => m.UpdateSecurityStampAsync(It.IsAny<User>()))
+            .Callback(() => stamps++)
+            .ReturnsAsync(IdentityResult.Success);
+
+        var added = await harness.Service.SyncDirectPermissionsAsync(new SyncDirectPermissionsDto
+        {
+            UserId = "target-1",
+            PermissionIds = [viewId]
+        });
+        Assert.Equal(1, added.Added);
+        Assert.True(added.SessionsInvalidated);
+
+        var repeated = await harness.Service.SyncDirectPermissionsAsync(new SyncDirectPermissionsDto
+        {
+            UserId = "target-1",
+            PermissionIds = [viewId]
+        });
+        Assert.Equal(0, repeated.Added);
+        Assert.Equal(0, repeated.Removed);
+        Assert.False(repeated.SessionsInvalidated);
+        Assert.Equal(1, stamps);
+
+        var cleared = await harness.Service.SyncDirectPermissionsAsync(new SyncDirectPermissionsDto
+        {
+            UserId = "target-1",
+            PermissionIds = []
+        });
+        Assert.Equal(1, cleared.Removed);
+        Assert.Equal(2, stamps);
+        Assert.True(await db.UserPermissions.AnyAsync(p =>
+            p.UserId == "target-1" && p.PermissionId == foreignId && p.CenterId == CenterB && p.IsActive));
+        Assert.False(await db.UserPermissions.AnyAsync(p =>
+            p.UserId == "target-1" && p.PermissionId == viewId && p.IsActive));
+    }
+
+    [Fact]
+    public async Task User_list_center_filter_narrows_before_count_and_rejects_a_foreign_center()
+    {
+        await using var db = CreateDb();
+        await SeedCenterAsync(db, CenterA, true);
+        await SeedCenterAsync(db, CenterB, true);
+        await SeedUserAsync(db, "actor-1", "admin");
+        await SeedUserAsync(db, "user-a", "user.a");
+        await SeedUserAsync(db, "user-b", "user.b");
+        await SeedUserAsync(db, "user-revoked", "user.revoked");
+        await SeedUserCenterAsync(db, "user-a", CenterA);
+        await SeedUserCenterAsync(db, "user-b", CenterB);
+        await SeedUserCenterAsync(db, "user-revoked", CenterA);
+        var revoked = await db.UserCenters.SingleAsync(uc => uc.UserId == "user-revoked");
+        revoked.IsActive = false;
+        revoked.RevokeReason = IamRetention.CenterRevoked;
+        await db.SaveChangesAsync();
+
+        await SeedRoleLinkAsync(db, "actor-1", "SuperAdmin", null);
+        var central = CreateUserService(db, central: true);
+        var narrowed = await central.Service.GetUsersListAsync(1, 10, centerId: CenterA);
+        Assert.Equal(1, narrowed.TotalCount);
+        Assert.Equal("user-a", narrowed.Items.Single().userId);
+
+        var centralLink = await db.UserRoleAssociations.SingleAsync(x => x.UserId == "actor-1");
+        centralLink.IsActive = false;
+        await db.SaveChangesAsync();
+
+        await SeedUserCenterAsync(db, "actor-1", CenterA);
+        var localActor = CreateUserService(db, central: false);
+        var foreign = await Assert.ThrowsAsync<ForbiddenPermissionException>(() =>
+            localActor.Service.GetUsersListAsync(1, 10, centerId: CenterB));
+        Assert.Contains("غير المركز النشط", foreign.Message);
+
+        var localPage = await localActor.Service.GetUsersListAsync(1, 10, centerId: CenterA);
+        Assert.Equal(1, localPage.TotalCount);
+        Assert.Equal("user-a", localPage.Items.Single().userId);
     }
 
     private static CreateUserDto NewUser(string username, string role, Guid? centerId = null) => new()

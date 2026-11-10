@@ -61,7 +61,7 @@ public sealed class MinimumActiveRoleHttpTests
         });
         Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains(MinimumActiveRoleGuard.AtLeastOneRoleMessage, body, StringComparison.Ordinal);
+        Assert.Contains(Application.Services.AuthServices.UserService.ProfileDoesNotChangeAssignmentsMessage, body, StringComparison.Ordinal);
         Assert.Equal(stampBefore, await ReadStampAsync(userId));
     }
 

@@ -30,7 +30,7 @@ public interface IRoleService
     Task AssignUserToRole(string userId, List<string> roleIds);
 
     //  مزامنة وتحديث صلاحيات الدور (إضافة وتعديل وحذف)
-    Task<string> SyncPermissionsForRoleAsync(AssignPermissionsDto dto);
+    Task<RolePermissionSyncResultDto> SyncPermissionsForRoleAsync(AssignPermissionsDto dto);
 
     //  إنشاء دور جديد مع الصلاحيات الخاصة به
     Task<RoleDetailsDto> CreateRoleWithPermissionsAsync(CreateRoleWithPermissionsDto dto);

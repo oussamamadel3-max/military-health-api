@@ -11,6 +11,11 @@ public class Role : IdentityRole, IAuditableEntity
     /// <summary>النطاق التشغيلي للدور: مركزي أو مقيد بمركز.</summary>
     public RoleScope Scope { get; set; } = RoleScope.Center;
 
+    /// <summary>
+    /// إصدار مجموعة صلاحيات الدور. يزداد عند كل تغيير فعلي للروابط ويمنع الكتابة المفقودة.
+    /// </summary>
+    public long PermissionSetVersion { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public string? CreatedBy { get; set; }
     public DateTime? UpdatedAt { get; set; }

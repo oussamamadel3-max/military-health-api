@@ -392,6 +392,12 @@ namespace Infrastructure.Migrations
                     b.Property<string>("NormalizedName")
                         .HasColumnType("text");
 
+                    b.Property<long>("PermissionSetVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
                     b.Property<int>("Scope")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")

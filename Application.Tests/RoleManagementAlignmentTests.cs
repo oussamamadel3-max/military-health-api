@@ -81,6 +81,32 @@ public class RoleManagementAlignmentTests
     }
 
     [Fact]
+    public async Task Sync_permissions_rejects_a_stale_permission_set_version_before_writing()
+    {
+        var role = new Role { Id = "role-1", Name = "CustomOps", IsActive = true, PermissionSetVersion = 4 };
+        var manager = CreateRoleManager(role);
+        var roles = new Mock<IRoleRepository>();
+        var gate = new Mock<IPermissionGate>();
+        gate.Setup(g => g.GetPermissions()).Returns(new List<string>
+        {
+            SystemPermissions.RoleManagement.AssignPermissions
+        });
+        var service = CreateRoleService(manager.Object, gate.Object, roles.Object, Mock.Of<IPermissionRepository>());
+
+        var error = await Assert.ThrowsAsync<RolePermissionConcurrencyException>(() =>
+            service.SyncPermissionsForRoleAsync(new AssignPermissionsDto
+            {
+                RoleId = role.Id,
+                PermissionsIds = new List<Guid> { Guid.NewGuid() },
+                PermissionSetVersion = 3
+            }));
+
+        Assert.Equal(409, error.Status);
+        Assert.Equal(4, role.PermissionSetVersion);
+        roles.Verify(r => r.AddRolePermissions(It.IsAny<IEnumerable<RolePermission>>()), Times.Never);
+    }
+
+    [Fact]
     public async Task Update_role_rejects_renaming_reserved_role()
     {
         var role = new Role { Id = "role-sa", Name = "SuperAdmin", IsActive = true };

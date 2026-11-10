@@ -20,6 +20,8 @@ namespace Application.Services.AuthServices;
 
 public class UserService : IUserService
 {
+    public const string ProfileDoesNotChangeAssignmentsMessage =
+        "تعديل الأدوار أو المراكز يتم من مسارات الإسناد المخصصة، وليس من تعديل البيانات العامة.";
     private readonly UserManager<User> _userManager;
     private readonly RoleManager<Role> _roleManager;
     private readonly IUserRepository _userRepository;
@@ -222,6 +224,8 @@ public class UserService : IUserService
 
         if (statusChanging && updatedUser.IsActive == false)
         {
+            await CenterManagerContinuityGuard.EnsureDeactivatingUserAsync(
+                _userRepository, _roleRepository, _centers, user.Id);
             await IamAdminGuard.EnsureNotLastIamAdminBeforeDisableOrDeleteAsync(
                 _userRepository, _roleRepository, user.Id);
         }
@@ -289,6 +293,8 @@ public class UserService : IUserService
 
         await EnsureCanManageTargetAsync(user.Id);
 
+        await CenterManagerContinuityGuard.EnsureDeactivatingUserAsync(
+            _userRepository, _roleRepository, _centers, user.Id);
         await IamAdminGuard.EnsureNotLastIamAdminBeforeDisableOrDeleteAsync(
             _userRepository, _roleRepository, user.Id);
 
@@ -312,7 +318,8 @@ public class UserService : IUserService
         int pageSize,
         string? q = null,
         bool? isActive = null,
-        string? roleId = null)
+        string? roleId = null,
+        Guid? centerId = null)
     {
         _permissionGate.EnsureAll(SystemPermissions.UserManagement.Read);
 
@@ -325,6 +332,9 @@ public class UserService : IUserService
         IQueryable<User> baseQuery = await BuildManageableUsersQueryAsync();
 
         baseQuery = baseQuery.Where(u => u.Id != currentUserId);
+
+        if (centerId is Guid requestedCenter)
+            baseQuery = await ApplyActiveCenterFilterAsync(baseQuery, requestedCenter);
 
         if (!string.IsNullOrWhiteSpace(q))
         {
@@ -490,25 +500,22 @@ public class UserService : IUserService
             ?? throw new UserNotFoundException(id);
 
         var statusChanging = dto.isActive.HasValue && dto.isActive.Value != user.IsActive;
-        var rolesProvided = dto.roles != null;
-        // roles: null → leave unchanged; roles: [] → invalid (not an implicit clear).
-        MinimumActiveRoleGuard.EnsurePatchRolesNotEmptyClear(dto.roles);
 
         var required = new List<string> { SystemPermissions.UserManagement.Edit };
         if (statusChanging) required.Add(SystemPermissions.UserManagement.ChangeStatus);
-        if (rolesProvided) required.Add(SystemPermissions.UserManagement.AssignRoles);
         _permissionGate.EnsureAll(required.ToArray());
         await EnsureCanManageTargetAsync(user.Id);
 
+        if (dto.roles != null || dto.centerId.HasValue)
+            throw new InvalidUserDataException(ProfileDoesNotChangeAssignmentsMessage);
+
         if (statusChanging && dto.isActive == false)
         {
+            await CenterManagerContinuityGuard.EnsureDeactivatingUserAsync(
+                _userRepository, _roleRepository, _centers, user.Id);
             await IamAdminGuard.EnsureNotLastIamAdminBeforeDisableOrDeleteAsync(
                 _userRepository, _roleRepository, user.Id);
         }
-
-        IDbContextTransaction? roleTx = null;
-        if (rolesProvided)
-            roleTx = await _unitOfWork.BeginTransactionAsync();
 
         try
         {
@@ -566,26 +573,6 @@ public class UserService : IUserService
                 _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id);
         }
 
-        if (rolesProvided)
-        {
-            var requestedTokens = (dto.roles ?? new())
-                .Where(r => r is not null)
-                .Select(r => !string.IsNullOrWhiteSpace(r.RoleId) ? r.RoleId! : r.RoleName)
-                .Where(s => !string.IsNullOrWhiteSpace(s))
-                .Select(s => s!)
-                .ToList();
-
-            await ApplyScopedRoleSyncAsync(user.Id, requestedTokens, dto.centerId);
-
-            var afterPerms = await IamAdminGuard.GetEffectivePermissionNamesAsync(
-                _userRepository, _roleRepository, user.Id);
-            await IamAdminGuard.EnsureNotLastIamAdminAsync(
-                _userRepository, _roleRepository, user.Id, afterPerms);
-
-            await SecurityStampHelper.InvalidateUserTokensAsync(
-                _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id);
-        }
-
         var roleAssociationEntities = await _userRepository.QueryRoleAssociations()
             .Where(ura => ura.UserId == user.Id && ura.IsActive)
             .Include(ura => ura.Role)
@@ -620,21 +607,11 @@ public class UserService : IUserService
         updated.permissionsCount = permissionsLite2.Count;
         updated.Permissions = permissionsLite2;
 
-        if (roleTx is not null)
-            await roleTx.CommitAsync();
-
         return updated;
         }
         catch
         {
-            if (roleTx is not null)
-                await roleTx.RollbackAsync();
             throw;
-        }
-        finally
-        {
-            if (roleTx is not null)
-                await roleTx.DisposeAsync();
         }
     }
 
@@ -652,6 +629,8 @@ public class UserService : IUserService
 
         if (user.IsActive && !request.isActive)
         {
+            await CenterManagerContinuityGuard.EnsureDeactivatingUserAsync(
+                _userRepository, _roleRepository, _centers, user.Id);
             await IamAdminGuard.EnsureNotLastIamAdminBeforeDisableOrDeleteAsync(
                 _userRepository, _roleRepository, user.Id);
         }
@@ -926,6 +905,117 @@ public class UserService : IUserService
             throw;
         }
     }
+
+    /// <summary>
+    /// يطابق الصلاحيات المباشرة الفعّالة داخل النطاق مع المجموعة النهائية.
+    /// لا يمس صلاحيات الأدوار ولا إسنادات المراكز الأخرى، ولا يبدّل الختم إن لم يتغيّر شيء.
+    /// </summary>
+    public async Task<DirectPermissionSyncResultDto> SyncDirectPermissionsAsync(SyncDirectPermissionsDto dto)
+    {
+        _permissionGate.EnsureAll(SystemPermissions.UserManagement.AssignPermissions);
+
+        var user = await _userManager.FindByIdAsync(dto.UserId)
+            ?? throw new UserNotFoundException(dto.UserId);
+
+        await EnsureCanManageTargetAsync(user.Id);
+        var actorId = AssignmentStamp.RequireActor(_currentUserService.UserId);
+        var scopeCenterId = await ResolveDirectPermissionScopeAsync(actorId, user.Id, dto.CenterId);
+
+        var requested = (dto.PermissionIds ?? new List<Guid>())
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToList();
+
+        if (requested.Count > 0)
+        {
+            var known = await _permissionRepository.GetActiveByIdsAsync(requested);
+            if (known.Count != requested.Count)
+                throw new InvalidUserDataException("لا يمكن إسناد صلاحية غير موجودة أو غير فعّالة.");
+
+            IamAdminGuard.EnsureAssignableWithinActorPermissions(
+                known.Select(p => p.Name), _permissionGate.GetPermissions());
+        }
+
+        var currentRows = await _userRepository.QueryUserPermissions(asNoTracking: false)
+            .Include(up => up.Permission)
+            .Where(up => up.UserId == user.Id && up.IsActive && up.CenterId == scopeCenterId)
+            .ToListAsync();
+
+        var actorPermissions = _permissionGate.GetPermissions();
+        var requestedSet = requested.ToHashSet();
+        var currentIds = currentRows.Select(row => row.PermissionId).ToHashSet();
+        var toAdd = requested.Where(id => !currentIds.Contains(id)).ToList();
+        var toRemove = currentRows
+            .Where(row => !requestedSet.Contains(row.PermissionId)
+                && actorPermissions.Contains(row.Permission?.Name ?? string.Empty, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+
+        var finalIds = new HashSet<Guid>(currentIds);
+        foreach (var row in toRemove)
+            finalIds.Remove(row.PermissionId);
+        foreach (var id in toAdd)
+            finalIds.Add(id);
+
+        var finalPermissions = await _permissionRepository.GetActiveByIdsAsync(finalIds);
+        PermissionDependencyRules.EnsureReadBeforeWriteActions(
+            finalPermissions.Select(p => p.Name),
+            message => new InvalidUserDataException(message));
+
+        if (toAdd.Count == 0 && toRemove.Count == 0)
+        {
+            return new DirectPermissionSyncResultDto();
+        }
+
+        using var tx = await _unitOfWork.BeginTransactionAsync();
+        try
+        {
+            if (toRemove.Count > 0)
+                RevokeDirectPermissions(toRemove);
+
+            if (toAdd.Count > 0)
+            {
+                var inactive = await _userRepository.QueryUserPermissions(asNoTracking: false)
+                    .Where(up => up.UserId == user.Id
+                        && !up.IsActive
+                        && up.CenterId == scopeCenterId
+                        && toAdd.Contains(up.PermissionId))
+                    .ToListAsync();
+
+                foreach (var row in inactive)
+                    IamRetention.Reactivate(row, actorId, DateTimeOffset.UtcNow);
+
+                var restored = inactive.Select(row => row.PermissionId).ToHashSet();
+                var inserts = toAdd
+                    .Where(id => !restored.Contains(id))
+                    .Select(id => NewPermissionLink(user.Id, id, scopeCenterId));
+                _userRepository.AddUserPermissions(inserts);
+            }
+
+            await _unitOfWork.SaveChangesAsync();
+
+            var afterPerms = await IamAdminGuard.GetEffectivePermissionNamesAsync(
+                _userRepository, _roleRepository, user.Id);
+            await IamAdminGuard.EnsureNotLastIamAdminAsync(
+                _userRepository, _roleRepository, user.Id, afterPerms);
+
+            await SecurityStampHelper.InvalidateUserTokensAsync(
+                _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, user.Id);
+
+            await tx.CommitAsync();
+        }
+        catch
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
+
+        return new DirectPermissionSyncResultDto
+        {
+            Added = toAdd.Count,
+            Removed = toRemove.Count,
+            SessionsInvalidated = true
+        };
+    }
     #endregion
 
     #region إزالة الصلاحيات الحقلية من مستخدم
@@ -962,53 +1052,29 @@ public class UserService : IUserService
         if (string.IsNullOrWhiteSpace(userId))
             throw new InvalidUserDataException("معرف المستخدم غير صالح.");
 
-        _permissionGate.EnsureAll(
-            SystemPermissions.UserManagement.Edit,
-            SystemPermissions.UserManagement.AssignRoles);
+        _permissionGate.EnsureAll(SystemPermissions.UserManagement.Edit);
 
         var user = await _userManager.FindByIdAsync(userId)
             ?? throw new UserNotFoundException(userId);
 
         await EnsureCanManageTargetAsync(user.Id);
 
-        using var transaction = await _unitOfWork.BeginTransactionAsync();
-        try
-        {
-            var safeUserName = _textSanitizer.SanitizePlainText(updatedUser.UserName) ?? updatedUser.UserName;
-            var safeEmail = _textSanitizer.SanitizePlainText(updatedUser.Email) ?? updatedUser.Email;
-            user.UserName = safeUserName;
-            user.NormalizedUserName = safeUserName.ToUpperInvariant();
-            user.Email = safeEmail;
-            user.NormalizedEmail = safeEmail.ToUpperInvariant();
-            MarkUserModified(user);
+        if (updatedUser.RoleIds != null || updatedUser.CenterId.HasValue)
+            throw new InvalidUserDataException(ProfileDoesNotChangeAssignmentsMessage);
 
-            var updateRes = await _userManager.UpdateAsync(user);
-            if (!updateRes.Succeeded)
-                throw new InvalidUserDataException(string.Join(", ", updateRes.Errors.Select(e => e.Description)));
+        var safeUserName = _textSanitizer.SanitizePlainText(updatedUser.UserName) ?? updatedUser.UserName;
+        var safeEmail = _textSanitizer.SanitizePlainText(updatedUser.Email) ?? updatedUser.Email;
+        user.UserName = safeUserName;
+        user.NormalizedUserName = safeUserName.ToUpperInvariant();
+        user.Email = safeEmail;
+        user.NormalizedEmail = safeEmail.ToUpperInvariant();
+        MarkUserModified(user);
 
-            if (updatedUser.RoleIds is not null)
-            {
-                MinimumActiveRoleGuard.EnsureRequestContainsRoleToken(updatedUser.RoleIds);
-                await ApplyScopedRoleSyncAsync(userId, updatedUser.RoleIds, updatedUser.CenterId);
-            }
+        var updateRes = await _userManager.UpdateAsync(user);
+        if (!updateRes.Succeeded)
+            throw new InvalidUserDataException(string.Join(", ", updateRes.Errors.Select(e => e.Description)));
 
-            await _unitOfWork.SaveChangesAsync();
-
-            var afterPerms = await IamAdminGuard.GetEffectivePermissionNamesAsync(
-                _userRepository, _roleRepository, userId);
-            await IamAdminGuard.EnsureNotLastIamAdminAsync(
-                _userRepository, _roleRepository, userId, afterPerms);
-
-            await SecurityStampHelper.InvalidateUserTokensAsync(
-                _userRepository, _refreshTokenRepository, _unitOfWork, _userManager, userId);
-
-            await transaction.CommitAsync();
-        }
-        catch
-        {
-            await transaction.RollbackAsync();
-            throw;
-        }
+        await _unitOfWork.SaveChangesAsync();
     }
     #endregion
 
@@ -1031,6 +1097,36 @@ public class UserService : IUserService
         var actorId = _currentUserService.UserId ?? string.Empty;
         await UserManagementScopeGuard.EnsureCanManageTargetAsync(
             _access, _userRepository, actorId, targetUserId);
+    }
+
+    /// <summary>
+    /// يضيّق القائمة بإسناد مركز فعّال قبل العد. المدير المحلي يُقبل فقط لمركز الجلسة.
+    /// </summary>
+    private async Task<IQueryable<User>> ApplyActiveCenterFilterAsync(IQueryable<User> query, Guid centerId)
+    {
+        if (centerId == Guid.Empty)
+            throw new InvalidUserDataException("معرف المركز غير صالح.");
+
+        var actorId = _currentUserService.UserId ?? string.Empty;
+        var unrestricted = await UserManagementScopeGuard.ActorHasUnrestrictedScopeAsync(_access, actorId);
+        if (!unrestricted)
+        {
+            if (_currentCenter.IsCentralContext || _currentCenter.CenterId is not Guid active || active != centerId)
+                throw new ForbiddenPermissionException("لا يمكن عرض مستخدمي مركز غير المركز النشط.");
+
+            if (!await _access.IsActivelyAssignedAsync(actorId, centerId))
+                throw new ForbiddenPermissionException("لا يمكن عرض مستخدمي مركز غير مسند لك.");
+        }
+        else
+        {
+            _ = await _centers.GetByIdAsync(centerId, asNoTracking: true)
+                ?? throw new MedicalCenterNotFoundException();
+        }
+
+        var assignedUserIds = _userRepository.QueryUserCenters()
+            .Where(uc => uc.CenterId == centerId && uc.IsActive && uc.Center.IsActive)
+            .Select(uc => uc.UserId);
+        return query.Where(u => assignedUserIds.Contains(u.Id));
     }
 
     private async Task<IQueryable<User>> BuildManageableUsersQueryAsync()
@@ -1361,7 +1457,20 @@ public class UserService : IUserService
                 MinimumActiveRoleGuard.EnsureProjectedActiveRolesRemain(allActive, removing, adding);
 
                 if (toRemove.Count > 0)
+                {
+                    foreach (var row in toRemove)
+                    {
+                        await CenterManagerContinuityGuard.EnsureRevokingRoleLinkAsync(
+                            _userRepository,
+                            _roleRepository,
+                            _centers,
+                            userId,
+                            row.Role?.Name,
+                            row.CenterId);
+                    }
+
                     RevokeRoleAssignments(toRemove);
+                }
 
                 if (toAdd.Count > 0)
                     _userRepository.AddRoleAssociations(toAdd.Select(r => NewRoleLink(userId, r.Id, scopeCenterId)));

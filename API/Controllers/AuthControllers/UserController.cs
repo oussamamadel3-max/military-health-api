@@ -68,9 +68,10 @@ namespace API.Controllers.AuthControllers
             [FromQuery][Range(1, 500)] int pageSize = 10,
             [FromQuery] string? q = null,
             [FromQuery] bool? isActive = null,
-            [FromQuery] string? roleId = null)
+            [FromQuery] string? roleId = null,
+            [FromQuery] Guid? centerId = null)
         {
-            var usersList = await _userService.GetUsersListAsync(pageNumber, pageSize, q, isActive, roleId);
+            var usersList = await _userService.GetUsersListAsync(pageNumber, pageSize, q, isActive, roleId, centerId);
             return ApiResponse.Success("تم جلب قائمة المستخدمين بنجاح.", usersList);
         }
 
@@ -156,6 +157,20 @@ namespace API.Controllers.AuthControllers
         }
 
         /// <summary>
+        /// يستبدل المجموعة النهائية للصلاحيات المباشرة داخل النطاق. التبديل القديم يبقى Delta.
+        /// </summary>
+        [HttpPost("[action]")]
+        [AuthorizePermission(SystemPermissions.UserManagement.AssignPermissions)]
+        public async Task<IResult> SyncDirectPermissions([FromBody] SyncDirectPermissionsDto dto)
+        {
+            var result = await _userService.SyncDirectPermissionsAsync(dto);
+            var message = result.Added == 0 && result.Removed == 0
+                ? "لم تتغير الصلاحيات المباشرة."
+                : "تمت مزامنة الصلاحيات المباشرة بنجاح.";
+            return ApiResponse.Success(message, result);
+        }
+
+        /// <summary>
         /// إزالة روابط صلاحيات الحقول عن مستخدم. يتطلب UserManagement.RemoveFieldPermissions.
         /// يُبطل جلسات المستخدم بعد الإزالة.
         /// </summary>
@@ -167,12 +182,15 @@ namespace API.Controllers.AuthControllers
             return ApiResponse.Success("تم إزالة الصلاحيات الحقلية بنجاح.");
         }
 
+        /// <summary>
+        /// يحدّث اسم المستخدم والبريد فقط. RoleIds وCenterId لا تغيّر الإسنادات.
+        /// </summary>
         [HttpPut("[action]/{id}")]
-        [AuthorizePermission(SystemPermissions.UserManagement.Edit, SystemPermissions.UserManagement.AssignRoles)]
+        [AuthorizePermission(SystemPermissions.UserManagement.Edit)]
         public async Task<IResult> UpdateUserWithRoles([FromRoute] string id, [FromBody] UpdateUserWithRolesDto dto)
         {
             await _userService.UpdateUserWithRolesAsync(id, dto);
-            return ApiResponse.Success("تم تحديث المستخدم والأدوار بنجاح.");
+            return ApiResponse.Success("تم تحديث بيانات المستخدم بنجاح.");
         }
 
         [HttpGet("[action]")]

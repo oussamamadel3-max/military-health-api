@@ -681,24 +681,8 @@ public class SurgeryExamService : ISurgeryExamService
         string userId,
         CancellationToken cancellationToken)
     {
-        var assigned = await _users.QueryUserClinicAssignments()
-            .AnyAsync(a => a.UserId == userId
-                && a.CenterId == centerId
-                && a.ClinicId == clinicId
-                && a.IsActive
-                && a.RevokedAt == null, cancellationToken);
-
-        if (!assigned)
-            throw new DoctorClinicNotAssignedException();
-
-        var link = await _centerClinics.GetByCenterAndClinicAsync(
-            centerId,
-            clinicId,
-            asNoTracking: true,
-            cancellationToken);
-
-        if (link is null || !link.IsActive)
-            throw new DoctorClinicNotAssignedException();
+        var link = await DoctorClinicAccess.RequireActiveAssignmentAsync(
+            _users, _centerClinics, centerId, clinicId, userId, cancellationToken);
 
         if (!string.Equals(link.Clinic.Code, SurgeryClinicCode, StringComparison.OrdinalIgnoreCase))
             throw new InvalidSurgeryExamDataException("فحص الجراحة مسموح فقط لعيادة الجراحة.");

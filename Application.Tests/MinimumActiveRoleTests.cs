@@ -116,7 +116,7 @@ public class MinimumActiveRoleTests
                 roles = []
             }));
 
-        Assert.Equal(MinimumActiveRoleGuard.AtLeastOneRoleMessage, error.Message);
+        Assert.Equal(UserService.ProfileDoesNotChangeAssignmentsMessage, error.Message);
         Assert.True(await db.UserRoleAssociations.AnyAsync(x =>
             x.UserId == "target-1" && x.IsActive && x.RoleId == roleId));
         Assert.Equal(stampBefore, (await db.Users.SingleAsync(u => u.Id == "target-1")).SecurityStamp);
@@ -139,7 +139,7 @@ public class MinimumActiveRoleTests
                 RoleIds = []
             }));
 
-        Assert.Equal(MinimumActiveRoleGuard.AtLeastOneRoleMessage, error.Message);
+        Assert.Equal(UserService.ProfileDoesNotChangeAssignmentsMessage, error.Message);
         Assert.True(await db.UserRoleAssociations.AnyAsync(x =>
             x.UserId == "target-1" && x.IsActive && x.RoleId == roleId));
     }

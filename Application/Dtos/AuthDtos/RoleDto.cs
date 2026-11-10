@@ -13,6 +13,8 @@ public class RoleDto
     public RoleScope Scope { get; set; } = RoleScope.Center;
     /// <summary>دور أساسي من كتالوج SRS §6.2 (الثمانية).</summary>
     public bool IsSystemRole { get; set; }
+    /// <summary>إصدار مجموعة الصلاحيات المطلوب إرساله عند المزامنة.</summary>
+    public long PermissionSetVersion { get; set; }
 }
 public class CreateRoleDto
 {
@@ -57,6 +59,8 @@ public class RoleDetailsDto
     public bool IsSystemRole { get; set; }
     public int PermissionsCount { get; set; }
     public List<PermissionInfoDto> Permissions { get; set; } = new List<PermissionInfoDto>();
+    /// <summary>إصدار مجموعة الصلاحيات المطلوب إرساله عند المزامنة.</summary>
+    public long PermissionSetVersion { get; set; }
     public int AssignedUsersCount { get; set; }
     public DateTime CreatedAt { get; set; }
     public string? CreatedByName { get; set; }

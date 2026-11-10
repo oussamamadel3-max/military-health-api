@@ -1,3 +1,5 @@
+using Application.Common.Permissions;
+using Application.Exceptions;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
@@ -16,18 +18,24 @@ namespace Application.Services.Dashboard
         private readonly IUserContextService _userCtx;
         private readonly IMapper _mapper;
         private readonly IBusinessClock _clock;
+        private readonly IPermissionGate _permissionGate;
+        private readonly ICurrentCenterService _currentCenter;
 
         public DashboardService(
             IAuditLogRepository auditLogRepository,
             IUserRepository users,
             IUserContextService userCtx,
             IMapper mapper,
+            IPermissionGate permissionGate,
+            ICurrentCenterService currentCenter,
             IBusinessClock? businessClock = null)
         {
             _auditLogRepository = auditLogRepository;
             _users = users;
             _userCtx = userCtx;
             _mapper = mapper;
+            _permissionGate = permissionGate;
+            _currentCenter = currentCenter;
             _clock = businessClock ?? BusinessClock.Utc;
         }
 
@@ -93,11 +101,33 @@ namespace Application.Services.Dashboard
                 System.Linq.Expressions.Expression.Constant(value));
             return System.Linq.Expressions.Expression.Lambda<Func<T, bool>>(body, p);
         }
-public async Task<DashboardStatsDto> GetAsync(DashboardFilter f)
+        /// <summary>
+        /// نشاط اللوحة مشتق من سجل التدقيق. Dashboard.Read لا يكفي لقراءته؛ يلزم AuditLog.Read.
+        /// السياق المحلي يُصفّى بمركز الجلسة قبل التجميع، والسياق المركزي يبقى لمن يملك AuditLog.Read.
+        /// </summary>
+        public async Task<DashboardStatsDto> GetAsync(DashboardFilter f)
         {
-            var (start, endEx, _) = NormalizeRange(f.From, f.To);
+            f ??= new DashboardFilter();
+            if (!_permissionGate.Has(SystemPermissions.AuditLog.Read))
+                return new DashboardStatsDto();
 
+            var (start, endEx, _) = NormalizeRange(f.From, f.To);
             var auditQ = _auditLogRepository.Query();
+
+            if (_currentCenter.IsCentralContext)
+            {
+                await _permissionGate.EnsureCentralAsync(SystemPermissions.AuditLog.Read);
+                if (f.CenterId is Guid requested && requested != Guid.Empty)
+                    auditQ = auditQ.Where(a => a.CenterId == requested);
+            }
+            else
+            {
+                var centerId = await _permissionGate.EnsureLocalAsync(SystemPermissions.Dashboard.Read);
+                if (f.CenterId is Guid requested && requested != centerId)
+                    throw new ForbiddenPermissionException("لا يمكن عرض نشاط لوحة تخص مركزاً غير المركز النشط.");
+
+                auditQ = auditQ.Where(a => a.CenterId == centerId);
+            }
 
             if (start.HasValue || endEx.HasValue)
                 auditQ = ApplyRange(auditQ, start, endEx, a => a.OccurredAt);

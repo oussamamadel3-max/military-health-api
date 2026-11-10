@@ -93,7 +93,7 @@ namespace API.Controllers.AuthControllers
         public async Task<IResult> SyncPermissionsForRole([FromBody] AssignPermissionsDto dto)
         {
             var summary = await _roleService.SyncPermissionsForRoleAsync(dto);
-            return ApiResponse.Success(summary);
+            return ApiResponse.Success(summary.Message, summary);
         }
 
         [HttpPost("[action]")]
