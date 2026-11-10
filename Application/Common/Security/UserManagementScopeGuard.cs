@@ -1,5 +1,6 @@
 using Application.Exceptions;
 using Application.Interfaces.Repositories;
+using Application.Interfaces.Services;
 
 namespace Application.Common.Security;
 
@@ -74,5 +75,39 @@ public static class UserManagementScopeGuard
 
         if (!await access.IsActivelyAssignedAsync(actorUserId, roleCenterId.Value, cancellationToken))
             throw new ForbiddenPermissionException("لا يمكنك إسناد دور لمركز خارج نطاق تفويضك.");
+    }
+
+    /// <summary>
+    /// يتحقق من حق المنفّذ في قراءة بيانات إسناد/صلاحيات مركز محدد (قوائم FR-018) — ليس لعمليات الإسناد.
+    /// </summary>
+    public static async Task EnsureCanViewCenterDataAsync(
+        IAccessContextRepository access,
+        IMedicalCenterRepository centers,
+        string actorUserId,
+        Guid centerId,
+        ICurrentCenterService currentCenter,
+        CancellationToken cancellationToken = default)
+    {
+        if (centerId == Guid.Empty)
+            throw new InvalidUserDataException("معرف المركز غير صالح.");
+
+        if (string.IsNullOrWhiteSpace(actorUserId))
+            throw new ForbiddenPermissionException("لا يمكنك عرض بيانات مركز خارج نطاق تفويضك.");
+
+        if (await ActorHasUnrestrictedScopeAsync(access, actorUserId, cancellationToken))
+        {
+            _ = await centers.GetByIdAsync(centerId, asNoTracking: true, cancellationToken)
+                ?? throw new MedicalCenterNotFoundException();
+            return;
+        }
+
+        if (currentCenter.IsCentralContext)
+            throw new ForbiddenPermissionException("لا يمكن عرض إسنادات المركز دون سياق مركز نشط.");
+
+        if (currentCenter.CenterId is not Guid active || active != centerId)
+            throw new ForbiddenPermissionException("لا يمكنك عرض إسنادات مركز غير المركز النشط.");
+
+        if (!await access.IsActivelyAssignedAsync(actorUserId, centerId, cancellationToken))
+            throw new ForbiddenPermissionException("لا يمكنك عرض بيانات مركز غير مسند لك.");
     }
 }

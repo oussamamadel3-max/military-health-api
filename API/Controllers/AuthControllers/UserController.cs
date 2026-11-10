@@ -218,6 +218,32 @@ namespace API.Controllers.AuthControllers
         }
 
         /// <summary>
+        /// قائمة إسنادات الأدوار على مستوى المركز (جدول «الأدوار المسندة»). يقتصر على CenterId المحلي.
+        /// </summary>
+        [HttpGet("[action]")]
+        [AuthorizePermission(SystemPermissions.UserManagement.Read)]
+        public async Task<IResult> ListCenterRoleAssignments(
+            [FromQuery] CenterRoleAssignmentListQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            var result = await _userAssignments.ListCenterRoleAssignmentsAsync(query, cancellationToken);
+            return ApiResponse.Success("تم جلب قائمة إسنادات الأدوار بنجاح.", result);
+        }
+
+        /// <summary>
+        /// قائمة الصلاحيات المباشرة على مستوى المركز — لا تشمل صلاحيات موروثة من الأدوار.
+        /// </summary>
+        [HttpGet("[action]")]
+        [AuthorizePermission(SystemPermissions.UserManagement.Read)]
+        public async Task<IResult> ListCenterDirectPermissions(
+            [FromQuery] CenterDirectPermissionListQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            var result = await _userAssignments.ListCenterDirectPermissionsAsync(query, cancellationToken);
+            return ApiResponse.Success("تم جلب قائمة الصلاحيات المباشرة بنجاح.", result);
+        }
+
+        /// <summary>
         /// عرض الصلاحيات الفعلية (FR-021). يسمح لصاحب الحساب، أو لمن لديه UserManagement.Read،
         /// أو لمن لديه UserManagement.ViewEffectiveAccess، ضمن تفويضه.
         /// </summary>

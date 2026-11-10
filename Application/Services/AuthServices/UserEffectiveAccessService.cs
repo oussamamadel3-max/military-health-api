@@ -178,6 +178,7 @@ public sealed class UserEffectiveAccessService : IUserEffectiveAccessService
             .Where(r => r.UserId == userId && r.IsActive && r.Role.IsActive)
             .Include(r => r.Role)
             .Include(r => r.Center)
+            .Include(r => r.AssignedByUser)
             .OrderBy(r => r.CenterId == null ? 0 : 1)
             .ThenBy(r => r.Role.Name)
             .ToListAsync(cancellationToken);
@@ -188,13 +189,16 @@ public sealed class UserEffectiveAccessService : IUserEffectiveAccessService
                 || (r.CenterId is Guid cid && viewableCenterIds.Contains(cid)))
             .Select(r => new EffectiveRoleDto
             {
+                AssignmentId = r.Id,
                 RoleId = r.RoleId,
                 RoleName = r.Role.Name ?? string.Empty,
                 RoleNameAr = AuthDisplayNames.RoleAr(r.Role.Name),
                 CenterId = r.CenterId,
                 CenterCode = r.Center?.Code,
                 CenterNameAr = r.Center?.NameAr,
-                IsCentralScope = r.CenterId is null
+                IsCentralScope = r.CenterId is null,
+                AssignedAt = r.AssignedAt,
+                AssignedByFullName = r.AssignedByUser?.FullName
             })
             .ToList();
     }
@@ -209,6 +213,7 @@ public sealed class UserEffectiveAccessService : IUserEffectiveAccessService
             .Where(p => p.UserId == userId && p.IsActive && p.Permission != null && p.Permission.IsActive)
             .Include(p => p.Permission)
             .Include(p => p.Center)
+            .Include(p => p.GrantedByUser)
             .OrderBy(p => p.CenterId == null ? 0 : 1)
             .ThenBy(p => p.Permission!.Name)
             .ToListAsync(cancellationToken);
@@ -222,12 +227,15 @@ public sealed class UserEffectiveAccessService : IUserEffectiveAccessService
                 var name = p.Permission!.Name ?? string.Empty;
                 return new EffectiveDirectPermissionDto
                 {
+                    AssignmentId = p.Id,
                     PermissionName = name,
                     PermissionNameAr = AuthDisplayNames.PermissionAr(name),
                     CenterId = p.CenterId,
                     CenterCode = p.Center?.Code,
                     CenterNameAr = p.Center?.NameAr,
-                    IsCentralScope = p.CenterId is null
+                    IsCentralScope = p.CenterId is null,
+                    GrantedAt = p.GrantedAt,
+                    GrantedByFullName = p.GrantedByUser?.FullName
                 };
             })
             .ToList();

@@ -108,7 +108,7 @@ namespace Infrastructure.Persistence
             var entityId = ResolveEntityId(entry);
             auditEvents.Add(new AuditEvent
             {
-                OccurredAt = DateTimeOffset.Now,
+                OccurredAt = DateTimeOffset.UtcNow,
                 ActorUserId = actorId,
                 ContextScope = centerId.HasValue ? "CENTER" : "CENTRAL",
                 CenterId = centerId,

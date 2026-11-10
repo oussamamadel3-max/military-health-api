@@ -26,7 +26,12 @@ public class UserRoleAssignmentDto
     public bool IsActive { get; set; }
     public DateTimeOffset AssignedAt { get; set; }
     public DateTimeOffset? RevokedAt { get; set; }
+    public DateTimeOffset LastChangedAt { get; set; }
+    public string? AssignedByUserId { get; set; }
+    public string? AssignedByUserName { get; set; }
+    public string? AssignedByFullName { get; set; }
     public string? RevokeReason { get; set; }
+    public List<UserRoleClinicSummaryDto> Clinics { get; set; } = new();
 }
 
 public class UserAssignmentsDto

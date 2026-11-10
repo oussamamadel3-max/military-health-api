@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Application.Services.AuthServices;
 
-public class UserAssignmentService : IUserAssignmentService
+public partial class UserAssignmentService : IUserAssignmentService
 {
     private readonly UserManager<User> _userManager;
     private readonly IUserRepository _userRepository;
@@ -83,15 +83,27 @@ public class UserAssignmentService : IUserAssignmentService
             .Where(ura => ura.UserId == user.Id)
             .Include(ura => ura.Role)
             .Include(ura => ura.Center)
+            .Include(ura => ura.AssignedByUser)
             .OrderByDescending(ura => ura.IsActive)
             .ThenBy(ura => ura.Role.Name)
             .ToListAsync(cancellationToken);
+
+        var clinicRows = await _userRepository.QueryUserClinicAssignments()
+            .Where(a => a.UserId == user.Id)
+            .Include(a => a.Clinic)
+            .OrderByDescending(a => a.IsActive)
+            .ThenBy(a => a.Clinic.SortOrder)
+            .ToListAsync(cancellationToken);
+
+        var clinicsByCenter = clinicRows
+            .GroupBy(a => a.CenterId)
+            .ToDictionary(g => g.Key, g => g.ToList());
 
         return new UserAssignmentsDto
         {
             UserId = user.Id,
             Centers = centers,
-            Roles = roles.Select(ToRoleDto).ToList()
+            Roles = roles.Select(r => ToRoleDto(r, clinicsByCenter)).ToList()
         };
     }
 
@@ -501,25 +513,63 @@ public class UserAssignmentService : IUserAssignmentService
         RevokeReason = row.RevokeReason
     };
 
+    private static UserRoleAssignmentDto ToRoleDto(
+        UserRoleAssociation row,
+        IReadOnlyDictionary<Guid, List<UserClinicAssignment>>? clinicsByCenter) =>
+        ToRoleDto(row, row.Role?.Name, row.Center?.Code, row.Center?.NameAr, clinicsByCenter);
+
     private static UserRoleAssignmentDto ToRoleDto(UserRoleAssociation row) =>
-        ToRoleDto(row, row.Role?.Name, row.Center?.Code, row.Center?.NameAr);
+        ToRoleDto(row, row.Role?.Name, row.Center?.Code, row.Center?.NameAr, null);
 
     private static UserRoleAssignmentDto ToRoleDto(
         UserRoleAssociation row,
         string? roleName,
         string? centerCode,
-        string? centerNameAr) => new()
+        string? centerNameAr) =>
+        ToRoleDto(row, roleName, centerCode, centerNameAr, null);
+
+    private static UserRoleAssignmentDto ToRoleDto(
+        UserRoleAssociation row,
+        string? roleName,
+        string? centerCode,
+        string? centerNameAr,
+        IReadOnlyDictionary<Guid, List<UserClinicAssignment>>? clinicsByCenter)
     {
-        AssignmentId = row.Id,
-        RoleId = row.RoleId,
-        RoleName = AuthDisplayNames.RoleAr(roleName),
-        CenterId = row.CenterId,
-        CenterCode = centerCode,
-        CenterNameAr = centerNameAr,
-        IsCentralScope = row.CenterId is null,
-        IsActive = row.IsActive,
-        AssignedAt = row.AssignedAt,
-        RevokedAt = row.RevokedAt,
-        RevokeReason = row.RevokeReason
-    };
+        List<UserRoleClinicSummaryDto> clinics = new();
+        if (clinicsByCenter is not null
+            && string.Equals(row.Role?.Name, UserClinicAssignmentService.ClinicDoctorRoleName, StringComparison.Ordinal)
+            && row.CenterId is Guid centerId
+            && clinicsByCenter.TryGetValue(centerId, out var centerClinics))
+        {
+            clinics = centerClinics.Select(c => new UserRoleClinicSummaryDto
+            {
+                ClinicAssignmentId = c.AssignmentId,
+                ClinicId = c.ClinicId,
+                ClinicCode = c.Clinic?.Code,
+                ClinicNameAr = c.Clinic?.NameAr,
+                SpecialtyTitle = c.SpecialtyTitle,
+                IsActive = c.IsActive
+            }).ToList();
+        }
+
+        return new UserRoleAssignmentDto
+        {
+            AssignmentId = row.Id,
+            RoleId = row.RoleId,
+            RoleName = AuthDisplayNames.RoleAr(roleName),
+            CenterId = row.CenterId,
+            CenterCode = centerCode,
+            CenterNameAr = centerNameAr,
+            IsCentralScope = row.CenterId is null,
+            IsActive = row.IsActive,
+            AssignedAt = row.AssignedAt,
+            RevokedAt = row.RevokedAt,
+            LastChangedAt = row.RevokedAt ?? row.AssignedAt,
+            AssignedByUserId = row.AssignedByUserId,
+            AssignedByUserName = row.AssignedByUser?.UserName,
+            AssignedByFullName = row.AssignedByUser?.FullName,
+            RevokeReason = row.RevokeReason,
+            Clinics = clinics
+        };
+    }
 }
