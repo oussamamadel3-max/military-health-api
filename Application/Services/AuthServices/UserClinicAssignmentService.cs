@@ -53,7 +53,7 @@ public class UserClinicAssignmentService : IUserClinicAssignmentService
         CancellationToken cancellationToken = default)
     {
         _permissionGate.EnsureAll(MilitaryHealthPermissions.UserClinics.Manage);
-        await EnsureActorCanManageCenterAsync(centerId, cancellationToken);
+        await EnsureLocalUserClinicsManageAsync(centerId, cancellationToken);
 
         if (await _centers.GetByIdAsync(centerId, asNoTracking: true, cancellationToken) is null)
             throw new MedicalCenterNotFoundException();
@@ -103,7 +103,7 @@ public class UserClinicAssignmentService : IUserClinicAssignmentService
         CancellationToken cancellationToken = default)
     {
         _permissionGate.EnsureAll(MilitaryHealthPermissions.UserClinics.Manage);
-        await EnsureActorCanManageCenterAsync(centerId, cancellationToken);
+        await EnsureLocalUserClinicsManageAsync(centerId, cancellationToken);
 
         if (await _centers.GetByIdAsync(centerId, asNoTracking: true, cancellationToken) is null)
             throw new MedicalCenterNotFoundException();
@@ -167,7 +167,7 @@ public class UserClinicAssignmentService : IUserClinicAssignmentService
         CancellationToken cancellationToken = default)
     {
         _permissionGate.EnsureAll(MilitaryHealthPermissions.UserClinics.Manage);
-        await EnsureActorCanManageCenterAsync(centerId, cancellationToken);
+        await EnsureLocalUserClinicsManageAsync(centerId, cancellationToken);
 
         if (await _centers.GetByIdAsync(centerId, asNoTracking: true, cancellationToken) is null)
             throw new MedicalCenterNotFoundException();
@@ -256,7 +256,7 @@ public class UserClinicAssignmentService : IUserClinicAssignmentService
 
         var actorId = AssignmentStamp.RequireActor(_currentUserService.UserId);
         await EnsureCanManageTargetAsync(user.Id, cancellationToken);
-        await EnsureActorCanManageCenterAsync(dto.CenterId, cancellationToken);
+        await EnsureLocalUserClinicsManageAsync(dto.CenterId, cancellationToken);
 
         var center = await _centers.GetByIdAsync(dto.CenterId, asNoTracking: true, cancellationToken);
         MedicalCenterActivityGuard.EnsureAcceptsNewRelations(center);
@@ -388,7 +388,7 @@ public class UserClinicAssignmentService : IUserClinicAssignmentService
                 ?? throw new InvalidUserDataException("إسناد العيادة غير موجود.");
 
             await EnsureCanManageTargetAsync(row.UserId, cancellationToken);
-            await EnsureActorCanManageCenterAsync(row.CenterId, cancellationToken);
+            await EnsureLocalUserClinicsManageAsync(row.CenterId, cancellationToken);
 
             if (!row.IsActive)
                 throw new InvalidUserDataException("إسناد العيادة ملغى مسبقاً.");
@@ -404,11 +404,37 @@ public class UserClinicAssignmentService : IUserClinicAssignmentService
         }
     }
 
-    private async Task EnsureActorCanManageCenterAsync(Guid centerId, CancellationToken cancellationToken)
+    private async Task EnsureLocalUserClinicsManageAsync(Guid centerId, CancellationToken cancellationToken)
     {
         var actorId = _currentUserService.UserId ?? string.Empty;
-        await UserManagementScopeGuard.EnsureCanAssignCenterAsync(
-            _access, actorId, centerId, cancellationToken);
+        if (await ActorHasCentralClinicManageAsync(actorId, cancellationToken))
+            return;
+
+        _ = await _permissionGate.EnsureLocalAsync(
+            MilitaryHealthPermissions.UserClinics.Manage,
+            centerId,
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// تجاوز الربط بالجلسة فقط عند امتلاك <see cref="MilitaryHealthPermissions.UserClinics.Manage"/> ضمن سياق مركزي
+  /// (مثل SuperAdmin)، وليس لمجرد وجود دور مركزي آخر بلا هذه الصلاحية.
+    /// </summary>
+    private async Task<bool> ActorHasCentralClinicManageAsync(
+        string actorUserId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(actorUserId))
+            return false;
+
+        var snapshot = await _access.LoadAsync(actorUserId, cancellationToken);
+        var names = CenterPermissionEvaluator.Resolve(
+            snapshot.Roles,
+            snapshot.Directs,
+            snapshot.Links,
+            activeCenterId: null);
+
+        return names.Contains(MilitaryHealthPermissions.UserClinics.Manage, StringComparer.OrdinalIgnoreCase);
     }
 
     private async Task EnsureCanManageTargetAsync(string targetUserId, CancellationToken cancellationToken)

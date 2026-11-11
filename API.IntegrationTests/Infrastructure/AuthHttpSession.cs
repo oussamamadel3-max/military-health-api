@@ -82,6 +82,43 @@ public sealed class AuthHttpSession
         return response;
     }
 
+    public async Task<HttpResponseMessage> SelectCenterAsync(Guid centerId)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/centers/select")
+        {
+            Content = JsonContent.Create(new { centerId })
+        };
+        AttachCsrf(request);
+        var response = await _client.SendAsync(request);
+        LastResponse = response;
+        await CaptureCsrfFromBodyAsync(response);
+        return response;
+    }
+
+    public async Task<HttpResponseMessage> AssignUserClinicAsync(string userId, Guid centerId, Guid clinicId)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/User/AssignUserClinic")
+        {
+            Content = JsonContent.Create(new { userId, centerId, clinicId })
+        };
+        AttachCsrf(request);
+        var response = await _client.SendAsync(request);
+        LastResponse = response;
+        return response;
+    }
+
+    public async Task<HttpResponseMessage> RevokeUserClinicAsync(Guid assignmentId, string reason)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/User/RevokeUserClinic")
+        {
+            Content = JsonContent.Create(new { assignmentId, reason })
+        };
+        AttachCsrf(request);
+        var response = await _client.SendAsync(request);
+        LastResponse = response;
+        return response;
+    }
+
     public async Task<HttpResponseMessage> ChangeMyPasswordAsync(string currentPassword, string newPassword, string confirmPassword)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/User/ChangeMyPassword")
@@ -208,7 +245,8 @@ public sealed class AuthHttpSession
         else
             request.Content = new StringContent(json, System.Text.Encoding.UTF8, contentType ?? "application/json");
         if (path.StartsWith("/api/User", StringComparison.OrdinalIgnoreCase)
-            || path.StartsWith("/api/Roles", StringComparison.OrdinalIgnoreCase))
+            || path.StartsWith("/api/Roles", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/api/centers/select", StringComparison.OrdinalIgnoreCase))
             AttachCsrf(request);
         var response = await _client.SendAsync(request);
         LastResponse = response;

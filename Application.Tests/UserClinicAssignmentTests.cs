@@ -450,6 +450,12 @@ public class UserClinicAssignmentTests
                 if (required.Any(r => !permissions.Contains(r, StringComparer.Ordinal)))
                     throw new ForbiddenPermissionException();
             });
+        gate.Setup(g => g.EnsureLocalAsync(
+                It.IsAny<string>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, Guid? clientCenterId, CancellationToken __) =>
+                clientCenterId ?? CenterA);
 
         var current = new TestCurrentUser();
         current.SetUser(actorId, "admin", "127.0.0.1");
