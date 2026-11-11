@@ -125,7 +125,9 @@ public static class UserClinicAssignmentHttpSeed
         LinkRole(db, doctor.Id, doctorRoleId, CenterA);
         LinkRole(db, doctor.Id, doctorRoleId, CenterB);
 
+        EnsureUserCenter(db, doctor2.Id, CenterA);
         EnsureUserCenter(db, doctor2.Id, CenterB);
+        LinkRole(db, doctor2.Id, doctorRoleId, CenterA);
         LinkRole(db, doctor2.Id, doctorRoleId, CenterB);
 
         EnsureUserCenter(db, revoked.Id, CenterA);
@@ -324,12 +326,19 @@ public static class UserClinicAssignmentHttpSeed
         if (await users.FindByNameAsync(Doctor2UserName) is { } existingDoctor2)
         {
             Doctor2UserId = existingDoctor2.Id;
+            EnsureUserCenter(db, existingDoctor2.Id, CenterA);
+            EnsureUserCenter(db, existingDoctor2.Id, CenterB);
+            LinkRole(db, existingDoctor2.Id, doctorRoleId, CenterA);
+            LinkRole(db, existingDoctor2.Id, doctorRoleId, CenterB);
+            await db.SaveChangesAsync();
             return;
         }
 
         var doctor2 = await EnsureUserAsync(users, Doctor2UserName, "it.clinic.doctor2@it.local", ClinicTestPassword);
         Doctor2UserId = doctor2.Id;
+        EnsureUserCenter(db, doctor2.Id, CenterA);
         EnsureUserCenter(db, doctor2.Id, CenterB);
+        LinkRole(db, doctor2.Id, doctorRoleId, CenterA);
         LinkRole(db, doctor2.Id, doctorRoleId, CenterB);
         await db.SaveChangesAsync();
     }

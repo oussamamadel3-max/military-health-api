@@ -56,8 +56,8 @@ public sealed class UserClinicAssignmentPermissionHttpTests
             (await session.Client.GetAsync($"/api/centers/{a}/clinics/{clinic}/doctors")).StatusCode);
 
         var assignResponse = await session.AssignUserClinicAsync(
-            UserClinicAssignmentHttpSeed.DoctorUserId, a, clinic);
-        Assert.NotEqual(HttpStatusCode.Forbidden, assignResponse.StatusCode);
+            UserClinicAssignmentHttpSeed.Doctor2UserId, a, clinic);
+        Assert.Equal(HttpStatusCode.OK, assignResponse.StatusCode);
 
         Assert.Equal(HttpStatusCode.OK,
             (await session.RevokeUserClinicAsync(UserClinicAssignmentHttpSeed.SeededAssignmentCenterA, "اختبار")).StatusCode);

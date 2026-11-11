@@ -320,14 +320,18 @@ public class UserClinicAssignmentService : IUserClinicAssignmentService
             var assignedAt = DateTimeOffset.UtcNow;
             var specialty = link.Clinic.NameAr;
 
-            var latestInactive = await _userRepository.QueryUserClinicAssignments(asNoTracking: false)
+            // SQLite (integration host) cannot translate DateTimeOffset in ORDER BY; cardinality per user/center/clinic is tiny.
+            var inactiveAssignments = await _userRepository.QueryUserClinicAssignments(asNoTracking: false)
                 .Where(a => a.UserId == user.Id
                     && a.CenterId == dto.CenterId
                     && a.ClinicId == dto.ClinicId
                     && !a.IsActive)
+                .ToListAsync(cancellationToken);
+
+            var latestInactive = inactiveAssignments
                 .OrderByDescending(a => a.RevokedAt)
                 .ThenByDescending(a => a.AssignedAt)
-                .FirstOrDefaultAsync(cancellationToken);
+                .FirstOrDefault();
 
             if (latestInactive is not null)
             {
