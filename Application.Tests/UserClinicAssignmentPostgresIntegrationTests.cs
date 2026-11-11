@@ -25,6 +25,9 @@ namespace Application.Tests;
 /// </summary>
 public class UserClinicAssignmentPostgresIntegrationTests
 {
+    static UserClinicAssignmentPostgresIntegrationTests()
+        => AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+
     private const string RequiredDatabase = "mhs_export_ef_review";
     private static readonly Guid PgCenter = Guid.Parse("c1111111-1111-1111-1111-111111111111");
     private static readonly Guid PgClinic = Guid.Parse("c2222222-2222-2222-2222-222222222222");
