@@ -342,12 +342,27 @@ namespace Application.Services.AuthServices
             PermissionDependencyRules.EnsureReadBeforeWriteActions(
                 activePermissions.Select(p => p.Name));
 
-            IamAdminGuard.EnsureAssignableWithinActorPermissions(
-                activePermissions.Select(p => p.Name), _permissionGate.GetPermissions());
-
             var existingRolePerms = (await _roleRepository.GetRolePermissionsAsync(dto.RoleId))
                 .Where(rp => rp.IsActive)
                 .ToList();
+
+            var existingIds = existingRolePerms
+                .Select(rp => rp.PermissionId)
+                .ToHashSet();
+
+            var toAdd = activeValidIds
+                .Where(id => !existingIds.Contains(id))
+                .ToList();
+
+            var toRemove = existingRolePerms
+                .Where(rp => !activeValidIds.Contains(rp.PermissionId))
+                .ToList();
+
+            var newlyGrantedNames = activePermissions
+                .Where(p => toAdd.Contains(p.Id))
+                .Select(p => p.Name);
+            IamAdminGuard.EnsureAssignableWithinActorPermissions(
+                newlyGrantedNames, _permissionGate.GetPermissions());
 
             var previousPermissionNames = (await _roleRepository.GetRolePermissionsForRolesAsync(new[] { dto.RoleId }))
                 .Select(rp => rp.Permission?.Name)
@@ -361,18 +376,6 @@ namespace Application.Services.AuthServices
                 dto.RoleId,
                 activePermissions.Select(p => p.Name!).ToList(),
                 previousPermissionNames);
-
-            var existingIds = existingRolePerms
-                .Select(rp => rp.PermissionId)
-                .ToHashSet();
-
-            var toAdd = activeValidIds
-                .Where(id => !existingIds.Contains(id))
-                .ToList();
-
-            var toRemove = existingRolePerms
-                .Where(rp => !activeValidIds.Contains(rp.PermissionId))
-                .ToList();
 
             using var tx = await _unitOfWork.BeginTransactionAsync();
             try

@@ -602,6 +602,157 @@ public class RoleAssignmentPathTests
     }
 
     [Fact]
+    public async Task Sync_direct_permissions_allows_keeping_grant_outside_actor_while_removing_delegated_one()
+    {
+        await using var db = CreateDb();
+        await SeedCenterAsync(db, CenterA, true);
+        await SeedUserAsync(db, "actor-1", "manager");
+        await SeedUserAsync(db, "target-1", "nurse");
+        await SeedUserCenterAsync(db, "actor-1", CenterA);
+        await SeedUserCenterAsync(db, "target-1", CenterA);
+        await SeedRoleLinkAsync(db, "actor-1", "CenterManager", CenterA);
+        await SeedIamKeeperAsync(db);
+        var viewId = await SeedPermissionAsync(db, "Members.View");
+        var elevatedId = await SeedPermissionAsync(db, MilitaryHealthPermissions.Centers.Manage);
+        var now = DateTimeOffset.UtcNow;
+        db.UserPermissions.AddRange(
+            new UserPermission
+            {
+                Id = Guid.NewGuid(),
+                UserId = "target-1",
+                PermissionId = viewId,
+                CenterId = CenterA,
+                IsActive = true,
+                GrantedByUserId = "actor-1",
+                GrantedAt = now
+            },
+            new UserPermission
+            {
+                Id = Guid.NewGuid(),
+                UserId = "target-1",
+                PermissionId = elevatedId,
+                CenterId = CenterA,
+                IsActive = true,
+                GrantedByUserId = "actor-1",
+                GrantedAt = now
+            });
+        await db.SaveChangesAsync();
+
+        var gate = new Mock<IPermissionGate>();
+        gate.Setup(g => g.GetPermissions()).Returns(new[]
+        {
+            SystemPermissions.UserManagement.AssignPermissions,
+            MilitaryHealthPermissions.Members.View,
+        });
+        var harness = CreateUserService(db, central: false, gate: gate.Object);
+        harness.UserManager.Setup(m => m.UpdateSecurityStampAsync(It.IsAny<User>()))
+            .ReturnsAsync(IdentityResult.Success);
+
+        var result = await harness.Service.SyncDirectPermissionsAsync(new SyncDirectPermissionsDto
+        {
+            UserId = "target-1",
+            PermissionIds = [elevatedId],
+        });
+
+        Assert.Equal(0, result.Added);
+        Assert.Equal(1, result.Removed);
+        Assert.True(result.SessionsInvalidated);
+        Assert.False(await db.UserPermissions.AnyAsync(p =>
+            p.UserId == "target-1" && p.PermissionId == viewId && p.CenterId == CenterA && p.IsActive));
+        Assert.True(await db.UserPermissions.AnyAsync(p =>
+            p.UserId == "target-1" && p.PermissionId == elevatedId && p.CenterId == CenterA && p.IsActive));
+    }
+
+    [Fact]
+    public async Task Sync_direct_permissions_rejects_adding_grant_beyond_actor_authorization()
+    {
+        await using var db = CreateDb();
+        await SeedCenterAsync(db, CenterA, true);
+        await SeedUserAsync(db, "actor-1", "manager");
+        await SeedUserAsync(db, "target-1", "nurse");
+        await SeedUserCenterAsync(db, "actor-1", CenterA);
+        await SeedUserCenterAsync(db, "target-1", CenterA);
+        await SeedRoleLinkAsync(db, "actor-1", "CenterManager", CenterA);
+        await SeedIamKeeperAsync(db);
+        var elevatedId = await SeedPermissionAsync(db, MilitaryHealthPermissions.Centers.Manage);
+
+        var gate = new Mock<IPermissionGate>();
+        gate.Setup(g => g.GetPermissions()).Returns(new[]
+        {
+            SystemPermissions.UserManagement.AssignPermissions,
+            MilitaryHealthPermissions.Members.View,
+        });
+        var harness = CreateUserService(db, central: false, gate: gate.Object);
+
+        await Assert.ThrowsAsync<ForbiddenPermissionException>(() =>
+            harness.Service.SyncDirectPermissionsAsync(new SyncDirectPermissionsDto
+            {
+                UserId = "target-1",
+                PermissionIds = [elevatedId],
+            }));
+    }
+
+    [Fact]
+    public async Task Sync_direct_permissions_empty_request_only_revokes_within_actor_delegation()
+    {
+        await using var db = CreateDb();
+        await SeedCenterAsync(db, CenterA, true);
+        await SeedUserAsync(db, "actor-1", "manager");
+        await SeedUserAsync(db, "target-1", "nurse");
+        await SeedUserCenterAsync(db, "actor-1", CenterA);
+        await SeedUserCenterAsync(db, "target-1", CenterA);
+        await SeedRoleLinkAsync(db, "actor-1", "CenterManager", CenterA);
+        await SeedIamKeeperAsync(db);
+        var viewId = await SeedPermissionAsync(db, "Members.View");
+        var elevatedId = await SeedPermissionAsync(db, MilitaryHealthPermissions.Centers.Manage);
+        var now = DateTimeOffset.UtcNow;
+        db.UserPermissions.AddRange(
+            new UserPermission
+            {
+                Id = Guid.NewGuid(),
+                UserId = "target-1",
+                PermissionId = viewId,
+                CenterId = CenterA,
+                IsActive = true,
+                GrantedByUserId = "actor-1",
+                GrantedAt = now
+            },
+            new UserPermission
+            {
+                Id = Guid.NewGuid(),
+                UserId = "target-1",
+                PermissionId = elevatedId,
+                CenterId = CenterA,
+                IsActive = true,
+                GrantedByUserId = "actor-1",
+                GrantedAt = now
+            });
+        await db.SaveChangesAsync();
+
+        var gate = new Mock<IPermissionGate>();
+        gate.Setup(g => g.GetPermissions()).Returns(new[]
+        {
+            SystemPermissions.UserManagement.AssignPermissions,
+            MilitaryHealthPermissions.Members.View,
+        });
+        var harness = CreateUserService(db, central: false, gate: gate.Object);
+        harness.UserManager.Setup(m => m.UpdateSecurityStampAsync(It.IsAny<User>()))
+            .ReturnsAsync(IdentityResult.Success);
+
+        var result = await harness.Service.SyncDirectPermissionsAsync(new SyncDirectPermissionsDto
+        {
+            UserId = "target-1",
+            PermissionIds = [],
+        });
+
+        Assert.Equal(1, result.Removed);
+        Assert.True(await db.UserPermissions.AnyAsync(p =>
+            p.UserId == "target-1" && p.PermissionId == elevatedId && p.CenterId == CenterA && p.IsActive));
+        Assert.False(await db.UserPermissions.AnyAsync(p =>
+            p.UserId == "target-1" && p.PermissionId == viewId && p.CenterId == CenterA && p.IsActive));
+    }
+
+    [Fact]
     public async Task User_list_center_filter_narrows_before_count_and_rejects_a_foreign_center()
     {
         await using var db = CreateDb();

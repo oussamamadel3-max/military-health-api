@@ -8,6 +8,7 @@ using Application.Interfaces.Services;
 using Application.Services.AuthServices;
 using Domain.Entities.Auth;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 using Moq;
 
@@ -43,6 +44,171 @@ public class RoleManagementAlignmentTests
             ReservedRoleGuard.EnsureCanDeactivate("SuperAdmin"));
 
         ReservedRoleGuard.EnsureCanDeactivate("ClinicDoctor");
+    }
+
+    [Fact]
+    public async Task Sync_permissions_allows_removing_view_history_from_supervisor_while_keeping_out_of_scope_grants()
+    {
+        var role = new Role { Id = "role-supervisor", Name = "Supervisor", IsActive = true, PermissionSetVersion = 2 };
+        var manager = CreateRoleManager(role);
+
+        var viewHistoryId = Guid.NewGuid();
+        var finalDecisionId = Guid.NewGuid();
+        var membersViewId = Guid.NewGuid();
+        var createUpdateId = Guid.NewGuid();
+
+        var viewHistory = new Permission { Id = viewHistoryId, Name = MilitaryHealthPermissions.Export.ViewHistory, IsActive = true };
+        var finalDecision = new Permission { Id = finalDecisionId, Name = MilitaryHealthPermissions.Clinical.FinalDecision, IsActive = true };
+        var membersView = new Permission { Id = membersViewId, Name = MilitaryHealthPermissions.Members.View, IsActive = true };
+        var createUpdate = new Permission { Id = createUpdateId, Name = MilitaryHealthPermissions.Members.CreateUpdate, IsActive = true };
+
+        var existingLinks = new List<RolePermission>
+        {
+            ActiveLink(role.Id, viewHistory),
+            ActiveLink(role.Id, finalDecision),
+            ActiveLink(role.Id, membersView),
+            ActiveLink(role.Id, createUpdate),
+        };
+
+        var permissions = new Mock<IPermissionRepository>();
+        var finalIds = new[] { finalDecisionId, membersViewId, createUpdateId };
+        permissions.Setup(r => r.GetActiveByIdsAsync(
+                It.Is<IEnumerable<Guid>>(ids => ids.OrderBy(x => x).SequenceEqual(finalIds.OrderBy(x => x))),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Permission> { finalDecision, membersView, createUpdate });
+
+        var roles = new Mock<IRoleRepository>();
+        roles.Setup(r => r.GetRolePermissionsAsync(role.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existingLinks);
+        roles.Setup(r => r.GetRolePermissionsForRolesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existingLinks);
+
+        var gate = new Mock<IPermissionGate>();
+        gate.Setup(g => g.GetPermissions()).Returns(new List<string>
+        {
+            SystemPermissions.RoleManagement.AssignPermissions,
+            MilitaryHealthPermissions.Export.ViewHistory,
+            MilitaryHealthPermissions.Members.View,
+        });
+
+        var uow = CreateUnitOfWorkMock();
+        var service = CreateRoleService(manager.Object, gate.Object, roles.Object, permissions.Object, uow.Object);
+
+        var result = await service.SyncPermissionsForRoleAsync(new AssignPermissionsDto
+        {
+            RoleId = role.Id,
+            PermissionsIds = finalIds.ToList(),
+            PermissionSetVersion = 2,
+        });
+
+        Assert.Equal(0, result.Added);
+        Assert.Equal(1, result.Removed);
+        Assert.Equal(3, role.PermissionSetVersion);
+        roles.Verify(r => r.AddRolePermissions(It.IsAny<IEnumerable<RolePermission>>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Sync_permissions_rejects_adding_grant_when_role_already_has_subset_within_actor_delegation()
+    {
+        var role = new Role { Id = "role-1", Name = "CustomOps", IsActive = true, PermissionSetVersion = 1 };
+        var manager = CreateRoleManager(role);
+        var readId = Guid.NewGuid();
+        var excessId = Guid.NewGuid();
+        var read = new Permission { Id = readId, Name = SystemPermissions.UserManagement.Read, IsActive = true };
+        var excess = new Permission { Id = excessId, Name = MilitaryHealthPermissions.Centers.Manage, IsActive = true };
+
+        var existingLinks = new List<RolePermission> { ActiveLink(role.Id, read) };
+
+        var permissions = new Mock<IPermissionRepository>();
+        permissions.Setup(r => r.GetActiveByIdsAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IEnumerable<Guid> ids, CancellationToken _) =>
+            {
+                var list = new List<Permission>();
+                if (ids.Contains(readId)) list.Add(read);
+                if (ids.Contains(excessId)) list.Add(excess);
+                return list;
+            });
+
+        var roles = new Mock<IRoleRepository>();
+        roles.Setup(r => r.GetRolePermissionsAsync(role.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existingLinks);
+        roles.Setup(r => r.GetRolePermissionsForRolesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existingLinks);
+
+        var gate = new Mock<IPermissionGate>();
+        gate.Setup(g => g.GetPermissions()).Returns(new List<string>
+        {
+            SystemPermissions.RoleManagement.AssignPermissions,
+            SystemPermissions.UserManagement.Read,
+        });
+
+        var service = CreateRoleService(manager.Object, gate.Object, roles.Object, permissions.Object);
+
+        await Assert.ThrowsAsync<ForbiddenPermissionException>(() =>
+            service.SyncPermissionsForRoleAsync(new AssignPermissionsDto
+            {
+                RoleId = role.Id,
+                PermissionsIds = new List<Guid> { readId, excessId },
+                PermissionSetVersion = 1,
+            }));
+    }
+
+    [Fact]
+    public async Task Sync_permissions_succeeds_without_version_bump_when_final_set_unchanged()
+    {
+        var role = new Role { Id = "role-1", Name = "CustomOps", IsActive = true, PermissionSetVersion = 5 };
+        var manager = CreateRoleManager(role);
+        var readId = Guid.NewGuid();
+        var read = new Permission { Id = readId, Name = SystemPermissions.UserManagement.Read, IsActive = true };
+        var existingLinks = new List<RolePermission> { ActiveLink(role.Id, read) };
+
+        var permissions = new Mock<IPermissionRepository>();
+        permissions.Setup(r => r.GetActiveByIdsAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Permission> { read });
+
+        var roles = new Mock<IRoleRepository>();
+        roles.Setup(r => r.GetRolePermissionsAsync(role.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existingLinks);
+        roles.Setup(r => r.GetRolePermissionsForRolesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existingLinks);
+
+        var gate = new Mock<IPermissionGate>();
+        gate.Setup(g => g.GetPermissions()).Returns(new List<string>
+        {
+            SystemPermissions.RoleManagement.AssignPermissions,
+            SystemPermissions.UserManagement.Read,
+        });
+
+        var uow = CreateUnitOfWorkMock();
+        var service = CreateRoleService(manager.Object, gate.Object, roles.Object, permissions.Object, uow.Object);
+
+        var result = await service.SyncPermissionsForRoleAsync(new AssignPermissionsDto
+        {
+            RoleId = role.Id,
+            PermissionsIds = new List<Guid> { readId },
+            PermissionSetVersion = 5,
+        });
+
+        Assert.Equal(0, result.Added);
+        Assert.Equal(0, result.Removed);
+        Assert.Equal(5, role.PermissionSetVersion);
+        roles.Verify(r => r.AddRolePermissions(It.IsAny<IEnumerable<RolePermission>>()), Times.Never);
+    }
+
+    [Fact]
+    public void Sync_permissions_rejects_write_without_read_dependency_on_final_set()
+    {
+        var writeOnly = new Permission
+        {
+            Id = Guid.NewGuid(),
+            Name = SystemPermissions.UserManagement.Create,
+            IsActive = true,
+        };
+
+        var error = Assert.Throws<InvalidRoleDataException>(() =>
+            PermissionDependencyRules.EnsureReadBeforeWriteActions(new[] { writeOnly.Name }));
+
+        Assert.Contains("القراءة", error.Message);
     }
 
     [Fact]
@@ -266,7 +432,8 @@ public class RoleManagementAlignmentTests
         RoleManager<Role> roleManager,
         IPermissionGate gate,
         IRoleRepository roles,
-        IPermissionRepository permissions)
+        IPermissionRepository permissions,
+        IUnitOfWork? unitOfWork = null)
     {
         var users = new Mock<IUserRepository>();
         users.Setup(r => r.GetUserIdsByRoleIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -276,6 +443,37 @@ public class RoleManagementAlignmentTests
 
         return new RoleService(
             roleManager, users.Object, null!, null!, new TestCurrentUser(), gate,
-            roles, permissions, Mock.Of<IRefreshTokenRepository>(), Mock.Of<IUnitOfWork>());
+            roles, permissions, Mock.Of<IRefreshTokenRepository>(), unitOfWork ?? Mock.Of<IUnitOfWork>());
+    }
+
+    private static Mock<IUnitOfWork> CreateUnitOfWorkMock()
+    {
+        var uow = new Mock<IUnitOfWork>();
+        uow.Setup(u => u.BeginTransactionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SyncPermissionsNoopTransaction());
+        uow.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
+        return uow;
+    }
+
+    private static RolePermission ActiveLink(string roleId, Permission permission) =>
+        new()
+        {
+            RoleId = roleId,
+            PermissionId = permission.Id,
+            Permission = permission,
+            IsActive = true,
+            GrantedByUserId = "seed",
+            GrantedAt = DateTimeOffset.UtcNow.AddDays(-1),
+        };
+
+    private sealed class SyncPermissionsNoopTransaction : IDbContextTransaction
+    {
+        public Guid TransactionId { get; } = Guid.NewGuid();
+        public void Commit() { }
+        public Task CommitAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public void Rollback() { }
+        public Task RollbackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public void Dispose() { }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

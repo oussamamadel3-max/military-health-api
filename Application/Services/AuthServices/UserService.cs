@@ -928,12 +928,9 @@ public class UserService : IUserService
 
         if (requested.Count > 0)
         {
-            var known = await _permissionRepository.GetActiveByIdsAsync(requested);
-            if (known.Count != requested.Count)
+            var knownRequested = await _permissionRepository.GetActiveByIdsAsync(requested);
+            if (knownRequested.Count != requested.Count)
                 throw new InvalidUserDataException("لا يمكن إسناد صلاحية غير موجودة أو غير فعّالة.");
-
-            IamAdminGuard.EnsureAssignableWithinActorPermissions(
-                known.Select(p => p.Name), _permissionGate.GetPermissions());
         }
 
         var currentRows = await _userRepository.QueryUserPermissions(asNoTracking: false)
@@ -949,6 +946,13 @@ public class UserService : IUserService
             .Where(row => !requestedSet.Contains(row.PermissionId)
                 && actorPermissions.Contains(row.Permission?.Name ?? string.Empty, StringComparer.OrdinalIgnoreCase))
             .ToList();
+
+        if (toAdd.Count > 0)
+        {
+            var grantingPermissions = await _permissionRepository.GetActiveByIdsAsync(toAdd);
+            IamAdminGuard.EnsureAssignableWithinActorPermissions(
+                grantingPermissions.Select(p => p.Name), actorPermissions);
+        }
 
         var finalIds = new HashSet<Guid>(currentIds);
         foreach (var row in toRemove)
