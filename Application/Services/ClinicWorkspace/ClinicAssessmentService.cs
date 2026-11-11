@@ -156,11 +156,7 @@ public class ClinicAssessmentService : IClinicAssessmentService
                 if (exam.CenterId != centerId)
                     throw new ClinicExamEditLockConflictException("الفحص الحالي خارج نطاق المركز النشط.");
 
-                exam.ExaminerUserId = userId;
-                exam.ExaminedAt = now;
-                exam.VersionNo += 1;
-                exam.UpdatedByUserId = userId;
-                exam.UpdatedAt = now;
+                MedicalExamIdentity.RecordModification(exam, userId, now);
             }
 
             var assessment = await _clinicWorkspace.QueryClinicAssessments(asNoTracking: false)
@@ -456,8 +452,6 @@ public class ClinicAssessmentService : IClinicAssessmentService
         open.ActionDescription = actionDescription;
         open.FollowupNote = followupNote;
         open.Status = "REQUESTED";
-        open.RequestedByUserId = userId;
-        open.RequestedAt = now;
         open.CompletedByUserId = null;
         open.CompletedAt = null;
         open.ClosedAt = null;

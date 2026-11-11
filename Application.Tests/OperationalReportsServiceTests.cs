@@ -575,6 +575,58 @@ public class OperationalReportsServiceTests
     }
 
     [Fact]
+    public async Task DoctorLinkage_preserves_original_examiner_after_second_doctor_edit()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        var memberId = await CreateMemberAsync(db, CenterA, "LNK-BR069");
+        var firstAt = DateTimeOffset.Parse("2026-06-01T10:00:00Z");
+        var examId = Guid.NewGuid();
+        db.MedicalExams.Add(new MedicalExam
+        {
+            ExamId = examId,
+            MemberId = memberId,
+            CenterId = CenterA,
+            ClinicId = ClinicEyes,
+            ExaminerUserId = "actor-1",
+            ExaminedAt = firstAt,
+            ExamSequence = 1,
+            IsCurrent = true,
+            VersionNo = 2,
+            UpdatedByUserId = "doc-2",
+            CreatedAt = firstAt,
+            UpdatedAt = DateTimeOffset.Parse("2026-06-02T12:00:00Z")
+        });
+        db.ClinicAssessments.Add(new ClinicAssessment
+        {
+            AssessmentId = Guid.NewGuid(),
+            ExamId = examId,
+            MemberId = memberId,
+            CenterId = CenterA,
+            ClinicId = ClinicEyes,
+            ResultStatusId = 2,
+            RejectionReason = "سبب",
+            AssessedByUserId = "actor-1",
+            AssessedAt = firstAt,
+            UpdatedByUserId = "doc-2",
+            UpdatedAt = DateTimeOffset.Parse("2026-06-02T12:00:00Z")
+        });
+        await db.SaveChangesAsync();
+
+        var page = await CreateService(db, CenterA).ListDoctorLinkageByMemberAsync(
+            new DoctorLinkageQuery { ViewMode = DoctorLinkageViewModes.ByMember });
+
+        var row = Assert.Single(page.Items, i => i.MemberId == memberId);
+        var link = Assert.Single(row.Exams);
+        Assert.Equal("actor-1", link.ExaminerUserId);
+        Assert.Equal(firstAt, link.ExaminedAt);
+
+        var byDoctor = await CreateService(db, CenterA).ListDoctorLinkageByDoctorAsync(
+            new DoctorLinkageQuery { ViewMode = DoctorLinkageViewModes.ByDoctor });
+        Assert.Contains(byDoctor.Items, i => i.ExaminerUserId == "actor-1" && i.ClinicId == ClinicEyes);
+    }
+
+    [Fact]
     public async Task DoctorLinkage_returns_final_decision_and_filters_clinic_result()
     {
         await using var db = MemberServiceTests.CreateDb();
@@ -700,11 +752,12 @@ public class OperationalReportsServiceTests
         Assert.Equal(1, page1.Items.Count);
     }
 
-    private static OperationalReportsService CreateService(
+    internal static OperationalReportsService CreateService(
         AppDbContext db,
         Guid centerId,
         bool allowLocal = true,
         bool allowCentral = false,
+        bool allowMemberDetailView = true,
         Mock<ICrossCenterAccessService>? cross = null,
         Mock<IPermissionGate>? gate = null,
         bool configureGate = true)
@@ -712,6 +765,8 @@ public class OperationalReportsServiceTests
         gate ??= new Mock<IPermissionGate>();
         if (configureGate)
         {
+            gate.Setup(g => g.Has(MilitaryHealthPermissions.Members.View)).Returns(allowMemberDetailView);
+
             if (allowLocal)
             {
                 gate.Setup(g => g.EnsureLocalAsync(
@@ -775,7 +830,7 @@ public class OperationalReportsServiceTests
             new ReportsTestUnitOfWork(db));
     }
 
-    private static async Task<Guid> CreateMemberWithDecisionAsync(
+    internal static async Task<Guid> CreateMemberWithDecisionAsync(
         AppDbContext db,
         Guid centerId,
         string recruitment,
@@ -840,7 +895,10 @@ public class OperationalReportsServiceTests
         await db.SaveChangesAsync();
     }
 
-    private static async Task<Guid> CreateMemberAsync(AppDbContext db, Guid centerId, string recruitment)
+    private static Task<Guid> CreateMemberAsync(AppDbContext db, Guid centerId, string recruitment)
+        => CreateTestMemberAsync(db, centerId, recruitment);
+
+    internal static async Task<Guid> CreateTestMemberAsync(AppDbContext db, Guid centerId, string recruitment)
     {
         var members = MemberServiceTests.CreateService(db, centerId, allowCreate: true, allowView: true);
         var created = await members.CreateAsync(new CreateMemberRequest
@@ -907,7 +965,7 @@ public class OperationalReportsServiceTests
         await db.SaveChangesAsync();
     }
 
-    private static async Task SeedAsync(AppDbContext db)
+    internal static async Task SeedAsync(AppDbContext db)
     {
         await MemberServiceTests.SeedReferencesAsync(db);
         foreach (var (id, code, name, sort) in new (Guid, string, string, int)[]

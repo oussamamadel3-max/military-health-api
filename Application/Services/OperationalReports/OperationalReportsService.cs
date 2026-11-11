@@ -137,7 +137,8 @@ public class OperationalReportsService : IOperationalReportsService
         var totals = SumKpis(perCenter);
         RecordAudit(CentralViewEventType, "OperationalKpi", null,
             "اطلاع مركزي على مؤشرات مجمعة",
-            new { CenterCount = perCenter.Count, range.FromDate, range.ToDate });
+            new { CenterCount = perCenter.Count, range.FromDate, range.ToDate },
+            auditCenterId: null);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return new CentralKpiResponseDto
@@ -174,6 +175,7 @@ public class OperationalReportsService : IOperationalReportsService
         query ??= new FinalMembersQuery();
         var centerId = await _permissionGate.EnsureLocalAsync(
             MilitaryHealthPermissions.Reports.Local, clientCenterId, cancellationToken);
+        OperationalReportAuthorization.EnsureMemberDetailView(_permissionGate);
         NormalizePaging(query);
         var range = NormalizeRange(query);
         NormalizeExportStatus(query);
@@ -196,6 +198,7 @@ public class OperationalReportsService : IOperationalReportsService
         query ??= new FinalMembersQuery();
         var centerId = await _permissionGate.EnsureLocalAsync(
             MilitaryHealthPermissions.Reports.Local, clientCenterId, cancellationToken);
+        OperationalReportAuthorization.EnsureMemberDetailView(_permissionGate);
         var range = NormalizeRange(query);
         NormalizeExportStatus(query);
         var items = await BuildFinalMemberItemsAsync(centerId, query, range, cancellationToken);
@@ -232,6 +235,7 @@ public class OperationalReportsService : IOperationalReportsService
         query ??= new WaitingMembersQuery();
         var centerId = await _permissionGate.EnsureLocalAsync(
             MilitaryHealthPermissions.Reports.Local, clientCenterId, cancellationToken);
+        OperationalReportAuthorization.EnsureMemberDetailView(_permissionGate);
         NormalizePaging(query);
         var range = NormalizeRange(query);
         NormalizeExportStatus(query);
@@ -256,6 +260,7 @@ public class OperationalReportsService : IOperationalReportsService
         query ??= new WaitingMembersQuery();
         var centerId = await _permissionGate.EnsureLocalAsync(
             MilitaryHealthPermissions.Reports.Local, clientCenterId, cancellationToken);
+        OperationalReportAuthorization.EnsureMemberDetailView(_permissionGate);
         var range = NormalizeRange(query);
         NormalizeExportStatus(query);
 
@@ -374,6 +379,25 @@ public class OperationalReportsService : IOperationalReportsService
         NormalizeDeferredQuery(query);
         var range = NormalizeRange(query);
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var detailAllowed = central || _permissionGate.Has(MilitaryHealthPermissions.Members.View);
+
+        if (!detailAllowed)
+        {
+            var aggregates = await LoadDeferredAggregateRowsAsync(centerId, query, range, today, cancellationToken);
+            var breakdown = BuildDeferredBreakdownFromAggregates(aggregates);
+            var total = aggregates.Count;
+            return new DeferredReportResponseDto
+            {
+                TotalCount = total,
+                LateCount = aggregates.Count(x => x.IsLate),
+                Breakdown = breakdown,
+                Items = Array.Empty<DeferredReportItemDto>(),
+                PageNumber = query.PageNumber,
+                PageSize = query.PageSize,
+                TotalPages = 0
+            };
+        }
+
         var all = await LoadDeferredItemsAsync(centerId, query, range, today, cancellationToken);
 
         if (central)
@@ -387,7 +411,7 @@ public class OperationalReportsService : IOperationalReportsService
             }
         }
 
-        var breakdown = all
+        var breakdownDetail = all
             .GroupBy(x => new { x.ActionTypeId, x.ActionTypeCode, x.ActionTypeNameAr, x.Status })
             .Select(g => new DeferredActionBreakdownDto
             {
@@ -401,7 +425,7 @@ public class OperationalReportsService : IOperationalReportsService
             .OrderBy(x => x.ActionTypeId).ThenBy(x => x.Status)
             .ToList();
 
-        var total = all.Count;
+        var totalDetail = all.Count;
         var page = all
             .Skip((query.PageNumber - 1) * query.PageSize)
             .Take(query.PageSize)
@@ -409,13 +433,13 @@ public class OperationalReportsService : IOperationalReportsService
 
         return new DeferredReportResponseDto
         {
-            TotalCount = total,
+            TotalCount = totalDetail,
             LateCount = all.Count(x => x.IsLate),
-            Breakdown = breakdown,
+            Breakdown = breakdownDetail,
             Items = page,
             PageNumber = query.PageNumber,
             PageSize = query.PageSize,
-            TotalPages = (int)Math.Ceiling(total / (double)query.PageSize)
+            TotalPages = totalDetail == 0 ? 0 : (int)Math.Ceiling(totalDetail / (double)query.PageSize)
         };
     }
 
@@ -427,6 +451,14 @@ public class OperationalReportsService : IOperationalReportsService
         CancellationToken cancellationToken = default)
     {
         query ??= new DeferredReportQuery();
+        Guid? auditCenterId = null;
+        if (!central)
+        {
+            auditCenterId = await _permissionGate.EnsureLocalAsync(
+                MilitaryHealthPermissions.Reports.Local, clientCenterId, cancellationToken);
+            OperationalReportAuthorization.EnsureMemberDetailView(_permissionGate);
+        }
+
         query.PageNumber = 1;
         query.PageSize = MemberService.MaxExportRows;
         var report = await GetDeferredReportAsync(query, clientCenterId, central, cancellationToken);
@@ -446,7 +478,8 @@ public class OperationalReportsService : IOperationalReportsService
 
         return await ExportRowsAsync(
             rows, "تقرير-المؤجلات", "المؤجلات", "تصدير تقرير الحالات المؤجلة",
-            cancellationToken);
+            cancellationToken,
+            auditCenterId);
     }
 
     #endregion
@@ -534,11 +567,13 @@ public class OperationalReportsService : IOperationalReportsService
         var centerId = await _permissionGate.EnsureLocalAsync(
             MilitaryHealthPermissions.Reports.Local, clientCenterId, cancellationToken);
         NormalizeDoctorQuery(query);
+        EnsureDoctorLinkageMemberView(query);
         var range = NormalizeRange(query);
 
-        var items = await BuildDoctorByMemberAsync(centerId, query, range, cancellationToken);
-        var total = items.Count;
-        var page = items.Skip((query.PageNumber - 1) * query.PageSize).Take(query.PageSize).ToList();
+        var (page, total) = await BuildDoctorByMemberAsync(
+            centerId, query, range,
+            (query.PageNumber - 1) * query.PageSize, query.PageSize,
+            cancellationToken);
         return new PaginatedList<DoctorLinkageByMemberItemDto>(page, total, query.PageNumber, query.PageSize);
     }
 
@@ -554,9 +589,10 @@ public class OperationalReportsService : IOperationalReportsService
         NormalizeDoctorQuery(query);
         var range = NormalizeRange(query);
 
-        var items = await BuildDoctorByDoctorAsync(centerId, query, range, cancellationToken);
-        var total = items.Count;
-        var page = items.Skip((query.PageNumber - 1) * query.PageSize).Take(query.PageSize).ToList();
+        var (page, total) = await BuildDoctorByDoctorAsync(
+            centerId, query, range,
+            (query.PageNumber - 1) * query.PageSize, query.PageSize,
+            cancellationToken);
         return new PaginatedList<DoctorLinkageByDoctorItemDto>(page, total, query.PageNumber, query.PageSize);
     }
 
@@ -575,7 +611,15 @@ public class OperationalReportsService : IOperationalReportsService
         List<DoctorLinkageExcelRowDto> rows;
         if (string.Equals(query.ViewMode, DoctorLinkageViewModes.ByDoctor, StringComparison.OrdinalIgnoreCase))
         {
-            var items = await BuildDoctorByDoctorAsync(centerId, query, range, cancellationToken);
+            var groupedQ = DoctorLinkageByDoctorGroupedQuery(centerId, query, range);
+            var groupTotal = await groupedQ.CountAsync(cancellationToken);
+            if (groupTotal == 0)
+                throw new OperationalReportExportEmptyException();
+            if (groupTotal > MemberService.MaxExportRows)
+                throw new InvalidOperationalReportFilterException(
+                    $"عدد السجلات ({groupTotal}) يتجاوز حد التصدير ({MemberService.MaxExportRows}).");
+
+            var (items, _) = await BuildDoctorByDoctorAsync(centerId, query, range, null, null, cancellationToken);
             rows = items.Select(i => new DoctorLinkageExcelRowDto
             {
                 ExaminerUserId = i.ExaminerUserId,
@@ -587,7 +631,16 @@ public class OperationalReportsService : IOperationalReportsService
         }
         else
         {
-            var items = await BuildDoctorByMemberAsync(centerId, query, range, cancellationToken);
+            EnsureDoctorLinkageMemberView(query);
+            var examRowCount = await DoctorLinkageByMemberFlatQuery(centerId, query, range)
+                .CountAsync(cancellationToken);
+            if (examRowCount == 0)
+                throw new OperationalReportExportEmptyException();
+            if (examRowCount > MemberService.MaxExportRows)
+                throw new InvalidOperationalReportFilterException(
+                    $"عدد السجلات ({examRowCount}) يتجاوز حد التصدير ({MemberService.MaxExportRows}).");
+
+            var (items, _) = await BuildDoctorByMemberAsync(centerId, query, range, null, null, cancellationToken);
             rows = items.SelectMany(m => m.Exams.Select(e => new DoctorLinkageExcelRowDto
             {
                 FileNumber = m.FileNumber,
@@ -1225,11 +1278,11 @@ public class OperationalReportsService : IOperationalReportsService
             .ToList();
     }
 
-    private async Task<List<DoctorLinkageByMemberItemDto>> BuildDoctorByMemberAsync(
+    /// <summary>فحوص ربط الأطباء الحالية في مركز الإجراء مع فلاتر الفترة والعيادة.</summary>
+    private IQueryable<MedicalExam> DoctorLinkageExamsQuery(
         Guid centerId,
         DoctorLinkageQuery query,
-        DateRange range,
-        CancellationToken cancellationToken)
+        DateRange range)
     {
         var examsQ = _clinicWorkspace.QueryMedicalExams(asNoTracking: true)
             .Where(e => e.CenterId == centerId && e.IsCurrent);
@@ -1239,28 +1292,150 @@ public class OperationalReportsService : IOperationalReportsService
             examsQ = examsQ.Where(e => e.ExaminedAt < range.ToExclusive.Value);
         if (query.ClinicId.HasValue)
             examsQ = examsQ.Where(e => e.ClinicId == query.ClinicId.Value);
+        return examsQ;
+    }
 
-        var examRows = await (
-            from e in examsQ
-            join m in _members.Query(asNoTracking: true) on e.MemberId equals m.MemberId
-            where m.CurrentMedicalCenterId == centerId
-            select new { e, m }
-        ).ToListAsync(cancellationToken);
-
-        var examIds = examRows.Select(r => r.e.ExamId).ToList();
-        var assessments = await _clinicWorkspace.QueryClinicAssessments(asNoTracking: true)
-            .Where(a => examIds.Contains(a.ExamId))
-            .ToDictionaryAsync(a => a.ExamId, cancellationToken);
+    /// <summary>صفوف فحص+منتسب+نتيجة عيادية لـ BY_MEMBER؛ التصفية على SQL.</summary>
+    private IQueryable<DoctorLinkageByMemberFlatRow> DoctorLinkageByMemberFlatQuery(
+        Guid centerId,
+        DoctorLinkageQuery query,
+        DateRange range)
+    {
+        var examsQ = DoctorLinkageExamsQuery(centerId, query, range);
+        var membersQ = MembersCurrentlyInCenter(centerId);
+        var assessmentsQ = _clinicWorkspace.QueryClinicAssessments(asNoTracking: true);
 
         if (query.ResultStatusId.HasValue)
         {
-            examRows = examRows
-                .Where(r => assessments.TryGetValue(r.e.ExamId, out var a)
-                            && a.ResultStatusId == query.ResultStatusId.Value)
-                .ToList();
+            return from e in examsQ
+                join m in membersQ on e.MemberId equals m.MemberId
+                join a in assessmentsQ on e.ExamId equals a.ExamId
+                where a.ResultStatusId == query.ResultStatusId.Value
+                select new DoctorLinkageByMemberFlatRow
+                {
+                    ExamId = e.ExamId,
+                    MemberId = m.MemberId,
+                    FileNumber = m.FileNumber,
+                    FullName = m.FullName,
+                    ExaminerUserId = e.ExaminerUserId,
+                    ClinicId = e.ClinicId,
+                    ExaminedAt = e.ExaminedAt,
+                    ResultStatusId = a.ResultStatusId
+                };
         }
 
-        var memberIds = examRows.Select(r => r.m.MemberId).Distinct().ToList();
+        return from e in examsQ
+            join m in membersQ on e.MemberId equals m.MemberId
+            join a in assessmentsQ on e.ExamId equals a.ExamId into ag
+            from a in ag.DefaultIfEmpty()
+            select new DoctorLinkageByMemberFlatRow
+            {
+                ExamId = e.ExamId,
+                MemberId = m.MemberId,
+                FileNumber = m.FileNumber,
+                FullName = m.FullName,
+                ExaminerUserId = e.ExaminerUserId,
+                ClinicId = e.ClinicId,
+                ExaminedAt = e.ExaminedAt,
+                ResultStatusId = a != null ? a.ResultStatusId : null
+            };
+    }
+
+    private IQueryable<DoctorLinkageMemberKey> DoctorLinkageByMemberKeysQuery(
+        Guid centerId,
+        DoctorLinkageQuery query,
+        DateRange range)
+        => DoctorLinkageByMemberFlatQuery(centerId, query, range)
+            .GroupBy(r => new { r.MemberId, r.FileNumber, r.FullName })
+            .Select(g => new DoctorLinkageMemberKey
+            {
+                MemberId = g.Key.MemberId,
+                FileNumber = g.Key.FileNumber,
+                FullName = g.Key.FullName
+            });
+
+    /// <summary>تجميع BY_DOCTOR على SQL (طبيب+عيادة).</summary>
+    private IQueryable<DoctorLinkageByDoctorAggregateRow> DoctorLinkageByDoctorGroupedQuery(
+        Guid centerId,
+        DoctorLinkageQuery query,
+        DateRange range)
+    {
+        var examsQ = DoctorLinkageExamsQuery(centerId, query, range);
+        var assessmentsQ = _clinicWorkspace.QueryClinicAssessments(asNoTracking: true);
+
+        IQueryable<DoctorLinkageExamResultRow> flatQ;
+        if (query.ResultStatusId.HasValue)
+        {
+            flatQ = from e in examsQ
+                join a in assessmentsQ on e.ExamId equals a.ExamId
+                where a.ResultStatusId == query.ResultStatusId.Value
+                select new DoctorLinkageExamResultRow
+                {
+                    MemberId = e.MemberId,
+                    ExaminerUserId = e.ExaminerUserId,
+                    ClinicId = e.ClinicId,
+                    ResultStatusId = a.ResultStatusId
+                };
+        }
+        else
+        {
+            flatQ = from e in examsQ
+                join a in assessmentsQ on e.ExamId equals a.ExamId into ag
+                from a in ag.DefaultIfEmpty()
+                select new DoctorLinkageExamResultRow
+                {
+                    MemberId = e.MemberId,
+                    ExaminerUserId = e.ExaminerUserId,
+                    ClinicId = e.ClinicId,
+                    ResultStatusId = a != null ? a.ResultStatusId : null
+                };
+        }
+
+        return flatQ
+            .GroupBy(x => new { x.ExaminerUserId, x.ClinicId })
+            .Select(g => new DoctorLinkageByDoctorAggregateRow
+            {
+                ExaminerUserId = g.Key.ExaminerUserId,
+                ClinicId = g.Key.ClinicId,
+                MemberCount = g.Select(x => x.MemberId).Distinct().Count(),
+                ExamCount = g.Count(),
+                AcceptedCount = g.Count(x => x.ResultStatusId == (short)1),
+                RejectedCount = g.Count(x => x.ResultStatusId == (short)2),
+                DeferredCount = g.Count(x => x.ResultStatusId == (short)3)
+            });
+    }
+
+    /// <summary>
+    /// FR-068: ربط المنتسبين الحاليين في المركز بفحوص أُجريت في نفس المركز.
+    /// يتطلب تفاصيل المنتسب (A2 / <see cref="MilitaryHealthPermissions.Members.View"/>).
+    /// قد يختلف العدد عن وضع BY_DOCTOR بعد نقل الملف (A3).
+    /// </summary>
+    private async Task<(List<DoctorLinkageByMemberItemDto> Items, int TotalCount)> BuildDoctorByMemberAsync(
+        Guid centerId,
+        DoctorLinkageQuery query,
+        DateRange range,
+        int? skip,
+        int? take,
+        CancellationToken cancellationToken)
+    {
+        var keysQ = DoctorLinkageByMemberKeysQuery(centerId, query, range);
+        var total = await keysQ.CountAsync(cancellationToken);
+        if (total == 0)
+            return ([], 0);
+
+        IQueryable<DoctorLinkageMemberKey> orderedKeys = keysQ
+            .OrderBy(k => k.FileNumber)
+            .ThenBy(k => k.MemberId);
+        if (skip.HasValue && take.HasValue)
+            orderedKeys = orderedKeys.Skip(skip.Value).Take(take.Value);
+
+        var pageKeys = await orderedKeys.ToListAsync(cancellationToken);
+        var memberIds = pageKeys.Select(k => k.MemberId).ToList();
+
+        var flatRows = await DoctorLinkageByMemberFlatQuery(centerId, query, range)
+            .Where(r => memberIds.Contains(r.MemberId))
+            .ToListAsync(cancellationToken);
+
         var finalDecisions = await _clinicWorkspace.QueryFinalDecisions(asNoTracking: true)
             .Where(d => d.CenterId == centerId && memberIds.Contains(d.MemberId))
             .ToListAsync(cancellationToken);
@@ -1273,85 +1448,103 @@ public class OperationalReportsService : IOperationalReportsService
         var results = await _referenceData.ResultStatuses(asNoTracking: true)
             .ToDictionaryAsync(r => r.StatusId, cancellationToken);
         var names = await _users.GetDisplayNamesByIdsAsync(
-            examRows.Select(r => r.e.ExaminerUserId).Distinct(), cancellationToken);
+            flatRows.Select(r => r.ExaminerUserId).Distinct(), cancellationToken);
 
-        return examRows
-            .GroupBy(r => new { r.m.MemberId, r.m.FileNumber, r.m.FullName })
-            .OrderBy(g => g.Key.FileNumber)
-            .Select(g =>
+        var byMember = flatRows.GroupBy(r => r.MemberId).ToDictionary(g => g.Key, g => g.ToList());
+        var items = pageKeys.Select(key =>
+        {
+            byMember.TryGetValue(key.MemberId, out var exams);
+            exams ??= new List<DoctorLinkageByMemberFlatRow>();
+            finalByMember.TryGetValue(key.MemberId, out var final);
+            string? finalName = null;
+            if (final is not null && results.TryGetValue(final.ResultStatusId, out var fr))
+                finalName = fr.NameAr;
+            return new DoctorLinkageByMemberItemDto
             {
-                finalByMember.TryGetValue(g.Key.MemberId, out var final);
-                string? finalName = null;
-                if (final is not null && results.TryGetValue(final.ResultStatusId, out var fr))
-                    finalName = fr.NameAr;
-                return new DoctorLinkageByMemberItemDto
-                {
-                    MemberId = g.Key.MemberId,
-                    FileNumber = g.Key.FileNumber,
-                    FullName = g.Key.FullName,
-                    FinalResultStatusId = final?.ResultStatusId,
-                    FinalResultNameAr = finalName,
-                    DecidedAt = final?.DecidedAt,
-                    Exams = g.Select(x =>
+                MemberId = key.MemberId,
+                FileNumber = key.FileNumber,
+                FullName = key.FullName,
+                FinalResultStatusId = final?.ResultStatusId,
+                FinalResultNameAr = finalName,
+                DecidedAt = final?.DecidedAt,
+                Exams = exams
+                    .OrderBy(x => x.ExaminedAt)
+                    .Select(x =>
                     {
-                        clinics.TryGetValue(x.e.ClinicId, out var clinic);
-                        assessments.TryGetValue(x.e.ExamId, out var assessment);
-                        short? rsId = assessment?.ResultStatusId;
+                        clinics.TryGetValue(x.ClinicId, out var clinic);
+                        short? rsId = x.ResultStatusId;
                         string? rsName = null;
                         if (rsId.HasValue && results.TryGetValue(rsId.Value, out var rs))
                             rsName = rs.NameAr;
-                        names.TryGetValue(x.e.ExaminerUserId, out var display);
+                        names.TryGetValue(x.ExaminerUserId, out var display);
                         return new DoctorExamLinkDto
                         {
-                            ExaminerUserId = x.e.ExaminerUserId,
+                            ExaminerUserId = x.ExaminerUserId,
                             ExaminerDisplayName = display,
-                            ClinicId = x.e.ClinicId,
+                            ClinicId = x.ClinicId,
                             ClinicCode = clinic?.Code ?? "?",
                             ClinicNameAr = clinic?.NameAr ?? "?",
-                            ExaminedAt = x.e.ExaminedAt,
+                            ExaminedAt = x.ExaminedAt,
                             ResultStatusId = rsId,
                             ResultNameAr = rsName
                         };
-                    }).OrderBy(e => e.ExaminedAt).ToList()
-                };
-            }).ToList();
+                    }).ToList()
+            };
+        }).ToList();
+
+        return (items, total);
     }
 
-    private async Task<List<DoctorLinkageByDoctorItemDto>> BuildDoctorByDoctorAsync(
+    /// <summary>
+    /// FR-068 A3: نشاط الطبيب ضمن مركز إجراء الفحص (<see cref="MedicalExam.CenterId"/>).
+    /// لا يشترط <see cref="Member.CurrentMedicalCenterId"/> — يختلف عن <see cref="BuildDoctorByMemberAsync"/>.
+    /// </summary>
+    private async Task<(List<DoctorLinkageByDoctorItemDto> Items, int TotalCount)> BuildDoctorByDoctorAsync(
         Guid centerId,
         DoctorLinkageQuery query,
         DateRange range,
+        int? skip,
+        int? take,
         CancellationToken cancellationToken)
     {
-        var byMember = await BuildDoctorByMemberAsync(centerId, query, range, cancellationToken);
-        var flat = byMember.SelectMany(m => m.Exams.Select(e => new { m.MemberId, e })).ToList();
+        var groupedQ = DoctorLinkageByDoctorGroupedQuery(centerId, query, range);
+        var total = await groupedQ.CountAsync(cancellationToken);
+        if (total == 0)
+            return ([], 0);
+
+        IQueryable<DoctorLinkageByDoctorAggregateRow> ordered = groupedQ
+            .OrderByDescending(x => x.MemberCount)
+            .ThenBy(x => x.ExaminerUserId)
+            .ThenBy(x => x.ClinicId);
+        if (skip.HasValue && take.HasValue)
+            ordered = ordered.Skip(skip.Value).Take(take.Value);
+
+        var aggregates = await ordered.ToListAsync(cancellationToken);
         var clinics = await _referenceData.Clinics(asNoTracking: true)
             .ToDictionaryAsync(c => c.ClinicId, cancellationToken);
         var names = await _users.GetDisplayNamesByIdsAsync(
-            flat.Select(x => x.e.ExaminerUserId).Distinct(), cancellationToken);
+            aggregates.Select(x => x.ExaminerUserId).Distinct(), cancellationToken);
 
-        return flat
-            .GroupBy(x => new { x.e.ExaminerUserId, x.e.ClinicId })
-            .Select(g =>
+        var items = aggregates.Select(row =>
+        {
+            clinics.TryGetValue(row.ClinicId, out var clinic);
+            names.TryGetValue(row.ExaminerUserId, out var display);
+            return new DoctorLinkageByDoctorItemDto
             {
-                clinics.TryGetValue(g.Key.ClinicId, out var clinic);
-                names.TryGetValue(g.Key.ExaminerUserId, out var display);
-                return new DoctorLinkageByDoctorItemDto
-                {
-                    ExaminerUserId = g.Key.ExaminerUserId,
-                    ExaminerDisplayName = display,
-                    ClinicId = g.Key.ClinicId,
-                    ClinicCode = clinic?.Code,
-                    ClinicNameAr = clinic?.NameAr,
-                    MemberCount = g.Select(x => x.MemberId).Distinct().Count(),
-                    ExamCount = g.Count(),
-                    AcceptedCount = g.Count(x => x.e.ResultStatusId == 1),
-                    RejectedCount = g.Count(x => x.e.ResultStatusId == 2),
-                    DeferredCount = g.Count(x => x.e.ResultStatusId == 3)
-                };
-            })
-            .OrderByDescending(x => x.MemberCount)
-            .ToList();
+                ExaminerUserId = row.ExaminerUserId,
+                ExaminerDisplayName = display,
+                ClinicId = row.ClinicId,
+                ClinicCode = clinic?.Code,
+                ClinicNameAr = clinic?.NameAr,
+                MemberCount = row.MemberCount,
+                ExamCount = row.ExamCount,
+                AcceptedCount = row.AcceptedCount,
+                RejectedCount = row.RejectedCount,
+                DeferredCount = row.DeferredCount
+            };
+        }).ToList();
+
+        return (items, total);
     }
 
     #endregion
@@ -1620,7 +1813,7 @@ public class OperationalReportsService : IOperationalReportsService
         string sheetName,
         string title,
         CancellationToken cancellationToken,
-        Guid? centerId = null)
+        Guid? auditCenterId = null)
     {
         var file = await _export.ExportToExcelAsync(rows, new ExportOptions
         {
@@ -1630,22 +1823,34 @@ public class OperationalReportsService : IOperationalReportsService
             IncludeSummary = false
         });
 
-        var userId = RequireUserId();
-        RecordAudit(ExportEventType, "OperationalReport", centerId?.ToString(),
-            title, new { RecordCount = rows.Count, reportName });
+        RequireUserId();
+        RecordAudit(
+            ExportEventType,
+            "OperationalReport",
+            entityId: null,
+            title,
+            new { RecordCount = rows.Count, reportName },
+            auditCenterId);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return file;
     }
 
-    private void RecordAudit(string eventType, string entityType, string? entityId, string reason, object newValues)
+    private void RecordAudit(
+        string eventType,
+        string entityType,
+        string? entityId,
+        string reason,
+        object newValues,
+        Guid? auditCenterId = null)
     {
         var userId = string.IsNullOrWhiteSpace(_currentUser.UserId) ? null : _currentUser.UserId;
+        var isLocal = auditCenterId.HasValue;
         _audit.Add(new AuditEvent
         {
             OccurredAt = DateTimeOffset.UtcNow,
             ActorUserId = userId,
-            ContextScope = CenterClaimTypes.Central,
-            CenterId = null,
+            ContextScope = isLocal ? CenterClaimTypes.Center : CenterClaimTypes.Central,
+            CenterId = auditCenterId,
             EventType = eventType,
             Result = "SUCCESS",
             EntityType = entityType,
@@ -1711,6 +1916,14 @@ public class OperationalReportsService : IOperationalReportsService
         }
     }
 
+    private void EnsureDoctorLinkageMemberView(DoctorLinkageQuery query)
+    {
+        if (string.Equals(query.ViewMode, DoctorLinkageViewModes.ByDoctor, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        OperationalReportAuthorization.EnsureMemberDetailView(_permissionGate);
+    }
+
     private static void NormalizeDoctorQuery(DoctorLinkageQuery query)
     {
         if (query.PageNumber < 1) query.PageNumber = 1;
@@ -1720,6 +1933,116 @@ public class OperationalReportsService : IOperationalReportsService
         if (mode is not DoctorLinkageViewModes.ByMember and not DoctorLinkageViewModes.ByDoctor)
             throw new InvalidOperationalReportFilterException("وضع العرض يجب أن يكون BY_MEMBER أو BY_DOCTOR.");
         query.ViewMode = mode;
+    }
+
+    private sealed class DoctorLinkageByMemberFlatRow
+    {
+        public Guid ExamId { get; init; }
+        public Guid MemberId { get; init; }
+        public long FileNumber { get; init; }
+        public string FullName { get; init; } = null!;
+        public string ExaminerUserId { get; init; } = null!;
+        public Guid ClinicId { get; init; }
+        public DateTimeOffset ExaminedAt { get; init; }
+        public short? ResultStatusId { get; init; }
+    }
+
+    private sealed class DoctorLinkageMemberKey
+    {
+        public Guid MemberId { get; init; }
+        public long FileNumber { get; init; }
+        public string FullName { get; init; } = null!;
+    }
+
+    private sealed class DoctorLinkageExamResultRow
+    {
+        public Guid MemberId { get; init; }
+        public string ExaminerUserId { get; init; } = null!;
+        public Guid ClinicId { get; init; }
+        public short? ResultStatusId { get; init; }
+    }
+
+    private sealed class DoctorLinkageByDoctorAggregateRow
+    {
+        public string ExaminerUserId { get; init; } = null!;
+        public Guid ClinicId { get; init; }
+        public int MemberCount { get; init; }
+        public int ExamCount { get; init; }
+        public int AcceptedCount { get; init; }
+        public int RejectedCount { get; init; }
+        public int DeferredCount { get; init; }
+    }
+
+    private sealed class DeferredAggregateRow
+    {
+        public short ActionTypeId { get; init; }
+        public string ActionTypeCode { get; init; } = null!;
+        public string ActionTypeNameAr { get; init; } = null!;
+        public string Status { get; init; } = null!;
+        public bool IsLate { get; init; }
+    }
+
+    private static IReadOnlyList<DeferredActionBreakdownDto> BuildDeferredBreakdownFromAggregates(
+        IReadOnlyList<DeferredAggregateRow> aggregates)
+        => aggregates
+            .GroupBy(x => new { x.ActionTypeId, x.ActionTypeCode, x.ActionTypeNameAr, x.Status })
+            .Select(g => new DeferredActionBreakdownDto
+            {
+                ActionTypeId = g.Key.ActionTypeId,
+                ActionTypeCode = g.Key.ActionTypeCode,
+                ActionTypeNameAr = g.Key.ActionTypeNameAr,
+                Status = g.Key.Status,
+                Count = g.Count(),
+                LateCount = g.Count(x => x.IsLate)
+            })
+            .OrderBy(x => x.ActionTypeId).ThenBy(x => x.Status)
+            .ToList();
+
+    private async Task<List<DeferredAggregateRow>> LoadDeferredAggregateRowsAsync(
+        Guid? centerId,
+        DeferredReportQuery query,
+        DateRange range,
+        DateOnly today,
+        CancellationToken cancellationToken)
+    {
+        var q = _clinicWorkspace.QueryDeferredActions(asNoTracking: true);
+        if (centerId.HasValue)
+            q = q.Where(d => d.CenterId == centerId.Value);
+        if (range.From.HasValue)
+            q = q.Where(d => d.RequestedAt >= range.From.Value);
+        if (range.ToExclusive.HasValue)
+            q = q.Where(d => d.RequestedAt < range.ToExclusive.Value);
+        if (query.ActionTypeId.HasValue)
+            q = q.Where(d => d.ActionTypeId == query.ActionTypeId.Value);
+        if (!string.IsNullOrWhiteSpace(query.ActionStatus))
+            q = q.Where(d => d.Status == query.ActionStatus);
+
+        var rows = await (
+            from d in q
+            join at in _referenceData.RequiredActionTypes(asNoTracking: true)
+                on d.ActionTypeId equals at.ActionTypeId
+            select new { d.Status, d.DeferUntil, d.ActionTypeId, at.Code, at.NameAr }
+        ).ToListAsync(cancellationToken);
+
+        var items = rows.Select(x =>
+        {
+            var isLate = x.Status == DeferredStatusRequested
+                         && x.DeferUntil.HasValue
+                         && x.DeferUntil.Value < today;
+            return new DeferredAggregateRow
+            {
+                ActionTypeId = x.ActionTypeId,
+                ActionTypeCode = x.Code,
+                ActionTypeNameAr = x.NameAr,
+                Status = x.Status,
+                IsLate = isLate
+            };
+        }).ToList();
+
+        if (query.LateOnly == true)
+            items = items.Where(i => i.IsLate).ToList();
+
+        return items;
     }
 
     private static void NormalizeExportStatus(FinalMembersQuery query)

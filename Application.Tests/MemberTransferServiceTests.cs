@@ -339,7 +339,7 @@ public class MemberTransferServiceTests
 
     #region Fixtures
 
-    private static MemberTransferService CreateService(
+    internal static MemberTransferService CreateService(
         AppDbContext db,
         Guid activeCenter,
         bool allowTransfer = false,
@@ -425,7 +425,7 @@ public class MemberTransferServiceTests
             new TransferTestUnitOfWork(db));
     }
 
-    private static async Task SeedAsync(AppDbContext db)
+    internal static async Task SeedAsync(AppDbContext db)
     {
         await MemberServiceTests.SeedReferencesAsync(db);
 
@@ -472,7 +472,7 @@ public class MemberTransferServiceTests
         await db.SaveChangesAsync();
     }
 
-    private static async Task<Member> CreateMemberAsync(
+    internal static async Task<Member> CreateMemberAsync(
         AppDbContext db,
         Guid centerId,
         long fileNumber,

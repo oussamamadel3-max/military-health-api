@@ -209,6 +209,44 @@ public class ClinicAssessmentServiceTests
         Assert.Equal(2, second.ExamVersionNo);
         Assert.Equal(1, await db.MedicalExams.CountAsync(e => e.MemberId == memberId));
         Assert.Equal(2, Assert.Single(await db.ClinicAssessments.ToListAsync()).ResultStatusId);
+
+        var exam = await db.MedicalExams.AsNoTracking().SingleAsync(e => e.ExamId == first.ExamId);
+        Assert.Equal("actor-1", exam.ExaminerUserId);
+        Assert.Equal("actor-1", exam.UpdatedByUserId);
+    }
+
+    [Fact]
+    public async Task Save_by_second_doctor_preserves_original_examiner_for_br069()
+    {
+        await using var db = MemberServiceTests.CreateDb();
+        await SeedAsync(db);
+        await SeedUserAsync(db, "doc-2", "doctor2");
+        await SeedDoctorAssignmentAsync(db, "doc-2", CenterA, ClinicEyes);
+        var memberId = await CreateMemberAsync(db, "BR069-EX");
+
+        await AcquireLockAsync(db, memberId, ClinicEyes, "actor-1");
+        var firstService = CreateService(db, CenterA, "actor-1");
+        var first = await firstService.SaveAsync(memberId, AcceptedRequest(ClinicEyes));
+        var firstExaminedAt = (await db.MedicalExams.AsNoTracking().SingleAsync(e => e.ExamId == first.ExamId)).ExaminedAt;
+
+        await AcquireLockAsync(db, memberId, ClinicEyes, "doc-2");
+        var secondService = CreateService(db, CenterA, "doc-2");
+        await secondService.SaveAsync(memberId, new SaveClinicAssessmentRequest
+        {
+            ClinicId = ClinicEyes,
+            ResultStatusId = 2,
+            RejectionReason = "سبب تعديل"
+        });
+
+        var exam = await db.MedicalExams.AsNoTracking().SingleAsync(e => e.MemberId == memberId && e.ClinicId == ClinicEyes);
+        var assessment = await db.ClinicAssessments.AsNoTracking().SingleAsync(a => a.ExamId == exam.ExamId);
+
+        Assert.Equal("actor-1", exam.ExaminerUserId);
+        Assert.Equal(firstExaminedAt, exam.ExaminedAt);
+        Assert.Equal("doc-2", exam.UpdatedByUserId);
+        Assert.Equal(2, exam.VersionNo);
+        Assert.Equal("actor-1", assessment.AssessedByUserId);
+        Assert.Equal("doc-2", assessment.UpdatedByUserId);
     }
 
     [Fact]

@@ -255,7 +255,12 @@ public class CentralCompareCenterDto
     public int ArchivedCount { get; set; }
 }
 
-/// <summary>تقرير ربط الأطباء (FR-068). الفترة على ExaminedAt؛ ResultStatusId يصفي نتيجة تقييم العيادة.</summary>
+/// <summary>
+/// تقرير ربط الأطباء (FR-068). الفترة على <c>ExaminedAt</c>؛ <c>ResultStatusId</c> يصفي تقييم العيادة.
+/// <para><b>BY_MEMBER (قرار اعتماد A):</b> منتسبون حاليون في المركز النشط + فحوص أُجريت في نفس المركز فقط — وليس التاريخ الطبي عبر المراكز.</para>
+/// <para><b>BY_DOCTOR (A3):</b> تجميع نشاط الفحوص داخل المركز بغض النظر عن <c>CurrentMedicalCenterId</c> بعد النقل.</para>
+/// <para>ليس بديلاً عن <c>GetHistoryLocalAsync</c> (سجل النقل). التوافق الحرفي مع وصف «التوزيع العكسي» في SRS يتطلب اعتماداً وظيفياً منفصلاً.</para>
+/// </summary>
 public class DoctorLinkageQuery : OperationalDateRangeQuery
 {
     public Guid? ClinicId { get; set; }
