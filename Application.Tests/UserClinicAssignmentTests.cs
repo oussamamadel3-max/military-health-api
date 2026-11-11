@@ -401,6 +401,168 @@ public class UserClinicAssignmentTests
     }
 
     [Fact]
+    public async Task Effective_doctors_count_excludes_inactive_user_and_center_assignment()
+    {
+        await using var db = CreateDb();
+        await SeedCenterAsync(db, CenterA, "CA", "مركز أ");
+        await SeedClinicAsync(db, ClinicEyes, "EYE", "العيون");
+        await SeedCenterClinicAsync(db, CenterA, ClinicEyes);
+        await SeedDoctorAsync(db, "doc-1", "doctor1", CenterA);
+        await SeedDoctorAsync(db, "doc-2", "doctor2", CenterA);
+        var service = CreateService(db, unrestrictedActor: true);
+
+        await service.AssignAsync(new AssignUserClinicDto
+        {
+            UserId = "doc-1",
+            CenterId = CenterA,
+            ClinicId = ClinicEyes
+        });
+        await service.AssignAsync(new AssignUserClinicDto
+        {
+            UserId = "doc-2",
+            CenterId = CenterA,
+            ClinicId = ClinicEyes
+        });
+
+        (await db.Users.SingleAsync(u => u.Id == "doc-1")).IsActive = false;
+        var inactiveCenter = await db.UserCenters.SingleAsync(uc => uc.UserId == "doc-2" && uc.CenterId == CenterA);
+        IamRetention.Revoke(inactiveCenter, "actor-1", "اختبار");
+        await db.SaveChangesAsync();
+
+        var item = Assert.Single((await service.GetCenterClinicsAsync(CenterA, 1, 10)).Items, c => c.ClinicId == ClinicEyes);
+        Assert.Equal(2, item.ActiveDoctorsCount);
+        Assert.Equal(0, item.EffectiveDoctorsCount);
+    }
+
+    [Fact]
+    public async Task Effective_doctors_count_excludes_user_without_clinic_doctor_role()
+    {
+        await using var db = CreateDb();
+        await SeedCenterAsync(db, CenterA, "CA", "مركز أ");
+        await SeedClinicAsync(db, ClinicEyes, "EYE", "العيون");
+        await SeedCenterClinicAsync(db, CenterA, ClinicEyes);
+        await SeedDoctorAsync(db, "doc-1", "doctor1", CenterA);
+        var service = CreateService(db, unrestrictedActor: true);
+
+        await service.AssignAsync(new AssignUserClinicDto
+        {
+            UserId = "doc-1",
+            CenterId = CenterA,
+            ClinicId = ClinicEyes
+        });
+
+        var roleId = await SeedRoleAsync(db, UserClinicAssignmentService.ClinicDoctorRoleName);
+        var roleLink = await db.UserRoleAssociations.SingleAsync(ura =>
+            ura.UserId == "doc-1" && ura.CenterId == CenterA && ura.RoleId == roleId);
+        IamRetention.Revoke(roleLink, "actor-1", "اختبار");
+        await db.SaveChangesAsync();
+
+        var item = Assert.Single((await service.GetCenterClinicsAsync(CenterA, 1, 10)).Items);
+        Assert.Equal(1, item.ActiveDoctorsCount);
+        Assert.Equal(0, item.EffectiveDoctorsCount);
+    }
+
+    [Fact]
+    public async Task Effective_doctors_count_requires_clinic_doctor_role_in_same_center()
+    {
+        await using var db = CreateDb();
+        await SeedCenterAsync(db, CenterA, "CA", "مركز أ");
+        await SeedCenterAsync(db, CenterB, "CB", "مركز ب");
+        await SeedClinicAsync(db, ClinicEyes, "EYE", "العيون");
+        await SeedCenterClinicAsync(db, CenterA, ClinicEyes);
+        await SeedUserAsync(db, "doc-1", "doctor1");
+        await SeedUserCenterAsync(db, "doc-1", CenterA);
+        var doctorRoleId = await SeedRoleAsync(db, UserClinicAssignmentService.ClinicDoctorRoleName);
+        db.UserRoleAssociations.Add(new UserRoleAssociation
+        {
+            Id = Guid.NewGuid(),
+            UserId = "doc-1",
+            RoleId = doctorRoleId,
+            CenterId = CenterB,
+            IsActive = true,
+            AssignedByUserId = "actor-1",
+            AssignedAt = DateTimeOffset.UtcNow
+        });
+        db.UserClinicAssignments.Add(new UserClinicAssignment
+        {
+            AssignmentId = Guid.NewGuid(),
+            UserId = "doc-1",
+            CenterId = CenterA,
+            ClinicId = ClinicEyes,
+            SpecialtyTitle = "العيون",
+            IsActive = true,
+            AssignedAt = DateTimeOffset.UtcNow,
+            AssignedByUserId = "actor-1"
+        });
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, unrestrictedActor: true);
+
+        var item = Assert.Single((await service.GetCenterClinicsAsync(CenterA, 1, 10)).Items);
+        Assert.Equal(1, item.ActiveDoctorsCount);
+        Assert.Equal(0, item.EffectiveDoctorsCount);
+    }
+
+    [Fact]
+    public async Task Effective_doctors_count_counts_distinct_active_assignment_rows()
+    {
+        await using var db = CreateDb();
+        await SeedCenterAsync(db, CenterA, "CA", "مركز أ");
+        await SeedClinicAsync(db, ClinicEyes, "EYE", "العيون");
+        await SeedClinicAsync(db, ClinicEnt, "ENT", "الأذنية");
+        await SeedCenterClinicAsync(db, CenterA, ClinicEyes);
+        await SeedCenterClinicAsync(db, CenterA, ClinicEnt);
+        await SeedDoctorAsync(db, "doc-1", "doctor1", CenterA);
+        var service = CreateService(db, unrestrictedActor: true);
+
+        await service.AssignAsync(new AssignUserClinicDto
+        {
+            UserId = "doc-1",
+            CenterId = CenterA,
+            ClinicId = ClinicEyes
+        });
+        await service.AssignAsync(new AssignUserClinicDto
+        {
+            UserId = "doc-1",
+            CenterId = CenterA,
+            ClinicId = ClinicEnt
+        });
+
+        var clinics = await service.GetCenterClinicsAsync(CenterA, 1, 10);
+        var eyes = Assert.Single(clinics.Items, c => c.ClinicId == ClinicEyes);
+        var ent = Assert.Single(clinics.Items, c => c.ClinicId == ClinicEnt);
+        Assert.Equal(1, eyes.ActiveDoctorsCount);
+        Assert.Equal(1, eyes.EffectiveDoctorsCount);
+        Assert.Equal(1, ent.ActiveDoctorsCount);
+        Assert.Equal(1, ent.EffectiveDoctorsCount);
+    }
+
+    [Fact]
+    public async Task Active_doctors_count_unchanged_when_effective_differs()
+    {
+        await using var db = CreateDb();
+        await SeedCenterAsync(db, CenterA, "CA", "مركز أ");
+        await SeedClinicAsync(db, ClinicEyes, "EYE", "العيون");
+        await SeedCenterClinicAsync(db, CenterA, ClinicEyes);
+        await SeedDoctorAsync(db, "doc-1", "doctor1", CenterA);
+        var service = CreateService(db, unrestrictedActor: true);
+
+        await service.AssignAsync(new AssignUserClinicDto
+        {
+            UserId = "doc-1",
+            CenterId = CenterA,
+            ClinicId = ClinicEyes
+        });
+
+        (await db.Users.SingleAsync(u => u.Id == "doc-1")).IsActive = false;
+        await db.SaveChangesAsync();
+
+        var item = Assert.Single((await service.GetCenterClinicsAsync(CenterA, 1, 10)).Items);
+        Assert.Equal(1, item.ActiveDoctorsCount);
+        Assert.Equal(0, item.EffectiveDoctorsCount);
+    }
+
+    [Fact]
     public async Task Seed_catalog_includes_user_clinics_manage_once()
     {
         var codes = MilitaryHealthSeedCatalog.DomainPermissions

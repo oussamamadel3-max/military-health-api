@@ -81,6 +81,25 @@ public class UserClinicAssignmentService : IUserClinicAssignmentService
             .Select(g => new { ClinicId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.ClinicId, x => x.Count, cancellationToken);
 
+        var userCenters = _userRepository.QueryUserCenters();
+        var roleAssociations = _userRepository.QueryRoleAssociations();
+        var effectiveCounts = await _userRepository.QueryUserClinicAssignments()
+            .Where(a => a.CenterId == centerId
+                && clinicIds.Contains(a.ClinicId)
+                && a.IsActive
+                && a.User.IsActive)
+            .Where(a => userCenters.Any(uc =>
+                uc.UserId == a.UserId && uc.CenterId == centerId && uc.IsActive))
+            .Where(a => roleAssociations.Any(ura =>
+                ura.UserId == a.UserId
+                && ura.CenterId == centerId
+                && ura.IsActive
+                && ura.Role.IsActive
+                && ura.Role.Name == ClinicDoctorRoleName))
+            .GroupBy(a => a.ClinicId)
+            .Select(g => new { ClinicId = g.Key, Count = g.Select(x => x.UserId).Distinct().Count() })
+            .ToDictionaryAsync(x => x.ClinicId, x => x.Count, cancellationToken);
+
         var items = page.Select(x => new CenterClinicForAssignmentDto
         {
             CenterClinicId = x.CenterClinicId,
@@ -90,7 +109,8 @@ public class UserClinicAssignmentService : IUserClinicAssignmentService
             ClinicNameAr = x.Clinic.NameAr,
             ClinicSortOrder = x.Clinic.SortOrder,
             IsActive = x.IsActive,
-            ActiveDoctorsCount = doctorCounts.GetValueOrDefault(x.ClinicId)
+            ActiveDoctorsCount = doctorCounts.GetValueOrDefault(x.ClinicId),
+            EffectiveDoctorsCount = effectiveCounts.GetValueOrDefault(x.ClinicId)
         }).ToList();
 
         return new PaginatedList<CenterClinicForAssignmentDto>(items, totalCount, pageNumber, pageSize);

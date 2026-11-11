@@ -142,6 +142,7 @@ public class CenterClinicForAssignmentDto
     public short ClinicSortOrder { get; set; }
     public bool IsActive { get; set; }
     public int ActiveDoctorsCount { get; set; }
+    public int EffectiveDoctorsCount { get; set; }
 }
 
 public class AssignUserClinicDto
