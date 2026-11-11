@@ -17,6 +17,9 @@ public static class IamRetention
     public const string ObsoletePermission = "OBSOLETE_PERMISSION";
     public const string PermissionRenamed = "PERMISSION_RENAMED";
 
+    /// <summary>سحب منح افتراضية لم تعد «نعم» في مصفوفة SRS §7.5.</summary>
+    public const string MatrixDefaultWithdrawn = "SRS75_MATRIX_DEFAULT_WITHDRAWN";
+
     /// <summary>
     /// إسناد مركز معلّق عند إنشاء حساب غير نشط؛ يُعاد تفعيله مع تفعيل المستخدم.
     /// يبقي قيد validateUserCenterAssignment سليماً دون ارتباط مركز نشط لحساب معطّل.

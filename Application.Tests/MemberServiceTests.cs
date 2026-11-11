@@ -124,7 +124,7 @@ public class MemberServiceTests
 
         var gate = new Mock<IPermissionGate>();
         gate.Setup(g => g.EnsureLocalAsync(
-                MilitaryHealthPermissions.Members.CreateUpdate,
+                MilitaryHealthPermissions.Members.Create,
                 It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(CenterA);
@@ -498,7 +498,7 @@ public class MemberServiceTests
 
         var gate = new Mock<IPermissionGate>();
         gate.Setup(g => g.EnsureLocalAsync(
-                MilitaryHealthPermissions.Members.CreateUpdate,
+                MilitaryHealthPermissions.Members.Update,
                 It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(CenterA);
@@ -798,7 +798,7 @@ public class MemberServiceTests
         await SeedReferencesAsync(db);
         var gate = new Mock<IPermissionGate>();
         gate.Setup(g => g.EnsureLocalAsync(
-                MilitaryHealthPermissions.Members.CreateUpdate,
+                MilitaryHealthPermissions.Members.Create,
                 CenterB,
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ForbiddenPermissionException());
@@ -1338,7 +1338,12 @@ public class MemberServiceTests
         if (allowCreate)
         {
             gate.Setup(g => g.EnsureLocalAsync(
-                    MilitaryHealthPermissions.Members.CreateUpdate,
+                    MilitaryHealthPermissions.Members.Create,
+                    It.IsAny<Guid?>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(activeCenter);
+            gate.Setup(g => g.EnsureLocalAsync(
+                    MilitaryHealthPermissions.Members.Update,
                     It.IsAny<Guid?>(),
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(activeCenter);
@@ -1346,7 +1351,12 @@ public class MemberServiceTests
         else
         {
             gate.Setup(g => g.EnsureLocalAsync(
-                    MilitaryHealthPermissions.Members.CreateUpdate,
+                    MilitaryHealthPermissions.Members.Create,
+                    It.IsAny<Guid?>(),
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new ForbiddenPermissionException());
+            gate.Setup(g => g.EnsureLocalAsync(
+                    MilitaryHealthPermissions.Members.Update,
                     It.IsAny<Guid?>(),
                     It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new ForbiddenPermissionException());

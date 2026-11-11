@@ -31,7 +31,8 @@ public static class MilitaryHealthSeedCatalog
         new(MilitaryHealthPermissions.Centers.Manage, "إدارة المراكز الصحية", "Centers.Manage"),
         new(MilitaryHealthPermissions.UserCenters.Manage, "إسناد المستخدمين إلى المراكز", "UserCenters.Manage"),
         new(MilitaryHealthPermissions.UserClinics.Manage, "إسناد الأطباء إلى عيادات المراكز", "UserClinics.Manage"),
-        new(MilitaryHealthPermissions.Members.CreateUpdate, "إنشاء ملف المنتسب وتعديله", "Members.CreateUpdate"),
+        new(MilitaryHealthPermissions.Members.Create, "إنشاء ملف المنتسب", "Members.Create"),
+        new(MilitaryHealthPermissions.Members.Update, "تعديل ملف المنتسب", "Members.Update"),
         new(MilitaryHealthPermissions.Members.EditAfterFinalDecision, "تعديل بيانات المنتسب بعد القرار النهائي", "Members.EditAfterFinalDecision"),
         new(MilitaryHealthPermissions.Members.View, "البحث وعرض ملف المنتسب", "Members.View"),
         new(MilitaryHealthPermissions.Members.ViewCentral, "البحث وعرض ملف المنتسب عبر المراكز", "Members.ViewCentral"),
@@ -91,6 +92,24 @@ public static class MilitaryHealthSeedCatalog
         TemplateIamPermissions.Concat(DomainPermissions);
 
     /// <summary>
+    /// علامة داخلية تُزرع معطّلة بعد أول مواءمة. ليست صلاحية تشغيلية ولا تدخل الكتالوج.
+    /// وجودها يمنع إعادة سحب منح أعادها مدير النظام بعد المواءمة.
+    /// </summary>
+    public const string MatrixAlignmentMarker = "System.Srs75MatrixAligned";
+
+    /// <summary>
+    /// منح أدوار كانت «نعم» في المصفوفة السابقة وأصبحت «لا». تُسحب مرة واحدة من قواعد البيانات القائمة.
+    /// </summary>
+    public static readonly (string RoleName, string PermissionName)[] RemovedDefaultRoleGrants =
+    [
+        ("Auditor", SystemPermissions.Dashboard.Read),
+        ("Auditor", SystemPermissions.Dashboard.Export),
+        ("Auditor", MilitaryHealthPermissions.Reports.Local),
+        ("Auditor", MilitaryHealthPermissions.Reports.Central),
+        ("CenterOfficer", MilitaryHealthPermissions.Reports.Central),
+    ];
+
+    /// <summary>
     /// روابط الدور←الصلاحية من عمود «نعم» في SRS §7.5 فقط.
     /// الصفوف التي تتوافق مع صلاحيات القالب فُكّكت إلى رموزها الحالية دون منح صلاحيات حقول القالب من المصفوفة.
     /// </summary>
@@ -140,9 +159,12 @@ public static class MilitaryHealthSeedCatalog
         Grant("SuperAdmin", SystemPermissions.UserManagement.ResetPassword),
         Grant("CenterManager", SystemPermissions.UserManagement.ResetPassword),
 
-        // إنشاء ملف المنتسب وتعديله
-        Grant("ReceptionClerk", MilitaryHealthPermissions.Members.CreateUpdate),
-        Grant("Supervisor", MilitaryHealthPermissions.Members.CreateUpdate),
+        // إنشاء ملف المنتسب
+        Grant("ReceptionClerk", MilitaryHealthPermissions.Members.Create),
+
+        // تعديل ملف المنتسب
+        Grant("ReceptionClerk", MilitaryHealthPermissions.Members.Update),
+        Grant("Supervisor", MilitaryHealthPermissions.Members.Update),
 
         // تعديل بيانات المنتسب بعد القرار النهائي (FR-024 A5) — دور إداري معتمد فقط
         Grant("Supervisor", MilitaryHealthPermissions.Members.EditAfterFinalDecision),
@@ -218,19 +240,15 @@ public static class MilitaryHealthSeedCatalog
         Grant("CenterManager", SystemPermissions.Dashboard.Read, SystemPermissions.Dashboard.Export),
         Grant("Supervisor", SystemPermissions.Dashboard.Read, SystemPermissions.Dashboard.Export),
         Grant("CenterOfficer", SystemPermissions.Dashboard.Read, SystemPermissions.Dashboard.Export),
-        Grant("Auditor", SystemPermissions.Dashboard.Read, SystemPermissions.Dashboard.Export),
 
         // التقارير المحلية
         Grant("SuperAdmin", MilitaryHealthPermissions.Reports.Local),
         Grant("CenterManager", MilitaryHealthPermissions.Reports.Local),
         Grant("Supervisor", MilitaryHealthPermissions.Reports.Local),
         Grant("CenterOfficer", MilitaryHealthPermissions.Reports.Local),
-        Grant("Auditor", MilitaryHealthPermissions.Reports.Local),
 
         // التقارير المركزية والمقارنة بين المراكز
         Grant("SuperAdmin", MilitaryHealthPermissions.Reports.Central),
-        Grant("CenterOfficer", MilitaryHealthPermissions.Reports.Central),
-        Grant("Auditor", MilitaryHealthPermissions.Reports.Central),
 
         // الأرشيف والتقرير الكامل والطباعة
         Grant("SuperAdmin", MilitaryHealthPermissions.Archive.ViewPrint),

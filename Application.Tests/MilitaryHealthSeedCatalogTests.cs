@@ -119,4 +119,31 @@ public class MilitaryHealthSeedCatalogTests
             MilitaryHealthPermissions.Members.ViewCentral,
             MilitaryHealthSeedCatalog.DomainPermissions.Select(p => p.Name));
     }
+
+    [Fact]
+    public void Matrix_matches_updated_srs_7_5_defaults()
+    {
+        var byRole = MilitaryHealthSeedCatalog.GrantsByRoleName();
+        var catalog = MilitaryHealthSeedCatalog.AllCatalogPermissions.Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+
+        Assert.Contains(MilitaryHealthPermissions.Members.Create, catalog);
+        Assert.Contains(MilitaryHealthPermissions.Members.Update, catalog);
+        Assert.DoesNotContain(MilitaryHealthPermissions.Members.CreateUpdate, catalog);
+
+        Assert.Contains(MilitaryHealthPermissions.Members.Create, byRole["ReceptionClerk"]);
+        Assert.Contains(MilitaryHealthPermissions.Members.Update, byRole["ReceptionClerk"]);
+        Assert.DoesNotContain(MilitaryHealthPermissions.Members.Create, byRole["Supervisor"]);
+        Assert.Contains(MilitaryHealthPermissions.Members.Update, byRole["Supervisor"]);
+
+        Assert.DoesNotContain(SystemPermissions.Dashboard.Read, byRole["Auditor"]);
+        Assert.DoesNotContain(SystemPermissions.Dashboard.Export, byRole["Auditor"]);
+        Assert.DoesNotContain(MilitaryHealthPermissions.Reports.Local, byRole["Auditor"]);
+        Assert.DoesNotContain(MilitaryHealthPermissions.Reports.Central, byRole["Auditor"]);
+        Assert.Contains(SystemPermissions.AuditLog.Read, byRole["Auditor"]);
+
+        Assert.DoesNotContain(MilitaryHealthPermissions.Reports.Central, byRole["CenterOfficer"]);
+        Assert.Contains(MilitaryHealthPermissions.Reports.Local, byRole["CenterOfficer"]);
+        Assert.Contains(SystemPermissions.Dashboard.Read, byRole["CenterOfficer"]);
+        Assert.Contains(MilitaryHealthPermissions.Reports.Central, byRole["SuperAdmin"]);
+    }
 }

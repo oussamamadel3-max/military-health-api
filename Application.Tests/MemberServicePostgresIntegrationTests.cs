@@ -287,7 +287,12 @@ public class MemberServicePostgresIntegrationTests
     {
         var gate = new Mock<IPermissionGate>();
         gate.Setup(g => g.EnsureLocalAsync(
-                MilitaryHealthPermissions.Members.CreateUpdate,
+                MilitaryHealthPermissions.Members.Create,
+                It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(activeCenter);
+        gate.Setup(g => g.EnsureLocalAsync(
+                MilitaryHealthPermissions.Members.Update,
                 It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(activeCenter);

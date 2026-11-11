@@ -188,7 +188,7 @@ public class MemberService : IMemberService
         CancellationToken cancellationToken = default)
     {
         var centerId = await _permissionGate.EnsureLocalAsync(
-            MilitaryHealthPermissions.Members.CreateUpdate,
+            MilitaryHealthPermissions.Members.Create,
             clientCenterId,
             cancellationToken);
 
@@ -308,7 +308,7 @@ public class MemberService : IMemberService
         CancellationToken cancellationToken = default)
     {
         var centerId = await _permissionGate.EnsureLocalAsync(
-            MilitaryHealthPermissions.Members.CreateUpdate,
+            MilitaryHealthPermissions.Members.Update,
             clientCenterId,
             cancellationToken);
 

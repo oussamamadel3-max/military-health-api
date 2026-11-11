@@ -224,6 +224,142 @@ namespace Infrastructure.Persistence
                 await context.SaveChangesAsync();
             }
 
+            /// <summary>
+            /// يفكك Members.CreateUpdate إلى إنشاء وتعديل. المشرف يحتفظ بالتعديل فقط؛ بقية الأدوار التي كانت تملك المفتاح الموحّد تحتفظ بالإنشاء أيضاً. الصلاحية المباشرة القديمة تُنسخ إلى المفتاحين.
+            /// </summary>
+            async Task SplitMembersCreateUpdateAsync(string actorId)
+            {
+                var oldPerm = await context.Permissions
+                    .FirstOrDefaultAsync(p => p.Name == MilitaryHealthPermissions.Members.CreateUpdate);
+                if (oldPerm == null)
+                    return;
+
+                var createName = MilitaryHealthPermissions.Members.Create;
+                var updateName = MilitaryHealthPermissions.Members.Update;
+                var roleLinks = await context.RolePermissions
+                    .Where(rp => rp.PermissionId == oldPerm.Id && rp.IsActive)
+                    .ToListAsync();
+                var affectedRoleIds = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var link in roleLinks)
+                {
+                    var roleName = await roleManager.Roles
+                        .Where(r => r.Id == link.RoleId)
+                        .Select(r => r.Name)
+                        .FirstOrDefaultAsync();
+                    await EnsurePermissionsAssignedToRoleAsync(link.RoleId, actorId, new[] { updateName });
+                    if (!string.Equals(roleName, "Supervisor", StringComparison.Ordinal))
+                        await EnsurePermissionsAssignedToRoleAsync(link.RoleId, actorId, new[] { createName });
+                    IamRetention.Revoke(link, actorId, IamRetention.PermissionRenamed);
+                    affectedRoleIds.Add(link.RoleId);
+                }
+
+                var userLinks = await context.UserPermissions
+                    .Where(up => up.PermissionId == oldPerm.Id && up.IsActive)
+                    .ToListAsync();
+                var affectedUserIds = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var link in userLinks)
+                {
+                    await EnsureDirectPermissionCopyAsync(link, createName, actorId);
+                    await EnsureDirectPermissionCopyAsync(link, updateName, actorId);
+                    IamRetention.Revoke(link, actorId, IamRetention.PermissionRenamed);
+                    affectedUserIds.Add(link.UserId);
+                }
+
+                if (oldPerm.IsActive)
+                    IamRetention.DeactivatePermission(oldPerm);
+                await context.SaveChangesAsync();
+
+                foreach (var roleId in affectedRoleIds)
+                {
+                    await SecurityStampHelper.InvalidateUsersWithRoleAsync(
+                        userRepository, refreshTokens, unitOfWork, userManager, roleId);
+                }
+
+                foreach (var userId in affectedUserIds)
+                {
+                    await SecurityStampHelper.InvalidateUserTokensAsync(
+                        userRepository, refreshTokens, unitOfWork, userManager, userId);
+                }
+            }
+
+            async Task EnsureDirectPermissionCopyAsync(UserPermission source, string permissionName, string actorId)
+            {
+                var permission = await context.Permissions.FirstAsync(p => p.Name == permissionName && p.IsActive);
+                var existing = await context.UserPermissions
+                    .Where(up => up.UserId == source.UserId
+                        && up.PermissionId == permission.Id
+                        && up.CenterId == source.CenterId)
+                    .ToListAsync();
+                if (existing.Any(up => up.IsActive))
+                    return;
+
+                var revoked = existing.OrderByDescending(up => up.RevokedAt).FirstOrDefault();
+                if (revoked != null)
+                    IamRetention.Reactivate(revoked, actorId, DateTimeOffset.UtcNow);
+                else
+                {
+                    context.UserPermissions.Add(new UserPermission
+                    {
+                        UserId = source.UserId,
+                        PermissionId = permission.Id,
+                        CenterId = source.CenterId,
+                        GrantedByUserId = actorId,
+                        GrantedAt = DateTimeOffset.UtcNow,
+                        IsActive = true
+                    });
+                }
+            }
+
+            /// <summary>
+            /// يسحب مرة واحدة المنح الافتراضية التي أصبحت «لا» في SRS §7.5، ثم يكتب علامة حتى لا يُلغى منح لاحق من مدير النظام.
+            /// </summary>
+            async Task WithdrawRemovedMatrixDefaultsOnceAsync(
+                string actorId,
+                IReadOnlyDictionary<string, Role> roles)
+            {
+                var markerName = MilitaryHealthSeedCatalog.MatrixAlignmentMarker;
+                if (await context.Permissions.AnyAsync(p => p.Name == markerName))
+                    return;
+
+                var affectedRoleIds = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var (roleName, permissionName) in MilitaryHealthSeedCatalog.RemovedDefaultRoleGrants)
+                {
+                    if (!roles.TryGetValue(roleName, out var role))
+                        continue;
+
+                    var permissionId = await context.Permissions
+                        .Where(p => p.Name == permissionName)
+                        .Select(p => (Guid?)p.Id)
+                        .FirstOrDefaultAsync();
+                    if (permissionId == null)
+                        continue;
+
+                    var links = await context.RolePermissions
+                        .Where(rp => rp.RoleId == role.Id && rp.PermissionId == permissionId && rp.IsActive)
+                        .ToListAsync();
+                    foreach (var link in links)
+                    {
+                        IamRetention.Revoke(link, actorId, IamRetention.MatrixDefaultWithdrawn);
+                        affectedRoleIds.Add(role.Id);
+                    }
+                }
+
+                context.Permissions.Add(new Permission
+                {
+                    Id = Guid.NewGuid(),
+                    Name = markerName,
+                    Description = "علامة داخلية: تمت مواءمة المنح الافتراضية مع SRS 7.5. ليست صلاحية تشغيلية.",
+                    IsActive = false
+                });
+                await context.SaveChangesAsync();
+
+                foreach (var roleId in affectedRoleIds)
+                {
+                    await SecurityStampHelper.InvalidateUsersWithRoleAsync(
+                        userRepository, refreshTokens, unitOfWork, userManager, roleId);
+                }
+            }
+
             async Task EnsurePermissionsAndAssignToUserAsync(string userId, IEnumerable<(string Name, string? Desc)> list)
             {
                 foreach (var (name, desc) in list)
@@ -398,6 +534,7 @@ namespace Infrastructure.Persistence
 
             await MigratePermissionNameAsync("ReportsAuditLogs.Export", "AuditLog.Export", "تصدير تقرير السجل", superAdmin.Id);
             await MigratePermissionNameAsync("ReportsDashboard.Export", "Dashboard.Export", "تصدير تقرير لوحة التحكم", superAdmin.Id);
+            await SplitMembersCreateUpdateAsync(superAdmin.Id);
 
             // صلاحيات القالب تبقى على دور SuperAdmin وعلى إسناده المباشر الحالي دون توسيعها إلى صلاحيات المجال
             await EnsurePermissionsAssignedToRoleAsync(
@@ -405,7 +542,7 @@ namespace Infrastructure.Persistence
                 superAdmin.Id,
                 templateBootstrapPermissions.Select(p => p.Name));
 
-            // روابط Role–Permission من مصفوفة SRS §7.5 فقط (إضافة/إعادة تفعيل الناقص؛ بلا حذف روابط قائمة)
+            // روابط Role–Permission من مصفوفة SRS §7.5 (إضافة/إعادة تفعيل الناقص). سحب المنح الملغاة يتم مرة واحدة أدناه.
             var grantsByRole = MilitaryHealthSeedCatalog.GrantsByRoleName();
             foreach (var (roleName, permissionNames) in grantsByRole)
             {
@@ -414,6 +551,8 @@ namespace Infrastructure.Persistence
 
                 await EnsurePermissionsAssignedToRoleAsync(role.Id, superAdmin.Id, permissionNames);
             }
+
+            await WithdrawRemovedMatrixDefaultsOnceAsync(superAdmin.Id, seededRoles);
 
             // مزامنة UserPermissions للمستخدم bootstrap مع كتالوج القالب فقط
             await EnsurePermissionsAndAssignToUserAsync(superAdmin.Id, templateBootstrapPermissions);

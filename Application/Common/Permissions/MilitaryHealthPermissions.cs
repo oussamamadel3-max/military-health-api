@@ -23,6 +23,13 @@ public static class MilitaryHealthPermissions
 
     public static class Members
     {
+        /// <summary>إنشاء ملف المنتسب في المركز النشط (SRS §7.5).</summary>
+        public const string Create = "Members.Create";
+
+        /// <summary>تعديل ملف المنتسب في المركز النشط (SRS §7.5).</summary>
+        public const string Update = "Members.Update";
+
+        /// <summary>مفتاح قديم موحّد. يُرحَّل إلى <see cref="Create"/> و<see cref="Update"/> ثم يُعطَّل.</summary>
         public const string CreateUpdate = "Members.CreateUpdate";
         /// <summary>تعديل البيانات التعريفية للمنتسب بعد صدور قرار نهائي معتمد (FR-024 A5).</summary>
         public const string EditAfterFinalDecision = "Members.EditAfterFinalDecision";

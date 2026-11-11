@@ -215,7 +215,7 @@ public class MembersController : ControllerBase
 
     /// <summary>إنشاء ملف منتسب في المركز النشط.</summary>
     [HttpPost]
-    [AuthorizeOperation(MilitaryHealthPermissions.Members.CreateUpdate, OperationScope.Local)]
+    [AuthorizeOperation(MilitaryHealthPermissions.Members.Create, OperationScope.Local)]
     public async Task<IResult> Create([FromBody] CreateMemberRequest request, CancellationToken cancellationToken = default)
     {
         var created = await _members.CreateAsync(
@@ -227,7 +227,7 @@ public class MembersController : ControllerBase
 
     /// <summary>تعديل بيانات منتسب ضمن المركز النشط.</summary>
     [HttpPut("{memberId:guid}")]
-    [AuthorizeOperation(MilitaryHealthPermissions.Members.CreateUpdate, OperationScope.Local)]
+    [AuthorizeOperation(MilitaryHealthPermissions.Members.Update, OperationScope.Local)]
     public async Task<IResult> Update(
         Guid memberId,
         [FromBody] UpdateMemberRequest request,
