@@ -770,6 +770,8 @@ public class RoleAssignmentPathTests
         revoked.RevokeReason = IamRetention.CenterRevoked;
         await db.SaveChangesAsync();
 
+        // النطاق المركزي للقائمة يتطلب UserManagement.Read فعلياً (BR-060)، لا اسم الدور وحده.
+        await SeedIamKeeperAsync(db);
         await SeedRoleLinkAsync(db, "actor-1", "SuperAdmin", null);
         var central = CreateUserService(db, central: true);
         var narrowed = await central.Service.GetUsersListAsync(1, 10, centerId: CenterA);
@@ -893,7 +895,8 @@ public class RoleAssignmentPathTests
             await db.SaveChangesAsync();
         }
 
-        foreach (var permissionName in SystemPermissions.UserManagementWrite
+        foreach (var permissionName in new[] { SystemPermissions.UserManagement.Read }
+                     .Concat(SystemPermissions.UserManagementWrite)
                      .Concat(SystemPermissions.RoleManagementWrite)
                      .Concat(SystemPermissions.PermissionManagementWrite)
                      .Distinct(StringComparer.OrdinalIgnoreCase))

@@ -715,6 +715,42 @@ public class UserClinicAssignmentTests
             AssignedAt = DateTimeOffset.UtcNow
         });
         await db.SaveChangesAsync();
+
+        foreach (var permissionName in new[]
+                 {
+                     SystemPermissions.UserManagement.Read,
+                     MilitaryHealthPermissions.UserClinics.Manage,
+                     MilitaryHealthPermissions.UserCenters.Manage
+                 })
+        {
+            var perm = await db.Permissions.FirstOrDefaultAsync(p => p.Name == permissionName);
+            if (perm is null)
+            {
+                perm = new Permission
+                {
+                    Id = Guid.NewGuid(),
+                    Name = permissionName,
+                    Description = permissionName,
+                    IsActive = true
+                };
+                db.Permissions.Add(perm);
+                await db.SaveChangesAsync();
+            }
+
+            if (!await db.RolePermissions.AnyAsync(rp =>
+                    rp.RoleId == roleId && rp.PermissionId == perm.Id && rp.IsActive))
+            {
+                db.RolePermissions.Add(new RolePermission
+                {
+                    RoleId = roleId,
+                    PermissionId = perm.Id,
+                    IsActive = true,
+                    GrantedByUserId = actorId,
+                    GrantedAt = DateTimeOffset.UtcNow
+                });
+                await db.SaveChangesAsync();
+            }
+        }
     }
 
     private static async Task SeedLocalManagerRoleAsync(AppDbContext db, string userId, Guid centerId)

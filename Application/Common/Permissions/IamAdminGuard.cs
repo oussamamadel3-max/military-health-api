@@ -97,6 +97,30 @@ public static class IamAdminGuard
         IEnumerable<string?> requestedPermissionNames,
         IReadOnlyCollection<string> actorPermissions)
     {
+        EnsureWithinActorPermissionDelegation(
+            requestedPermissionNames,
+            actorPermissions,
+            "لا يمكن منح صلاحيات تتجاوز حدود تفويضك");
+    }
+
+    /// <summary>
+    /// يمنع سحب صلاحيات مباشرة خارج حدود تفويض المنفّذ (NFR-018 / BR-028).
+    /// </summary>
+    public static void EnsureRevocableWithinActorPermissions(
+        IEnumerable<string?> requestedPermissionNames,
+        IReadOnlyCollection<string> actorPermissions)
+    {
+        EnsureWithinActorPermissionDelegation(
+            requestedPermissionNames,
+            actorPermissions,
+            "لا يمكن سحب صلاحيات تتجاوز حدود تفويضك");
+    }
+
+    private static void EnsureWithinActorPermissionDelegation(
+        IEnumerable<string?> requestedPermissionNames,
+        IReadOnlyCollection<string> actorPermissions,
+        string messagePrefix)
+    {
         var actorSet = actorPermissions.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var excess = requestedPermissionNames
             .Where(p => !string.IsNullOrWhiteSpace(p))
@@ -107,7 +131,7 @@ public static class IamAdminGuard
 
         if (excess.Count > 0)
             throw new ForbiddenPermissionException(
-                $"لا يمكن منح صلاحيات تتجاوز حدود تفويضك: {string.Join(", ", excess)}");
+                $"{messagePrefix}: {string.Join(", ", excess)}");
     }
 
     /// <summary>

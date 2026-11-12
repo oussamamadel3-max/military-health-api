@@ -55,7 +55,7 @@ public sealed class UserAdminOperationsService : IUserAdminOperationsService
 
         var actorId = _currentUser.UserId ?? string.Empty;
         await UserManagementScopeGuard.EnsureCanManageTargetAsync(
-            _access, _users, actorId, userId, cancellationToken);
+            _access, _users, actorId, userId, SystemPermissions.AuditLog.Read, cancellationToken);
 
         if (pageNumber < 1) pageNumber = 1;
         if (pageSize < 1) pageSize = 20;

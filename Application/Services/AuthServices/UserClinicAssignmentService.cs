@@ -246,7 +246,8 @@ public class UserClinicAssignmentService : IUserClinicAssignmentService
             .ToListAsync(cancellationToken);
 
         var actorId = _currentUserService.UserId ?? string.Empty;
-        if (!await UserManagementScopeGuard.ActorHasUnrestrictedScopeAsync(_access, actorId, cancellationToken))
+        if (!await UserManagementScopeGuard.ActorHasCentralOperationScopeAsync(
+                _access, actorId, MilitaryHealthPermissions.UserClinics.Manage, cancellationToken))
         {
             var actorCenters = await _userRepository.QueryUserCenters()
                 .Where(uc => uc.UserId == actorId && uc.IsActive)
@@ -441,31 +442,24 @@ public class UserClinicAssignmentService : IUserClinicAssignmentService
     }
 
     /// <summary>
-    /// تجاوز الربط بالجلسة فقط عند امتلاك <see cref="MilitaryHealthPermissions.UserClinics.Manage"/> ضمن سياق مركزي
-  /// (مثل SuperAdmin)، وليس لمجرد وجود دور مركزي آخر بلا هذه الصلاحية.
+    /// تجاوز الربط بالجلسة فقط عند امتلاك UserClinics.Manage ضمن سياق مركزي، وليس لمجرد وجود دور مركزي آخر.
     /// </summary>
-    private async Task<bool> ActorHasCentralClinicManageAsync(
+    private Task<bool> ActorHasCentralClinicManageAsync(
         string actorUserId,
         CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(actorUserId))
-            return false;
-
-        var snapshot = await _access.LoadAsync(actorUserId, cancellationToken);
-        var names = CenterPermissionEvaluator.Resolve(
-            snapshot.Roles,
-            snapshot.Directs,
-            snapshot.Links,
-            activeCenterId: null);
-
-        return names.Contains(MilitaryHealthPermissions.UserClinics.Manage, StringComparer.OrdinalIgnoreCase);
-    }
+        => UserManagementScopeGuard.ActorHasCentralOperationScopeAsync(
+            _access, actorUserId, MilitaryHealthPermissions.UserClinics.Manage, cancellationToken);
 
     private async Task EnsureCanManageTargetAsync(string targetUserId, CancellationToken cancellationToken)
     {
         var actorId = _currentUserService.UserId ?? string.Empty;
         await UserManagementScopeGuard.EnsureCanManageTargetAsync(
-            _access, _userRepository, actorId, targetUserId, cancellationToken);
+            _access,
+            _userRepository,
+            actorId,
+            targetUserId,
+            MilitaryHealthPermissions.UserClinics.Manage,
+            cancellationToken);
     }
 
     private async Task<User> RequireUserAsync(string userId)

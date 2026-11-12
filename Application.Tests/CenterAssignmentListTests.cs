@@ -41,7 +41,12 @@ public class CenterAssignmentListTests
 
         await Assert.ThrowsAsync<ForbiddenPermissionException>(() =>
             UserManagementScopeGuard.EnsureCanViewCenterDataAsync(
-                access, centers, "actor-1", CenterB, new TestCenter(CenterA, false)));
+                access,
+                centers,
+                "actor-1",
+                CenterB,
+                new TestCenter(CenterA, false),
+                SystemPermissions.UserManagement.Read));
     }
 
     [Fact]
@@ -398,7 +403,8 @@ public class CenterAssignmentListTests
             AssignedAt = DateTimeOffset.UtcNow
         });
         await db.SaveChangesAsync();
-        foreach (var permissionName in SystemPermissions.UserManagementWrite
+        foreach (var permissionName in new[] { SystemPermissions.UserManagement.Read }
+            .Concat(SystemPermissions.UserManagementWrite)
             .Concat(SystemPermissions.RoleManagementWrite)
             .Concat(SystemPermissions.PermissionManagementWrite)
             .Distinct(StringComparer.OrdinalIgnoreCase))

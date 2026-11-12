@@ -4,15 +4,30 @@ using Application.Interfaces.Services;
 
 namespace Application.Common.Security;
 
+/// <summary>
+/// حراس نطاق إدارة المستخدمين والإسنادات.
+/// النطاق غير المقيد يُمنح فقط عند امتلاك <b>صلاحية العملية نفسها</b> بنطاق مركزي فعّال (BR-048 / BR-057 / NFR-018).
+/// </summary>
 public static class UserManagementScopeGuard
 {
-    public static async Task<bool> ActorHasUnrestrictedScopeAsync(
+    /// <summary>
+    /// هل يملك المنفّذ الصلاحية المحددة ضمن سياق مركزي (CenterId فارغ على الدور أو المنح المباشر)؟
+    /// </summary>
+    public static async Task<bool> ActorHasCentralOperationScopeAsync(
         IAccessContextRepository access,
         string actorUserId,
+        string operationPermission,
         CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(actorUserId) || string.IsNullOrWhiteSpace(operationPermission))
+            return false;
+
         var snapshot = await access.LoadAsync(actorUserId, cancellationToken);
-        return CenterPermissionEvaluator.HasCentralAuthority(snapshot.Roles, snapshot.Directs);
+        return CenterPermissionEvaluator.HasCentralOperationPermission(
+            snapshot.Roles,
+            snapshot.Directs,
+            snapshot.Links,
+            operationPermission);
     }
 
     public static async Task EnsureCanManageTargetAsync(
@@ -20,12 +35,16 @@ public static class UserManagementScopeGuard
         IUserRepository users,
         string actorUserId,
         string targetUserId,
+        string operationPermission,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(actorUserId))
             throw new ForbiddenPermissionException("لا يمكنك إدارة مستخدم خارج نطاق تفويضك.");
 
-        if (await ActorHasUnrestrictedScopeAsync(access, actorUserId, cancellationToken))
+        if (string.IsNullOrWhiteSpace(operationPermission))
+            throw new ForbiddenPermissionException("لا يمكنك إدارة مستخدم خارج نطاق تفويضك.");
+
+        if (await ActorHasCentralOperationScopeAsync(access, actorUserId, operationPermission, cancellationToken))
             return;
 
         var targetSnapshot = await access.LoadAsync(targetUserId, cancellationToken);
@@ -38,17 +57,19 @@ public static class UserManagementScopeGuard
 
     /// <summary>
     /// مدير المركز لا يسند مركزاً خارج مراكزه الفعّالة (FR-019 / BR-048).
+    /// التجاوز المركزي يتطلب <paramref name="operationPermission"/> بنطاق مركزي (عادة UserCenters.Manage).
     /// </summary>
     public static async Task EnsureCanAssignCenterAsync(
         IAccessContextRepository access,
         string actorUserId,
         Guid centerId,
+        string operationPermission,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(actorUserId))
             throw new ForbiddenPermissionException("لا يمكنك إسناد مركز خارج نطاق تفويضك.");
 
-        if (await ActorHasUnrestrictedScopeAsync(access, actorUserId, cancellationToken))
+        if (await ActorHasCentralOperationScopeAsync(access, actorUserId, operationPermission, cancellationToken))
             return;
 
         if (!await access.IsActivelyAssignedAsync(actorUserId, centerId, cancellationToken))
@@ -56,18 +77,19 @@ public static class UserManagementScopeGuard
     }
 
     /// <summary>
-    /// الإسناد المركزي (CenterId فارغ) يتطلب سلطة مركزية للمنفّذ (BR-048).
+    /// الإسناد المركزي (CenterId فارغ) يتطلب صلاحية العملية بنطاق مركزي للمنفّذ (BR-048).
     /// </summary>
     public static async Task EnsureCanAssignRoleScopeAsync(
         IAccessContextRepository access,
         string actorUserId,
         Guid? roleCenterId,
+        string operationPermission,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(actorUserId))
             throw new ForbiddenPermissionException("لا يمكنك إسناد دور خارج نطاق تفويضك.");
 
-        if (await ActorHasUnrestrictedScopeAsync(access, actorUserId, cancellationToken))
+        if (await ActorHasCentralOperationScopeAsync(access, actorUserId, operationPermission, cancellationToken))
             return;
 
         if (roleCenterId is null)
@@ -86,6 +108,7 @@ public static class UserManagementScopeGuard
         string actorUserId,
         Guid centerId,
         ICurrentCenterService currentCenter,
+        string operationPermission,
         CancellationToken cancellationToken = default)
     {
         if (centerId == Guid.Empty)
@@ -94,7 +117,7 @@ public static class UserManagementScopeGuard
         if (string.IsNullOrWhiteSpace(actorUserId))
             throw new ForbiddenPermissionException("لا يمكنك عرض بيانات مركز خارج نطاق تفويضك.");
 
-        if (await ActorHasUnrestrictedScopeAsync(access, actorUserId, cancellationToken))
+        if (await ActorHasCentralOperationScopeAsync(access, actorUserId, operationPermission, cancellationToken))
         {
             _ = await centers.GetByIdAsync(centerId, asNoTracking: true, cancellationToken)
                 ?? throw new MedicalCenterNotFoundException();

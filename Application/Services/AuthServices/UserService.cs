@@ -117,17 +117,20 @@ public class UserService : IUserService
             MilitaryHealthPermissions.UserCenters.Manage);
 
         var actorId = AssignmentStamp.RequireActor(_currentUserService.UserId);
-        var actorIsCentral = await UserManagementScopeGuard.ActorHasUnrestrictedScopeAsync(_access, actorId);
+        var actorAssignsRolesCentrally = await UserManagementScopeGuard.ActorHasCentralOperationScopeAsync(
+            _access, actorId, SystemPermissions.UserManagement.AssignRoles);
+        var actorCreatesCentrally = await UserManagementScopeGuard.ActorHasCentralOperationScopeAsync(
+            _access, actorId, SystemPermissions.UserManagement.Create);
         var rolesFromDb = await LoadRequestedRolesAsync(rawRoles);
         foreach (var role in rolesFromDb)
-            AssignableRolePolicy.EnsureAssignable(actorIsCentral, role.Name, role.IsActive, role.Scope);
+            AssignableRolePolicy.EnsureAssignable(actorAssignsRolesCentrally, role.Name, role.IsActive, role.Scope);
 
         var roleScopes = rolesFromDb.Select(r => r.Scope).ToList();
         if (roleScopes.Any(AssignableRolePolicy.IsCentralScope) &&
             roleScopes.Any(s => !AssignableRolePolicy.IsCentralScope(s)))
             throw new InvalidUserDataException("لا يمكن الجمع بين دور مركزي ودور مقيد بمركز في الطلب نفسه.");
 
-        var membershipCenterId = await ResolveMembershipCenterAsync(actorIsCentral, createdUser.centerId, actorId);
+        var membershipCenterId = await ResolveMembershipCenterAsync(actorCreatesCentrally, createdUser.centerId, actorId);
 
         using var tx = await _unitOfWork.BeginTransactionAsync();
         try
@@ -220,7 +223,7 @@ public class UserService : IUserService
             required.Add(SystemPermissions.UserManagement.ChangeStatus);
 
         _permissionGate.EnsureAll(required.ToArray());
-        await EnsureCanManageTargetAsync(user.Id);
+        await EnsureCanManageTargetAsync(user.Id, SystemPermissions.UserManagement.Edit);
 
         if (statusChanging && updatedUser.IsActive == false)
         {
@@ -291,7 +294,7 @@ public class UserService : IUserService
         var user = await _userManager.FindByIdAsync(userId)
             ?? throw new UserNotFoundException(userId);
 
-        await EnsureCanManageTargetAsync(user.Id);
+        await EnsureCanManageTargetAsync(user.Id, SystemPermissions.UserManagement.Delete);
 
         await CenterManagerContinuityGuard.EnsureDeactivatingUserAsync(
             _userRepository, _roleRepository, _centers, user.Id);
@@ -449,7 +452,7 @@ public class UserService : IUserService
             .FirstOrDefaultAsync(u => u.Id == id)
             ?? throw new UserNotFoundException(id);
 
-        await EnsureCanManageTargetAsync(user.Id);
+        await EnsureCanManageTargetAsync(user.Id, SystemPermissions.UserManagement.Read);
 
         var roleAssociations = await _userRepository.QueryRoleAssociations()
             .Where(ura => ura.UserId == user.Id)
@@ -504,7 +507,7 @@ public class UserService : IUserService
         var required = new List<string> { SystemPermissions.UserManagement.Edit };
         if (statusChanging) required.Add(SystemPermissions.UserManagement.ChangeStatus);
         _permissionGate.EnsureAll(required.ToArray());
-        await EnsureCanManageTargetAsync(user.Id);
+        await EnsureCanManageTargetAsync(user.Id, SystemPermissions.UserManagement.Edit);
 
         if (dto.roles != null || dto.centerId.HasValue)
             throw new InvalidUserDataException(ProfileDoesNotChangeAssignmentsMessage);
@@ -625,7 +628,7 @@ public class UserService : IUserService
         var user = await _userRepository.GetByIdAsync(id)
             ?? throw new UserNotFoundException(id);
 
-        await EnsureCanManageTargetAsync(user.Id);
+        await EnsureCanManageTargetAsync(user.Id, SystemPermissions.UserManagement.ChangeStatus);
 
         if (user.IsActive && !request.isActive)
         {
@@ -758,7 +761,7 @@ public class UserService : IUserService
         var user = await _userManager.FindByIdAsync(request.UserId)
             ?? throw new UserNotFoundException(request.UserId);
 
-        await EnsureCanManageTargetAsync(user.Id);
+        await EnsureCanManageTargetAsync(user.Id, SystemPermissions.UserManagement.ResetPassword);
 
         if (!user.IsActive)
             throw new InvalidUserDataException("الحساب معطّل. يجب تفعيل الحساب قبل إعادة تعيين كلمة المرور.");
@@ -799,7 +802,7 @@ public class UserService : IUserService
         var user = await _userManager.FindByIdAsync(dto.UserId)
             ?? throw new UserNotFoundException(dto.UserId);
 
-        await EnsureCanManageTargetAsync(user.Id);
+        await EnsureCanManageTargetAsync(user.Id, SystemPermissions.UserManagement.AssignRoles);
 
         var requested = MinimumActiveRoleGuard.CollectTokens(dto.RoleIds, dto.RoleNames);
         MinimumActiveRoleGuard.EnsureRequestContainsRoleToken(requested);
@@ -835,7 +838,7 @@ public class UserService : IUserService
         var user = await _userManager.FindByIdAsync(dto.UserId)
             ?? throw new UserNotFoundException(dto.UserId);
 
-        await EnsureCanManageTargetAsync(user.Id);
+        await EnsureCanManageTargetAsync(user.Id, SystemPermissions.UserManagement.AssignPermissions);
         var actorId = AssignmentStamp.RequireActor(_currentUserService.UserId);
         var scopeCenterId = await ResolveDirectPermissionScopeAsync(actorId, user.Id, dto.CenterId);
 
@@ -865,19 +868,29 @@ public class UserService : IUserService
             finalPermissions.Select(p => p.Name),
             message => new InvalidUserDataException(message));
 
+        var actorPermissions = _permissionGate.GetPermissions();
         var grantingNames = (await _permissionRepository.GetActiveByIdsAsync(toAdd))
             .Select(p => p.Name);
-        IamAdminGuard.EnsureAssignableWithinActorPermissions(grantingNames, _permissionGate.GetPermissions());
+        IamAdminGuard.EnsureAssignableWithinActorPermissions(grantingNames, actorPermissions);
+
+        List<UserPermission>? removeRows = null;
+        if (toRemove.Count > 0)
+        {
+            removeRows = await _userRepository.QueryUserPermissions(asNoTracking: false)
+                .Include(up => up.Permission)
+                .Where(up => up.UserId == user.Id && up.IsActive && up.CenterId == scopeCenterId && toRemove.Contains(up.PermissionId))
+                .ToListAsync();
+
+            IamAdminGuard.EnsureRevocableWithinActorPermissions(
+                removeRows.Select(r => r.Permission?.Name),
+                actorPermissions);
+        }
 
         using var tx = await _unitOfWork.BeginTransactionAsync();
         try
         {
-            if (toRemove.Any())
+            if (removeRows is { Count: > 0 })
             {
-                var removeRows = await _userRepository.QueryUserPermissions(asNoTracking: false)
-                    .Where(up => up.UserId == user.Id && up.IsActive && up.CenterId == scopeCenterId && toRemove.Contains(up.PermissionId))
-                    .ToListAsync();
-
                 RevokeDirectPermissions(removeRows);
                 await _unitOfWork.SaveChangesAsync();
             }
@@ -917,7 +930,7 @@ public class UserService : IUserService
         var user = await _userManager.FindByIdAsync(dto.UserId)
             ?? throw new UserNotFoundException(dto.UserId);
 
-        await EnsureCanManageTargetAsync(user.Id);
+        await EnsureCanManageTargetAsync(user.Id, SystemPermissions.UserManagement.AssignPermissions);
         var actorId = AssignmentStamp.RequireActor(_currentUserService.UserId);
         var scopeCenterId = await ResolveDirectPermissionScopeAsync(actorId, user.Id, dto.CenterId);
 
@@ -1033,7 +1046,7 @@ public class UserService : IUserService
         var user = await _userManager.FindByIdAsync(dto.UserId)
             ?? throw new UserNotFoundException(dto.UserId);
 
-        await EnsureCanManageTargetAsync(user.Id);
+        await EnsureCanManageTargetAsync(user.Id, SystemPermissions.UserManagement.RemoveFieldPermissions);
 
         var userFieldPermissions = (await _userRepository.GetUserFieldPermissionsAsync(dto.UserId))
             .Where(ufp => dto.FieldPermissionIds.Contains(ufp.FieldPermissionId))
@@ -1061,7 +1074,7 @@ public class UserService : IUserService
         var user = await _userManager.FindByIdAsync(userId)
             ?? throw new UserNotFoundException(userId);
 
-        await EnsureCanManageTargetAsync(user.Id);
+        await EnsureCanManageTargetAsync(user.Id, SystemPermissions.UserManagement.Edit);
 
         if (updatedUser.RoleIds != null || updatedUser.CenterId.HasValue)
             throw new InvalidUserDataException(ProfileDoesNotChangeAssignmentsMessage);
@@ -1096,15 +1109,16 @@ public class UserService : IUserService
     }
     #endregion
 
-    private async Task EnsureCanManageTargetAsync(string targetUserId)
+    private async Task EnsureCanManageTargetAsync(string targetUserId, string operationPermission)
     {
         var actorId = _currentUserService.UserId ?? string.Empty;
         await UserManagementScopeGuard.EnsureCanManageTargetAsync(
-            _access, _userRepository, actorId, targetUserId);
+            _access, _userRepository, actorId, targetUserId, operationPermission);
     }
 
     /// <summary>
     /// يضيّق القائمة بإسناد مركز فعّال قبل العد. المدير المحلي يُقبل فقط لمركز الجلسة.
+    /// التجاوز المركزي يتطلب UserManagement.Read بنطاق مركزي.
     /// </summary>
     private async Task<IQueryable<User>> ApplyActiveCenterFilterAsync(IQueryable<User> query, Guid centerId)
     {
@@ -1112,7 +1126,8 @@ public class UserService : IUserService
             throw new InvalidUserDataException("معرف المركز غير صالح.");
 
         var actorId = _currentUserService.UserId ?? string.Empty;
-        var unrestricted = await UserManagementScopeGuard.ActorHasUnrestrictedScopeAsync(_access, actorId);
+        var unrestricted = await UserManagementScopeGuard.ActorHasCentralOperationScopeAsync(
+            _access, actorId, SystemPermissions.UserManagement.Read);
         if (!unrestricted)
         {
             if (_currentCenter.IsCentralContext || _currentCenter.CenterId is not Guid active || active != centerId)
@@ -1136,7 +1151,8 @@ public class UserService : IUserService
     private async Task<IQueryable<User>> BuildManageableUsersQueryAsync()
     {
         var actorId = _currentUserService.UserId ?? string.Empty;
-        if (await UserManagementScopeGuard.ActorHasUnrestrictedScopeAsync(_access, actorId))
+        if (await UserManagementScopeGuard.ActorHasCentralOperationScopeAsync(
+                _access, actorId, SystemPermissions.UserManagement.Read))
             return _userRepository.QueryUsers();
 
         return _userRepository.QueryUsersManageableByLocalActor(actorId);
@@ -1306,7 +1322,8 @@ public class UserService : IUserService
             if (requestedCenterId == Guid.Empty)
                 throw new InvalidUserDataException("معرف المركز غير صالح.");
 
-            var actorIsCentral = await UserManagementScopeGuard.ActorHasUnrestrictedScopeAsync(_access, actorId);
+            var actorIsCentral = await UserManagementScopeGuard.ActorHasCentralOperationScopeAsync(
+                _access, actorId, SystemPermissions.UserManagement.AssignPermissions);
             if (!actorIsCentral)
             {
                 if (_currentCenter.IsCentralContext || _currentCenter.CenterId is not Guid active || active == Guid.Empty)
@@ -1405,7 +1422,8 @@ public class UserService : IUserService
             Guid? requestedCenterId)
         {
             var actorId = AssignmentStamp.RequireActor(_currentUserService.UserId);
-            var actorIsCentral = await UserManagementScopeGuard.ActorHasUnrestrictedScopeAsync(_access, actorId);
+            var actorIsCentral = await UserManagementScopeGuard.ActorHasCentralOperationScopeAsync(
+                _access, actorId, SystemPermissions.UserManagement.AssignRoles);
             var roles = await LoadRequestedRolesAsync(roleIdsOrNames);
             foreach (var role in roles)
                 AssignableRolePolicy.EnsureAssignable(actorIsCentral, role.Name, role.IsActive, role.Scope);
@@ -1423,7 +1441,8 @@ public class UserService : IUserService
                 MedicalCenterActivityGuard.EnsureAcceptsNewRelations(center);
             }
 
-            await UserManagementScopeGuard.EnsureCanAssignRoleScopeAsync(_access, actorId, scopeCenterId);
+            await UserManagementScopeGuard.EnsureCanAssignRoleScopeAsync(
+                _access, actorId, scopeCenterId, SystemPermissions.UserManagement.AssignRoles);
 
             var desiredIds = roles.Select(r => r.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var scopeRows = await _userRepository.QueryRoleAssociations(asNoTracking: false)

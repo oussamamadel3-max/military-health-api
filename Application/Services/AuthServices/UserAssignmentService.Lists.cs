@@ -121,7 +121,13 @@ public partial class UserAssignmentService
             throw new InvalidUserDataException("معرف المركز مطلوب.");
 
         await UserManagementScopeGuard.EnsureCanViewCenterDataAsync(
-            _access, _centers, actorId, centerId, _currentCenter, cancellationToken);
+            _access,
+            _centers,
+            actorId,
+            centerId,
+            _currentCenter,
+            SystemPermissions.UserManagement.Read,
+            cancellationToken);
 
         return centerId;
     }

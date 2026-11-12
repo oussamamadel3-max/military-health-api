@@ -109,6 +109,10 @@ public static class CenterPermissionEvaluator
             .ToList();
     }
 
+    /// <summary>
+    /// أهلية سياق مركزي/جلسة (أي دور أو صلاحية مباشرة بـ CenterId فارغ).
+    /// لا تُستخدم وحدها لمنح نطاق إدارة مستخدمين غير مقيد (BR-057).
+    /// </summary>
     public static bool HasCentralAuthority(
         IEnumerable<RoleAssignment> roles,
         IEnumerable<DirectAssignment> directs)
@@ -116,6 +120,23 @@ public static class CenterPermissionEvaluator
         var centralRole = roles.Any(r => r.IsActive && r.RoleIsActive && r.CenterId is null);
         var centralDirect = directs.Any(d => d.IsActive && d.PermissionIsActive && d.CenterId is null && !string.IsNullOrWhiteSpace(d.PermissionName));
         return centralRole || centralDirect;
+    }
+
+    /// <summary>
+    /// هل يملك المنفّذ الصلاحية المسماة ضمن نطاق مركزي فعّال (دور/مباشر بـ CenterId فارغ)؟
+    /// يطابق حساب <c>Resolve(..., activeCenterId: null)</c>.
+    /// </summary>
+    public static bool HasCentralOperationPermission(
+        IEnumerable<RoleAssignment> roles,
+        IEnumerable<DirectAssignment> directs,
+        IEnumerable<RolePermissionLink> links,
+        string operationPermission)
+    {
+        if (string.IsNullOrWhiteSpace(operationPermission))
+            return false;
+
+        return Resolve(roles, directs, links, activeCenterId: null)
+            .Contains(operationPermission, StringComparer.OrdinalIgnoreCase);
     }
 
     private static Entry GetOrAdd(Dictionary<string, Entry> bucket, string name)

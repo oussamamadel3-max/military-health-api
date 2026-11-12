@@ -316,7 +316,11 @@ public class UserAssignmentTests
             .ReturnsAsync(false);
 
         await Assert.ThrowsAsync<ForbiddenPermissionException>(() =>
-            UserManagementScopeGuard.EnsureCanAssignCenterAsync(access.Object, "actor-1", CenterB));
+            UserManagementScopeGuard.EnsureCanAssignCenterAsync(
+                access.Object,
+                "actor-1",
+                CenterB,
+                MilitaryHealthPermissions.UserCenters.Manage));
     }
 
     private static UserAssignmentService CreateService(
@@ -386,10 +390,12 @@ public class UserAssignmentTests
         });
         await db.SaveChangesAsync();
 
-        // حتى يُحسب SuperAdmin كمدير IAM في IamAdminGuard أثناء الاختبارات
-        foreach (var permissionName in SystemPermissions.UserManagementWrite
+        // حتى يُحسب SuperAdmin كمدير IAM بنطاق مركزي فعلي (قراءة + كتابة) أثناء الاختبارات
+        foreach (var permissionName in new[] { SystemPermissions.UserManagement.Read }
+            .Concat(SystemPermissions.UserManagementWrite)
             .Concat(SystemPermissions.RoleManagementWrite)
             .Concat(SystemPermissions.PermissionManagementWrite)
+            .Concat(new[] { MilitaryHealthPermissions.UserCenters.Manage })
             .Distinct(StringComparer.OrdinalIgnoreCase))
         {
             await SeedRolePermissionAsync(db, roleId, permissionName);

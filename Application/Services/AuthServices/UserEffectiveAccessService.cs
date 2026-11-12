@@ -58,8 +58,11 @@ public sealed class UserEffectiveAccessService : IUserEffectiveAccessService
                 !_permissionGate.Has(SystemPermissions.UserManagement.ViewEffectiveAccess))
                 throw new ForbiddenPermissionException();
 
+            var managePermission = _permissionGate.Has(SystemPermissions.UserManagement.ViewEffectiveAccess)
+                ? SystemPermissions.UserManagement.ViewEffectiveAccess
+                : SystemPermissions.UserManagement.Read;
             await UserManagementScopeGuard.EnsureCanManageTargetAsync(
-                _access, _users, actorId, userId, cancellationToken);
+                _access, _users, actorId, userId, managePermission, cancellationToken);
         }
 
         var user = await _users.GetByIdAsync(userId, asNoTracking: true, cancellationToken)
@@ -67,8 +70,11 @@ public sealed class UserEffectiveAccessService : IUserEffectiveAccessService
 
         var snapshot = await _access.LoadAsync(user.Id, cancellationToken);
         var allActiveCenters = await _access.GetActiveCentersAsync(user.Id, cancellationToken);
-        var actorUnrestricted = await UserManagementScopeGuard.ActorHasUnrestrictedScopeAsync(
-            _access, actorId, cancellationToken);
+        var actorUnrestricted =
+            await UserManagementScopeGuard.ActorHasCentralOperationScopeAsync(
+                _access, actorId, SystemPermissions.UserManagement.Read, cancellationToken)
+            || await UserManagementScopeGuard.ActorHasCentralOperationScopeAsync(
+                _access, actorId, SystemPermissions.UserManagement.ViewEffectiveAccess, cancellationToken);
 
         IReadOnlyList<AssignedCenterDto> viewableCenters = allActiveCenters;
         if (!isSelf && !actorUnrestricted)
