@@ -50,15 +50,17 @@ public class IamHardeningTests
         var gate = new Mock<IPermissionGate>();
 
         var access = new Mock<IAccessContextRepository>();
-        access.Setup(a => a.LoadAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        access.Setup(a => a.LoadAsync("actor-1", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AccessSnapshot
             {
-                Roles =
+                Directs =
                 {
-                    new CenterPermissionEvaluator.RoleAssignment(
-                        "role-central", "SuperAdmin", null, true, true)
+                    new CenterPermissionEvaluator.DirectAssignment(
+                        SystemPermissions.UserManagement.Delete, null, true, true)
                 }
             });
+        access.Setup(a => a.LoadAsync(user.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AccessSnapshot());
 
         var actor = new TestCurrentUser();
         actor.SetUser("actor-1", "admin", "127.0.0.1");

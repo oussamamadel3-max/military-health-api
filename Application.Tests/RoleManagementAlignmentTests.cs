@@ -76,6 +76,7 @@ public class RoleManagementAlignmentTests
                 It.Is<IEnumerable<Guid>>(ids => ids.OrderBy(x => x).SequenceEqual(finalIds.OrderBy(x => x))),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<Permission> { finalDecision, membersView, createUpdate });
+        SetupCatalogActiveIdsEcho(permissions);
 
         var roles = new Mock<IRoleRepository>();
         roles.Setup(r => r.GetRolePermissionsAsync(role.Id, It.IsAny<CancellationToken>()))
@@ -128,6 +129,7 @@ public class RoleManagementAlignmentTests
                 if (ids.Contains(excessId)) list.Add(excess);
                 return list;
             });
+        SetupCatalogActiveIdsEcho(permissions);
 
         var roles = new Mock<IRoleRepository>();
         roles.Setup(r => r.GetRolePermissionsAsync(role.Id, It.IsAny<CancellationToken>()))
@@ -165,6 +167,7 @@ public class RoleManagementAlignmentTests
         var permissions = new Mock<IPermissionRepository>();
         permissions.Setup(r => r.GetActiveByIdsAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<Permission> { read });
+        SetupCatalogActiveIdsEcho(permissions);
 
         var roles = new Mock<IRoleRepository>();
         roles.Setup(r => r.GetRolePermissionsAsync(role.Id, It.IsAny<CancellationToken>()))
@@ -222,6 +225,7 @@ public class RoleManagementAlignmentTests
         var permissions = new Mock<IPermissionRepository>();
         permissions.Setup(r => r.GetActiveByIdsAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<Permission> { excess });
+        SetupCatalogActiveIdsEcho(permissions);
 
         var roles = new Mock<IRoleRepository>();
         roles.Setup(r => r.GetRolePermissionsAsync(role.Id, It.IsAny<CancellationToken>()))
@@ -415,6 +419,15 @@ public class RoleManagementAlignmentTests
         await Assert.ThrowsAsync<ForbiddenPermissionException>(() =>
             IamAdminGuard.EnsureAtLeastOneIamAdminRemainsAfterRolePermissionChangeAsync(
                 users.Object, roles.Object, roleId, Array.Empty<string>(), adminPerms));
+    }
+
+    /// <summary>
+    /// Treats every requested id as catalog-active (default for tests that only use active permissions).
+    /// </summary>
+    private static void SetupCatalogActiveIdsEcho(Mock<IPermissionRepository> permissions)
+    {
+        permissions.Setup(r => r.GetActiveIdsAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IEnumerable<Guid> ids, CancellationToken _) => ids.Distinct().ToList());
     }
 
     private static Mock<RoleManager<Role>> CreateRoleManager(Role role)

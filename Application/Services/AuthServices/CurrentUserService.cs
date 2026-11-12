@@ -6,7 +6,8 @@ namespace Application.Services.AuthServices
     {
         public string UserId { get; private set; } = "0";
         public string UserName { get; private set; } = "Anonymous";
-        public string IPAddress { get; private set; } = "::1";
+        /// <summary>Empty until middleware or seed context sets a real value; never invent a loopback client IP.</summary>
+        public string IPAddress { get; private set; } = string.Empty;
         public string? UserAgent { get; private set; }
         public Guid CorrelationId { get; private set; }
 

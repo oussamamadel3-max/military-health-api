@@ -2,6 +2,7 @@ using Application.Common.Permissions;
 using Application.Common.Security;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
+using Application.Interfaces.Services;
 using Domain.Entities.Auth;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -20,6 +21,10 @@ namespace Infrastructure.Persistence
             var userRepository = scope.ServiceProvider.GetRequiredService<IUserRepository>();
             var refreshTokens = scope.ServiceProvider.GetRequiredService<IRefreshTokenRepository>();
             var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+            var currentUser = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
+
+            // تمييز أحداث التدقيق أثناء البذرة عن طلبات HTTP (بدون عنوان عميل مضلل).
+            IamSeedCatalogOps.ApplySystemSeedAuditContext(currentUser);
 
             // 1) تأكد من وجود القاعدة ومحدّثة
             await context.Database.MigrateAsync();
@@ -28,53 +33,13 @@ namespace Infrastructure.Persistence
             // Helpers
             // ============================
 
-            async Task<Role> EnsureRoleAsync(
+            // إنشاء الدور الناقص فقط؛ لا تُعاد تفعيل أدوار عطّلها المسؤول (FR-016 / BR-047).
+            Task<Role> EnsureRoleAsync(
                 string name,
                 string normalized,
                 string? descriptionAr = null,
                 Domain.Enums.RoleScope scope = Domain.Enums.RoleScope.Center)
-            {
-                var role = await roleManager.Roles.FirstOrDefaultAsync(r => r.Name == name);
-                if (role == null)
-                {
-                    role = new Role
-                    {
-                        Id = Guid.NewGuid().ToString(),
-                        Name = name,
-                        NormalizedName = normalized,
-                        Description = descriptionAr,
-                        Scope = scope,
-                        IsActive = true,
-                        CreatedAt = DateTime.Now
-                    };
-                    var res = await roleManager.CreateAsync(role);
-                    if (!res.Succeeded)
-                        throw new Exception($"تعذر إنشاء الدور {name}: " + string.Join(", ", res.Errors.Select(e => e.Description)));
-                }
-                else
-                {
-                    var dirty = false;
-                    if (!role.IsActive)
-                    {
-                        role.IsActive = true;
-                        dirty = true;
-                    }
-                    if (!string.IsNullOrWhiteSpace(descriptionAr) &&
-                        !string.Equals(role.Description, descriptionAr, StringComparison.Ordinal))
-                    {
-                        role.Description = descriptionAr;
-                        dirty = true;
-                    }
-                    if (role.Scope != scope)
-                    {
-                        role.Scope = scope;
-                        dirty = true;
-                    }
-                    if (dirty)
-                        await roleManager.UpdateAsync(role);
-                }
-                return role;
-            }
+                => IamSeedCatalogOps.EnsureRoleAsync(context, name, normalized, descriptionAr, scope);
 
             async Task<User> EnsureUserAsync(string userName, string email, string password,string fullName,IEnumerable<Role>? attachRoles = null)
             {
@@ -111,21 +76,19 @@ namespace Infrastructure.Persistence
                         if (existingRoles.Any(ura => ura.IsActive))
                             continue;
 
-                        var revokedRole = existingRoles.FirstOrDefault();
-                        if (revokedRole != null)
-                            IamRetention.Reactivate(revokedRole, u.Id, DateTimeOffset.UtcNow);
-                        else
+                        // لا تُعاد تفعيل إسناد دور سُحب إدارياً أثناء البذرة.
+                        if (existingRoles.Count > 0)
+                            continue;
+
+                        context.UserRoleAssociations.Add(new UserRoleAssociation
                         {
-                            context.UserRoleAssociations.Add(new UserRoleAssociation
-                            {
-                                Id = Guid.NewGuid(),
-                                UserId = u.Id,
-                                RoleId = r.Id,
-                                AssignedByUserId = u.Id,
-                                AssignedAt = DateTimeOffset.UtcNow,
-                                IsActive = true
-                            });
-                        }
+                            Id = Guid.NewGuid(),
+                            UserId = u.Id,
+                            RoleId = r.Id,
+                            AssignedByUserId = u.Id,
+                            AssignedAt = DateTimeOffset.UtcNow,
+                            IsActive = true
+                        });
                     }
                     await context.SaveChangesAsync();
                 }
@@ -134,95 +97,16 @@ namespace Infrastructure.Persistence
             }
 
 
-            // --- صلاحيات: أدوات مساعدة ---
-            async Task<Permission> EnsurePermissionAsync(string name, string? desc)
-            {
-                var perm = await context.Permissions.FirstOrDefaultAsync(x => x.Name == name);
-                if (perm == null)
-                {
-                    perm = new Permission
-                    {
-                        Id = Guid.NewGuid(),
-                        Name = name,
-                        Description = desc,
-                        IsActive = true
-                    };
-                    context.Permissions.Add(perm);
-                    await context.SaveChangesAsync();
-                }
-                else if (!perm.IsActive)
-                {
-                    perm.IsActive = true;
-                    await context.SaveChangesAsync();
-                }
-                return perm;
-            }
+            // --- صلاحيات: أدوات مساعدة (إنشاء الناقص فقط؛ لا تُلغى قرارات التعطيل/السحب الإدارية) ---
+            Task<Permission> EnsurePermissionAsync(string name, string? desc)
+                => IamSeedCatalogOps.EnsurePermissionAsync(context, name, desc);
 
             /// <summary>
             /// يعيد تسمية صلاحية قديمة إلى الاسم الجديد مع الحفاظ على إسنادات الأدوار/المستخدمين.
             /// إن وُجد الاسمان معاً تُنقل الإسنادات النشطة أو يُلغى المكرر، ثم تُعطّل القديمة.
             /// </summary>
-            async Task MigratePermissionNameAsync(string oldName, string newName, string? newDesc, string actorId)
-            {
-                var oldPerm = await context.Permissions.FirstOrDefaultAsync(p => p.Name == oldName);
-                if (oldPerm == null) return;
-
-                var newPerm = await context.Permissions.FirstOrDefaultAsync(p => p.Name == newName);
-                if (newPerm == null)
-                {
-                    oldPerm.Name = newName;
-                    if (!string.IsNullOrWhiteSpace(newDesc))
-                        oldPerm.Description = newDesc;
-                    await context.SaveChangesAsync();
-                    return;
-                }
-
-                var oldRoleLinks = await context.RolePermissions
-                    .Where(rp => rp.PermissionId == oldPerm.Id)
-                    .ToListAsync();
-                var newRoleLinks = await context.RolePermissions
-                    .Where(rp => rp.PermissionId == newPerm.Id)
-                    .ToListAsync();
-                foreach (var link in oldRoleLinks.Where(link => link.IsActive))
-                {
-                    var counterpart = newRoleLinks.FirstOrDefault(row => row.RoleId == link.RoleId);
-                    if (counterpart == null)
-                        link.PermissionId = newPerm.Id;
-                    else if (!counterpart.IsActive)
-                    {
-                        IamRetention.Reactivate(counterpart, actorId, DateTimeOffset.UtcNow);
-                        IamRetention.Revoke(link, actorId, IamRetention.PermissionRenamed);
-                    }
-                    else
-                        IamRetention.Revoke(link, actorId, IamRetention.PermissionRenamed);
-                }
-
-                var oldUserLinks = await context.UserPermissions
-                    .Where(up => up.PermissionId == oldPerm.Id)
-                    .ToListAsync();
-                var newUserLinks = await context.UserPermissions
-                    .Where(up => up.PermissionId == newPerm.Id)
-                    .ToListAsync();
-                foreach (var link in oldUserLinks.Where(link => link.IsActive))
-                {
-                    var counterpart = newUserLinks.FirstOrDefault(row => row.UserId == link.UserId && row.CenterId == link.CenterId);
-                    if (counterpart == null)
-                        link.PermissionId = newPerm.Id;
-                    else if (!counterpart.IsActive)
-                    {
-                        IamRetention.Reactivate(counterpart, actorId, DateTimeOffset.UtcNow);
-                        IamRetention.Revoke(link, actorId, IamRetention.PermissionRenamed);
-                    }
-                    else
-                        IamRetention.Revoke(link, actorId, IamRetention.PermissionRenamed);
-                }
-
-                IamRetention.DeactivatePermission(oldPerm);
-                if (!string.IsNullOrWhiteSpace(newDesc) && string.IsNullOrWhiteSpace(newPerm.Description))
-                    newPerm.Description = newDesc;
-
-                await context.SaveChangesAsync();
-            }
+            Task MigratePermissionNameAsync(string oldName, string newName, string? newDesc, string actorId)
+                => IamSeedCatalogOps.MigratePermissionNameAsync(context, oldName, newName, newDesc, actorId);
 
             /// <summary>
             /// يفكك Members.CreateUpdate إلى إنشاء وتعديل. المشرف يحتفظ بالتعديل فقط؛ بقية الأدوار التي كانت تملك المفتاح الموحّد تحتفظ بالإنشاء أيضاً. الصلاحية المباشرة القديمة تُنسخ إلى المفتاحين.
@@ -360,41 +244,8 @@ namespace Infrastructure.Persistence
                 }
             }
 
-            async Task EnsurePermissionsAndAssignToUserAsync(string userId, IEnumerable<(string Name, string? Desc)> list)
-            {
-                foreach (var (name, desc) in list)
-                {
-                    var perm = await EnsurePermissionAsync(name, desc);
-
-                    if (!perm.IsActive)
-                        continue;
-
-                    var existingGrants = await context.UserPermissions
-                        .Where(up => up.UserId == userId && up.PermissionId == perm.Id && up.CenterId == null)
-                        .OrderByDescending(up => up.IsActive)
-                        .ThenByDescending(up => up.RevokedAt)
-                        .ToListAsync();
-                    if (existingGrants.Any(up => up.IsActive))
-                        continue;
-
-                    var revokedGrant = existingGrants.FirstOrDefault();
-                    if (revokedGrant != null)
-                        IamRetention.Reactivate(revokedGrant, userId, DateTimeOffset.UtcNow);
-                    else
-                    {
-                        context.UserPermissions.Add(new UserPermission
-                        {
-                            Id = Guid.NewGuid(),
-                            UserId = userId,
-                            PermissionId = perm.Id,
-                            GrantedByUserId = userId,
-                            GrantedAt = DateTimeOffset.UtcNow,
-                            IsActive = true
-                        });
-                    }
-                }
-                await context.SaveChangesAsync();
-            }
+            Task EnsurePermissionsAndAssignToUserAsync(string userId, IEnumerable<(string Name, string? Desc)> list)
+                => IamSeedCatalogOps.EnsureDirectUserPermissionsAsync(context, userId, list);
 
 
             async Task CleanupObsoletePermissionsAsync(string actorId)
@@ -447,48 +298,8 @@ namespace Infrastructure.Persistence
                 string grantedByUserId,
                 IEnumerable<string> permissionNames)
             {
-                var names = permissionNames
-                    .Where(n => !string.IsNullOrWhiteSpace(n))
-                    .Distinct(StringComparer.Ordinal)
-                    .ToList();
-                if (names.Count == 0) return;
-
-                var changed = false;
-
-                var perms = await context.Permissions
-                    .Where(p => p.Name != null && names.Contains(p.Name))
-                    .ToListAsync();
-                var existingRolePerms = await context.RolePermissions
-                    .Where(rp => rp.RoleId == roleId)
-                    .ToListAsync();
-
-                foreach (var perm in perms)
-                {
-                    if (!perm.IsActive)
-                        continue;
-
-                    var matches = existingRolePerms.Where(rp => rp.PermissionId == perm.Id).ToList();
-                    if (matches.Any(rp => rp.IsActive))
-                        continue;
-
-                    var revoked = matches.OrderByDescending(rp => rp.RevokedAt).FirstOrDefault();
-                    if (revoked != null)
-                        IamRetention.Reactivate(revoked, grantedByUserId, DateTimeOffset.UtcNow);
-                    else
-                    {
-                        context.RolePermissions.Add(new RolePermission
-                        {
-                            RoleId = roleId,
-                            PermissionId = perm.Id,
-                            GrantedByUserId = grantedByUserId,
-                            GrantedAt = DateTimeOffset.UtcNow,
-                            IsActive = true
-                        });
-                    }
-
-                    changed = true;
-                }
-                await context.SaveChangesAsync();
+                var changed = await IamSeedCatalogOps.EnsurePermissionsAssignedToRoleAsync(
+                    context, roleId, grantedByUserId, permissionNames);
                 if (changed)
                 {
                     await SecurityStampHelper.InvalidateUsersWithRoleAsync(
@@ -542,7 +353,7 @@ namespace Infrastructure.Persistence
                 superAdmin.Id,
                 templateBootstrapPermissions.Select(p => p.Name));
 
-            // روابط Role–Permission من مصفوفة SRS §7.5 (إضافة/إعادة تفعيل الناقص). سحب المنح الملغاة يتم مرة واحدة أدناه.
+            // روابط Role–Permission من مصفوفة SRS §7.5 (إضافة الناقص فقط دون إحياء سحب إداري). سحب المنح الملغاة يتم مرة واحدة أدناه.
             var grantsByRole = MilitaryHealthSeedCatalog.GrantsByRoleName();
             foreach (var (roleName, permissionNames) in grantsByRole)
             {

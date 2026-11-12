@@ -354,8 +354,20 @@ namespace Application.Services.AuthServices
                 .Where(id => !existingIds.Contains(id))
                 .ToList();
 
+            // Preserve RolePermission rows whose catalog Permission is inactive: the UI omits them
+            // from the active final set, which must not be treated as an intentional withdraw (FR-017).
+            // Effective access still requires Permission.IsActive via role-permission resolution.
+            // Empty list = every linked permission is catalog-inactive and must be parked.
+            // Never fall back to treating all existingIds as active — that would revoke parked links.
+            var catalogActiveLookup = await _permissionRepository.GetActiveIdsAsync(existingIds)
+                ?? throw new InvalidOperationException(
+                    "GetActiveIdsAsync returned null; cannot decide role-permission withdrawals safely.");
+            var catalogActiveExistingIds = catalogActiveLookup.ToHashSet();
+
             var toRemove = existingRolePerms
-                .Where(rp => !activeValidIds.Contains(rp.PermissionId))
+                .Where(rp =>
+                    catalogActiveExistingIds.Contains(rp.PermissionId) &&
+                    !activeValidIds.Contains(rp.PermissionId))
                 .ToList();
 
             var newlyGrantedNames = activePermissions
