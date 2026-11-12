@@ -1,3 +1,4 @@
+using Application.Common.Security;
 using Application.Exceptions;
 using Application.Interfaces.Services;
 using Microsoft.AspNetCore.Mvc.Filters;
@@ -39,7 +40,17 @@ public class AuthorizePermissionAttribute : Attribute, IAuthorizationFilter
 
         if (!_requiredPermissions.All(p => permissions.Contains(p)))
         {
-            throw new ForbiddenPermissionException();
+            var required = string.Join(",", _requiredPermissions);
+            if (IamSensitiveAccessDenial.RequiresAuditForPermission(required))
+            {
+                throw ForbiddenPermissionException.AccessDenied(
+                    "ليس لديك الصلاحية المطلوبة.",
+                    "AuthorizePermissionAttribute",
+                    "permission-missing",
+                    permission: required);
+            }
+
+            throw new ForbiddenPermissionException("ليس لديك الصلاحية المطلوبة.");
         }
     }
 }

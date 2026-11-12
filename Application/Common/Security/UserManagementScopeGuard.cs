@@ -39,20 +39,39 @@ public static class UserManagementScopeGuard
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(actorUserId))
-            throw new ForbiddenPermissionException("لا يمكنك إدارة مستخدم خارج نطاق تفويضك.");
+            throw ForbiddenPermissionException.AccessDenied(
+                "لا يمكنك إدارة مستخدم خارج نطاق تفويضك.",
+                "UserManagement.ManageTarget",
+                "actor-missing",
+                operationPermission,
+                targetUserId);
 
         if (string.IsNullOrWhiteSpace(operationPermission))
-            throw new ForbiddenPermissionException("لا يمكنك إدارة مستخدم خارج نطاق تفويضك.");
+            throw ForbiddenPermissionException.AccessDenied(
+                "لا يمكنك إدارة مستخدم خارج نطاق تفويضك.",
+                "UserManagement.ManageTarget",
+                "operation-missing",
+                targetUserId: targetUserId);
 
         if (await ActorHasCentralOperationScopeAsync(access, actorUserId, operationPermission, cancellationToken))
             return;
 
         var targetSnapshot = await access.LoadAsync(targetUserId, cancellationToken);
         if (CenterPermissionEvaluator.HasCentralAuthority(targetSnapshot.Roles, targetSnapshot.Directs))
-            throw new ForbiddenPermissionException("لا يمكنك إدارة مستخدم مركزي خارج نطاق تفويضك.");
+            throw ForbiddenPermissionException.AccessDenied(
+                "لا يمكنك إدارة مستخدم مركزي خارج نطاق تفويضك.",
+                "UserManagement.ManageTarget",
+                "central-target-out-of-scope",
+                operationPermission,
+                targetUserId);
 
         if (!await users.SharesActiveCenterAsync(actorUserId, targetUserId, cancellationToken))
-            throw new ForbiddenPermissionException("لا يمكنك إدارة مستخدم خارج نطاق مراكزك.");
+            throw ForbiddenPermissionException.AccessDenied(
+                "لا يمكنك إدارة مستخدم خارج نطاق مراكزك.",
+                "UserManagement.ManageTarget",
+                "center-scope-mismatch",
+                operationPermission,
+                targetUserId);
     }
 
     /// <summary>
@@ -67,13 +86,23 @@ public static class UserManagementScopeGuard
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(actorUserId))
-            throw new ForbiddenPermissionException("لا يمكنك إسناد مركز خارج نطاق تفويضك.");
+            throw ForbiddenPermissionException.AccessDenied(
+                "لا يمكنك إسناد مركز خارج نطاق تفويضك.",
+                "UserManagement.AssignCenter",
+                "actor-missing",
+                operationPermission,
+                centerId: centerId);
 
         if (await ActorHasCentralOperationScopeAsync(access, actorUserId, operationPermission, cancellationToken))
             return;
 
         if (!await access.IsActivelyAssignedAsync(actorUserId, centerId, cancellationToken))
-            throw new ForbiddenPermissionException("لا يمكنك إسناد مستخدم إلى مركز خارج نطاق تفويضك.");
+            throw ForbiddenPermissionException.AccessDenied(
+                "لا يمكنك إسناد مستخدم إلى مركز خارج نطاق تفويضك.",
+                "UserManagement.AssignCenter",
+                "center-out-of-scope",
+                operationPermission,
+                centerId: centerId);
     }
 
     /// <summary>
@@ -87,16 +116,30 @@ public static class UserManagementScopeGuard
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(actorUserId))
-            throw new ForbiddenPermissionException("لا يمكنك إسناد دور خارج نطاق تفويضك.");
+            throw ForbiddenPermissionException.AccessDenied(
+                "لا يمكنك إسناد دور خارج نطاق تفويضك.",
+                "UserManagement.AssignRoleScope",
+                "actor-missing",
+                operationPermission,
+                centerId: roleCenterId);
 
         if (await ActorHasCentralOperationScopeAsync(access, actorUserId, operationPermission, cancellationToken))
             return;
 
         if (roleCenterId is null)
-            throw new ForbiddenPermissionException("لا يمكنك إسناد دور مركزي خارج نطاق تفويضك.");
+            throw ForbiddenPermissionException.AccessDenied(
+                "لا يمكنك إسناد دور مركزي خارج نطاق تفويضك.",
+                "UserManagement.AssignRoleScope",
+                "central-role-forbidden",
+                operationPermission);
 
         if (!await access.IsActivelyAssignedAsync(actorUserId, roleCenterId.Value, cancellationToken))
-            throw new ForbiddenPermissionException("لا يمكنك إسناد دور لمركز خارج نطاق تفويضك.");
+            throw ForbiddenPermissionException.AccessDenied(
+                "لا يمكنك إسناد دور لمركز خارج نطاق تفويضك.",
+                "UserManagement.AssignRoleScope",
+                "center-out-of-scope",
+                operationPermission,
+                centerId: roleCenterId);
     }
 
     /// <summary>
@@ -115,7 +158,12 @@ public static class UserManagementScopeGuard
             throw new InvalidUserDataException("معرف المركز غير صالح.");
 
         if (string.IsNullOrWhiteSpace(actorUserId))
-            throw new ForbiddenPermissionException("لا يمكنك عرض بيانات مركز خارج نطاق تفويضك.");
+            throw ForbiddenPermissionException.AccessDenied(
+                "لا يمكنك عرض بيانات مركز خارج نطاق تفويضك.",
+                "UserManagement.ViewCenterData",
+                "actor-missing",
+                operationPermission,
+                centerId: centerId);
 
         if (await ActorHasCentralOperationScopeAsync(access, actorUserId, operationPermission, cancellationToken))
         {
@@ -125,12 +173,27 @@ public static class UserManagementScopeGuard
         }
 
         if (currentCenter.IsCentralContext)
-            throw new ForbiddenPermissionException("لا يمكن عرض إسنادات المركز دون سياق مركز نشط.");
+            throw ForbiddenPermissionException.AccessDenied(
+                "لا يمكن عرض إسنادات المركز دون سياق مركز نشط.",
+                "UserManagement.ViewCenterData",
+                "no-active-center",
+                operationPermission,
+                centerId: centerId);
 
         if (currentCenter.CenterId is not Guid active || active != centerId)
-            throw new ForbiddenPermissionException("لا يمكنك عرض إسنادات مركز غير المركز النشط.");
+            throw ForbiddenPermissionException.AccessDenied(
+                "لا يمكنك عرض إسنادات مركز غير المركز النشط.",
+                "UserManagement.ViewCenterData",
+                "center-mismatch",
+                operationPermission,
+                centerId: centerId);
 
         if (!await access.IsActivelyAssignedAsync(actorUserId, centerId, cancellationToken))
-            throw new ForbiddenPermissionException("لا يمكنك عرض بيانات مركز غير مسند لك.");
+            throw ForbiddenPermissionException.AccessDenied(
+                "لا يمكنك عرض بيانات مركز غير مسند لك.",
+                "UserManagement.ViewCenterData",
+                "center-unassigned",
+                operationPermission,
+                centerId: centerId);
     }
 }

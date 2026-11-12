@@ -26,15 +26,51 @@ public sealed class ValidationLocalizationHttpTests
     }
 
     [Fact]
-    [Trait("KnownGap", "MH-FNC-038")]
+    [Trait("Regression", "MH-FNC-038")]
     public async Task Login_missing_credentials_should_not_expose_english_property_names()
     {
         var session = _factory.CreateSession();
         var response = await session.PostRawJsonAsync("/api/Auth/Login", "{}");
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("اسم المستخدم", body, StringComparison.Ordinal);
+        Assert.Contains("كلمة المرور", body, StringComparison.Ordinal);
         Assert.DoesNotContain("UserName", body, StringComparison.Ordinal);
         Assert.DoesNotContain("PassWord", body, StringComparison.Ordinal);
         Assert.DoesNotContain("The ", body, StringComparison.Ordinal);
+        AssertNoTechnicalLeak(body);
+    }
+
+    [Fact]
+    [Trait("Regression", "MH-FNC-038")]
+    public async Task Login_username_too_short_returns_arabic_length_message()
+    {
+        var session = _factory.CreateSession();
+        var response = await session.PostRawJsonAsync(
+            "/api/Auth/Login",
+            """{"userName":"ab","passWord":"Abcdef1!"}""");
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("اسم المستخدم", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("UserName", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("The ", body, StringComparison.Ordinal);
+        AssertNoTechnicalLeak(body);
+    }
+
+    [Fact]
+    [Trait("Regression", "MH-FNC-038")]
+    public async Task Login_username_too_long_returns_arabic_length_message()
+    {
+        var session = _factory.CreateSession();
+        var longName = new string('a', 257);
+        var response = await session.PostRawJsonAsync(
+            "/api/Auth/Login",
+            $$"""{"userName":"{{longName}}","passWord":"Abcdef1!"}""");
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("اسم المستخدم", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("UserName", body, StringComparison.Ordinal);
+        AssertNoTechnicalLeak(body);
     }
 
     [Fact]

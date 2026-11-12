@@ -41,6 +41,23 @@ public class InvalidRoleDataException : BusinessException
 
 public class ForbiddenPermissionException : BusinessException
 {
+    /// <summary>عند true يُسجَّل AuditEvent بنتيجة DENIED عبر مسار معالجة الأخطاء الموحد.</summary>
+    public bool AuditAccessDenial { get; init; }
+
+    /// <summary>رمز سبب رفض غير حسّاس (مثل permission-missing).</summary>
+    public string? DenialReasonCode { get; init; }
+
+    /// <summary>اسم العملية الداخلية للتدقيق (مثل PermissionGate.EnsureAll).</summary>
+    public string? DenialOperation { get; init; }
+
+    /// <summary>الصلاحية المطلوبة إن وُجدت.</summary>
+    public string? DeniedPermission { get; init; }
+
+    /// <summary>المستخدم المستهدف عند ارتباط الرفض بإدارة مستخدم.</summary>
+    public string? TargetUserId { get; init; }
+
+    public Guid? CenterId { get; init; }
+
     public ForbiddenPermissionException(string message = "ليس لديك الصلاحية المطلوبة.")
         : base(
             message: message,
@@ -48,4 +65,22 @@ public class ForbiddenPermissionException : BusinessException
             status: 403)
     {
     }
+
+    /// <summary>يرفض العملية مع تعليمها لتدقيق IAM الحساس دون تغيير عقد HTTP 403.</summary>
+    public static ForbiddenPermissionException AccessDenied(
+        string message,
+        string operation,
+        string reasonCode,
+        string? permission = null,
+        string? targetUserId = null,
+        Guid? centerId = null)
+        => new(message)
+        {
+            AuditAccessDenial = true,
+            DenialOperation = operation,
+            DenialReasonCode = reasonCode,
+            DeniedPermission = permission,
+            TargetUserId = targetUserId,
+            CenterId = centerId
+        };
 }

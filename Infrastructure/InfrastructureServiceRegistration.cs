@@ -22,6 +22,7 @@ using Application.Services.Supervisor;
 using Application.Services.Time;
 using Infrastructure.Persistence;
 using Infrastructure.Repositories;
+using Infrastructure.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Infrastructure;
@@ -80,6 +81,7 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<ILoginLockoutService, LoginLockoutService>();
         services.AddScoped<IUserPermissionService, UserPermissionService>();
         services.AddScoped<IPermissionGate, PermissionGate>();
+        services.AddScoped<IIamAccessDeniedAuditor, IamAccessDeniedAuditor>();
         services.AddScoped<ICurrentUserService, CurrentUserService>();
         services.AddScoped<ICurrentCenterService, CurrentCenterService>();
         services.AddScoped<IActiveCenterService, ActiveCenterService>();

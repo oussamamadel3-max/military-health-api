@@ -35,8 +35,11 @@ public static class IamAdminGuard
             userRepository, roleRepository, targetUserId, cancellationToken);
 
         if (!otherAdminExists)
-            throw new ForbiddenPermissionException(
-                "لا يمكن إزالة أو تعطيل أو سحب قدرات آخر حساب نشط قادر على إدارة المستخدمين والأدوار والصلاحيات.");
+            throw ForbiddenPermissionException.AccessDenied(
+                "لا يمكن إزالة أو تعطيل أو سحب قدرات آخر حساب نشط قادر على إدارة المستخدمين والأدوار والصلاحيات.",
+                "IamAdminGuard.EnsureNotLastIamAdmin",
+                "last-iam-admin-protection",
+                targetUserId: targetUserId);
     }
 
     public static async Task EnsureNotLastIamAdminBeforeDisableOrDeleteAsync(
@@ -55,8 +58,11 @@ public static class IamAdminGuard
             userRepository, roleRepository, targetUserId, cancellationToken);
 
         if (!otherAdminExists)
-            throw new ForbiddenPermissionException(
-                "لا يمكن حذف أو تعطيل آخر حساب نشط قادر على إدارة المستخدمين والأدوار والصلاحيات.");
+            throw ForbiddenPermissionException.AccessDenied(
+                "لا يمكن حذف أو تعطيل آخر حساب نشط قادر على إدارة المستخدمين والأدوار والصلاحيات.",
+                "IamAdminGuard.EnsureNotLastIamAdminBeforeDisableOrDelete",
+                "last-iam-admin-protection",
+                targetUserId: targetUserId);
     }
 
     public static async Task<HashSet<string>> GetEffectivePermissionNamesAsync(
@@ -130,8 +136,11 @@ public static class IamAdminGuard
             .ToList();
 
         if (excess.Count > 0)
-            throw new ForbiddenPermissionException(
-                $"{messagePrefix}: {string.Join(", ", excess)}");
+            throw ForbiddenPermissionException.AccessDenied(
+                $"{messagePrefix}: {string.Join(", ", excess)}",
+                "IamAdminGuard.DelegationBoundary",
+                "delegation-exceeded",
+                permission: string.Join(",", excess));
     }
 
     /// <summary>
@@ -175,8 +184,10 @@ public static class IamAdminGuard
         }
 
         if (hadAdmin && !remainsAdmin)
-            throw new ForbiddenPermissionException(
-                "لا يمكن إزالة أو تعطيل قدرات آخر حساب نشط قادر على إدارة المستخدمين والأدوار والصلاحيات.");
+            throw ForbiddenPermissionException.AccessDenied(
+                "لا يمكن إزالة أو تعطيل قدرات آخر حساب نشط قادر على إدارة المستخدمين والأدوار والصلاحيات.",
+                "IamAdminGuard.EnsureAtLeastOneIamAdminRemainsAfterRolePermissionChange",
+                "last-iam-admin-protection");
     }
 
     public static async Task<HashSet<string>> GetEffectivePermissionNamesWithRoleOverrideAsync(

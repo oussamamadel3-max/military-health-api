@@ -65,6 +65,20 @@ public class ErrorHandlingMiddleware
                     correlationId, lockedEx.ErrorCode, lockedEx.RetryAfterSeconds, lockedEx.Message);
                 break;
 
+            case ForbiddenPermissionException forbiddenEx:
+                await TryAuditIamAccessDenialAsync(context, forbiddenEx, correlationId);
+
+                response = ApiResponse.Error(
+                    message: forbiddenEx.Message,
+                    code: forbiddenEx.ErrorCode,
+                    meta: MergeMeta(forbiddenEx.Meta, correlationId),
+                    status: forbiddenEx.Status);
+
+                _logger.LogWarning(
+                    "BUSINESS EXCEPTION: CorrelationId={CorrelationId}, Code={ErrorCode}, Status={Status}, Message={Message}",
+                    correlationId, forbiddenEx.ErrorCode, forbiddenEx.Status, forbiddenEx.Message);
+                break;
+
             case BusinessException bizEx:
                 response = ApiResponse.Error(
                     message: bizEx.Message,
@@ -182,6 +196,31 @@ public class ErrorHandlingMiddleware
         }
 
         await response.ExecuteAsync(context);
+    }
+
+    private static async Task TryAuditIamAccessDenialAsync(
+        HttpContext context,
+        ForbiddenPermissionException exception,
+        Guid correlationId)
+    {
+        if (!exception.AuditAccessDenial)
+            return;
+
+        var auditor = context.RequestServices.GetService<IIamAccessDeniedAuditor>();
+        if (auditor is null)
+            return;
+
+        var currentUser = context.RequestServices.GetService<ICurrentUserService>();
+        if (currentUser is null)
+            return;
+
+        var currentCenter = context.RequestServices.GetService<ICurrentCenterService>();
+        await auditor.TryRecordAsync(
+            currentUser,
+            currentCenter,
+            exception,
+            correlationId,
+            context.Items);
     }
 
     private static Guid ResolveCorrelationId(HttpContext context)

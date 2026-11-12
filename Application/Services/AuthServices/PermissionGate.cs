@@ -64,12 +64,8 @@ public sealed class PermissionGate : IPermissionGate
         var userId = RequireUser();
         if (HasAll(permissions)) return;
 
-        _logger.LogWarning(
-            "Rejected protected operation for user {UserId}. Reason {Reason}.",
-            userId,
-            "permission-missing");
-
-        throw new ForbiddenPermissionException();
+        var required = string.Join(",", permissions.Where(p => !string.IsNullOrWhiteSpace(p)));
+        throw Denied(userId, required, "permission-missing", "PermissionGate.EnsureAll");
     }
 
     public async Task<Guid> EnsureLocalAsync(
@@ -147,7 +143,11 @@ public sealed class PermissionGate : IPermissionGate
             ?? user?.FindFirst("sub")?.Value;
     }
 
-    private ForbiddenPermissionException Denied(string userId, string permission, string reason)
+    private ForbiddenPermissionException Denied(
+        string userId,
+        string permission,
+        string reason,
+        string operation = "PermissionGate")
     {
         _logger.LogWarning(
             "Rejected protected operation for user {UserId}. Permission {Permission}. Reason {Reason}.",
@@ -155,6 +155,16 @@ public sealed class PermissionGate : IPermissionGate
             permission,
             reason);
 
-        return new ForbiddenPermissionException();
+        // FR-076 A2: رفض صلاحية تشغيلية عامة لا يُصنَّف ضمن تدقيق IAM الحساس.
+        if (!IamSensitiveAccessDenial.RequiresAuditForPermission(permission))
+        {
+            return new ForbiddenPermissionException("ليس لديك الصلاحية المطلوبة.");
+        }
+
+        return ForbiddenPermissionException.AccessDenied(
+            message: "ليس لديك الصلاحية المطلوبة.",
+            operation: operation,
+            reasonCode: reason,
+            permission: permission);
     }
 }

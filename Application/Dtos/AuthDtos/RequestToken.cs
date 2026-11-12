@@ -6,12 +6,14 @@ namespace Application.Dtos.AuthDtos
 {
     public class RequestToken
     {
-        [Required]
-        [StringLength(256, MinimumLength = 3)]
+        /// <summary>اسم المستخدم للدخول. اسم الخاصية JSON يبقى UserName.</summary>
+        [Required(ErrorMessage = "اسم المستخدم مطلوب.")]
+        [StringLength(256, MinimumLength = 3, ErrorMessage = "اسم المستخدم يجب أن يكون بين 3 و 256 حرفاً.")]
         public string UserName { get; set; }
 
-        [Required]
-        [StringLength(128, MinimumLength = 5)]
+        /// <summary>كلمة المرور للدخول. اسم الخاصية JSON يبقى PassWord.</summary>
+        [Required(ErrorMessage = "كلمة المرور مطلوبة.")]
+        [StringLength(128, MinimumLength = 5, ErrorMessage = "كلمة المرور يجب أن تكون بين 5 و 128 حرفاً.")]
         public string PassWord { get; set; }
     }
 

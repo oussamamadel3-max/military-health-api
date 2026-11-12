@@ -1154,10 +1154,20 @@ public class UserService : IUserService
         if (!unrestricted)
         {
             if (_currentCenter.IsCentralContext || _currentCenter.CenterId is not Guid active || active != centerId)
-                throw new ForbiddenPermissionException("لا يمكن عرض مستخدمي مركز غير المركز النشط.");
+                throw ForbiddenPermissionException.AccessDenied(
+                    "لا يمكن عرض مستخدمي مركز غير المركز النشط.",
+                    "UserService.ApplyActiveCenterFilter",
+                    "client-center-mismatch",
+                    SystemPermissions.UserManagement.Read,
+                    centerId: centerId);
 
             if (!await _access.IsActivelyAssignedAsync(actorId, centerId))
-                throw new ForbiddenPermissionException("لا يمكن عرض مستخدمي مركز غير مسند لك.");
+                throw ForbiddenPermissionException.AccessDenied(
+                    "لا يمكن عرض مستخدمي مركز غير مسند لك.",
+                    "UserService.ApplyActiveCenterFilter",
+                    "actor-center-unassigned",
+                    SystemPermissions.UserManagement.Read,
+                    centerId: centerId);
         }
         else
         {
@@ -1350,13 +1360,30 @@ public class UserService : IUserService
             if (!actorIsCentral)
             {
                 if (_currentCenter.IsCentralContext || _currentCenter.CenterId is not Guid active || active == Guid.Empty)
-                    throw new ForbiddenPermissionException("لا يوجد مركز نشط لإسناد الصلاحية.");
+                    throw ForbiddenPermissionException.AccessDenied(
+                        "لا يوجد مركز نشط لإسناد الصلاحية.",
+                        "UserService.ResolveDirectPermissionScope",
+                        "no-active-center",
+                        SystemPermissions.UserManagement.AssignPermissions,
+                        targetUserId: targetUserId);
 
                 if (requestedCenterId is Guid requested && requested != active)
-                    throw new ForbiddenPermissionException("لا يمكنك إسناد صلاحية خارج مركزك النشط.");
+                    throw ForbiddenPermissionException.AccessDenied(
+                        "لا يمكنك إسناد صلاحية خارج مركزك النشط.",
+                        "UserService.ResolveDirectPermissionScope",
+                        "client-center-mismatch",
+                        SystemPermissions.UserManagement.AssignPermissions,
+                        targetUserId: targetUserId,
+                        centerId: active);
 
                 if (!await _access.IsActivelyAssignedAsync(targetUserId, active))
-                    throw new ForbiddenPermissionException("لا يمكن منح صلاحية خارج مركز مسند للمستخدم.");
+                    throw ForbiddenPermissionException.AccessDenied(
+                        "لا يمكن منح صلاحية خارج مركز مسند للمستخدم.",
+                        "UserService.ResolveDirectPermissionScope",
+                        "target-center-unassigned",
+                        SystemPermissions.UserManagement.AssignPermissions,
+                        targetUserId: targetUserId,
+                        centerId: active);
 
                 return active;
             }
@@ -1367,7 +1394,13 @@ public class UserService : IUserService
             var center = await _centers.GetByIdAsync(requestedCenterId.Value, asNoTracking: true);
             MedicalCenterActivityGuard.EnsureAcceptsNewRelations(center);
             if (!await _access.IsActivelyAssignedAsync(targetUserId, requestedCenterId.Value))
-                throw new ForbiddenPermissionException("لا يمكن منح صلاحية خارج مركز مسند للمستخدم.");
+                throw ForbiddenPermissionException.AccessDenied(
+                    "لا يمكن منح صلاحية خارج مركز مسند للمستخدم.",
+                    "UserService.ResolveDirectPermissionScope",
+                    "target-center-unassigned",
+                    SystemPermissions.UserManagement.AssignPermissions,
+                    targetUserId: targetUserId,
+                    centerId: requestedCenterId);
 
             return requestedCenterId;
         }
@@ -1381,10 +1414,19 @@ public class UserService : IUserService
             if (!actorIsCentral)
             {
                 if (_currentCenter.IsCentralContext || _currentCenter.CenterId is not Guid active || active == Guid.Empty)
-                    throw new ForbiddenPermissionException("لا يوجد مركز نشط لإنشاء المستخدم.");
+                    throw ForbiddenPermissionException.AccessDenied(
+                        "لا يوجد مركز نشط لإنشاء المستخدم.",
+                        "UserService.ResolveMembershipCenter",
+                        "no-active-center",
+                        SystemPermissions.UserManagement.Create);
 
                 if (requestedCenterId is Guid requested && requested != active)
-                    throw new ForbiddenPermissionException("لا يمكنك إنشاء مستخدم في مركز خارج مركزك النشط.");
+                    throw ForbiddenPermissionException.AccessDenied(
+                        "لا يمكنك إنشاء مستخدم في مركز خارج مركزك النشط.",
+                        "UserService.ResolveMembershipCenter",
+                        "client-center-mismatch",
+                        SystemPermissions.UserManagement.Create,
+                        centerId: active);
 
                 centerId = active;
             }
@@ -1400,7 +1442,12 @@ public class UserService : IUserService
             MedicalCenterActivityGuard.EnsureAcceptsNewRelations(center);
 
             if (!actorIsCentral && !await _access.IsActivelyAssignedAsync(actorId, centerId))
-                throw new ForbiddenPermissionException("لا يمكنك إنشاء مستخدم خارج نطاق تفويضك.");
+                throw ForbiddenPermissionException.AccessDenied(
+                    "لا يمكنك إنشاء مستخدم خارج نطاق تفويضك.",
+                    "UserService.ResolveMembershipCenter",
+                    "actor-center-unassigned",
+                    SystemPermissions.UserManagement.Create,
+                    centerId: centerId);
 
             return centerId;
         }

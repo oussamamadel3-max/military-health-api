@@ -39,6 +39,15 @@ public static class ValidationErrorText
         return $"قيمة الحقل {label} غير صالحة.";
     }
 
+    private static readonly Dictionary<string, string> FieldLabels =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["userName"] = "اسم المستخدم",
+            ["passWord"] = "كلمة المرور",
+            ["password"] = "كلمة المرور",
+            ["refreshToken"] = "رمز التحديث",
+        };
+
     private static string Label(string key)
     {
         if (string.IsNullOrWhiteSpace(key) || key is "$" or "request")
@@ -47,7 +56,8 @@ public static class ValidationErrorText
         if (key.StartsWith("$.", StringComparison.Ordinal))
             key = key[2..];
 
-        return key;
+        var leaf = key.Contains('.') ? key[(key.LastIndexOf('.') + 1)..] : key;
+        return FieldLabels.TryGetValue(leaf, out var arabic) ? arabic : leaf;
     }
 
     private static bool ContainsArabic(string? message)
