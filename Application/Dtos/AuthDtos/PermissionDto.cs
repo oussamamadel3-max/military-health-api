@@ -31,8 +31,9 @@ namespace Application.Dtos.AuthDtos
         public List<Guid> PermissionId { get; set; } = new();
 
         /// <summary>
-        /// نطاق الصلاحية المباشرة. للمدير المحلي يُؤخذ المركز النشط إن تُرك فارغاً، ويُرفض إن اختلف عنه.
-        /// للجهة المركزية: القيمة الفارغة تعني صلاحية مركزية، والقيمة تقيّد الصلاحية بذلك المركز.
+        /// نطاق الصلاحية المباشرة.
+        /// للمنفّذ المحلي: <c>null</c> أو غياب القيمة يعني استخدام المركز النشط الذي يتحقق منه الخادم، وليس إنشاء إسناد مركزي؛ ويُرفض إن اختلفت القيمة عن المركز النشط.
+        /// للمنفّذ الذي يملك صلاحية العملية نفسها بنطاق مركزي: <c>null</c> قد يعني نطاقاً مركزياً عاماً عندما تسمح العملية بذلك، والقيمة تقيّد الصلاحية بذلك المركز.
         /// </summary>
         public Guid? CenterId { get; set; }
     }
@@ -49,8 +50,19 @@ namespace Application.Dtos.AuthDtos
 
         public List<Guid> PermissionIds { get; set; } = new();
 
-        /// <summary>نفس معنى CenterId في التبديل: فارغ للمدير المحلي يعني المركز النشط.</summary>
+        /// <summary>
+        /// نطاق المزامنة.
+        /// للمنفّذ المحلي: <c>null</c> أو غياب القيمة يعني استخدام المركز النشط الذي يتحقق منه الخادم، وليس إنشاء إسناد مركزي؛ ويُرفض إن اختلفت القيمة عن المركز النشط.
+        /// للمنفّذ الذي يملك صلاحية العملية نفسها بنطاق مركزي: <c>null</c> قد يعني نطاقاً مركزياً عاماً عندما تسمح العملية بذلك.
+        /// </summary>
         public Guid? CenterId { get; set; }
+    }
+
+    /// <summary>صلاحية مباشرة طُلب سحبها أثناء المزامنة وبقيت لأنها خارج حدود تفويض المنفّذ.</summary>
+    public sealed class SkippedDirectPermissionRevokeDto
+    {
+        public Guid PermissionId { get; set; }
+        public string Name { get; set; } = string.Empty;
     }
 
     /// <summary>نتيجة مزامنة الصلاحيات المباشرة.</summary>
@@ -59,6 +71,12 @@ namespace Application.Dtos.AuthDtos
         public int Added { get; set; }
         public int Removed { get; set; }
         public bool SessionsInvalidated { get; set; }
+
+        /// <summary>
+        /// صلاحيات مباشرة ضمن نطاق المزامنة طُلبت إزالتها من المجموعة النهائية لكن لم تُسحب لحدود التفويض.
+        /// قائمة فارغة عند عدم وجود عناصر متخطاة.
+        /// </summary>
+        public List<SkippedDirectPermissionRevokeDto> SkippedRevokes { get; set; } = new();
     }
 
 

@@ -657,6 +657,7 @@ public class RoleAssignmentPathTests
         Assert.Equal(0, result.Added);
         Assert.Equal(1, result.Removed);
         Assert.True(result.SessionsInvalidated);
+        Assert.Empty(result.SkippedRevokes);
         Assert.False(await db.UserPermissions.AnyAsync(p =>
             p.UserId == "target-1" && p.PermissionId == viewId && p.CenterId == CenterA && p.IsActive));
         Assert.True(await db.UserPermissions.AnyAsync(p =>
@@ -746,6 +747,9 @@ public class RoleAssignmentPathTests
         });
 
         Assert.Equal(1, result.Removed);
+        var skipped = Assert.Single(result.SkippedRevokes);
+        Assert.Equal(elevatedId, skipped.PermissionId);
+        Assert.Equal(MilitaryHealthPermissions.Centers.Manage, skipped.Name);
         Assert.True(await db.UserPermissions.AnyAsync(p =>
             p.UserId == "target-1" && p.PermissionId == elevatedId && p.CenterId == CenterA && p.IsActive));
         Assert.False(await db.UserPermissions.AnyAsync(p =>

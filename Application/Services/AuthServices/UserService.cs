@@ -955,9 +955,28 @@ public class UserService : IUserService
         var requestedSet = requested.ToHashSet();
         var currentIds = currentRows.Select(row => row.PermissionId).ToHashSet();
         var toAdd = requested.Where(id => !currentIds.Contains(id)).ToList();
-        var toRemove = currentRows
-            .Where(row => !requestedSet.Contains(row.PermissionId)
-                && actorPermissions.Contains(row.Permission?.Name ?? string.Empty, StringComparer.OrdinalIgnoreCase))
+
+        // Omissions from the final set are revoke candidates. Outside-delegation grants stay
+        // active but are reported in SkippedRevokes so the client is not told they were withdrawn.
+        var candidateRemovals = currentRows
+            .Where(row => !requestedSet.Contains(row.PermissionId))
+            .ToList();
+        var toRemove = candidateRemovals
+            .Where(row => actorPermissions.Contains(
+                row.Permission?.Name ?? string.Empty, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+        var skippedRevokes = candidateRemovals
+            .Where(row => !actorPermissions.Contains(
+                row.Permission?.Name ?? string.Empty, StringComparer.OrdinalIgnoreCase))
+            .GroupBy(row => row.PermissionId)
+            .Select(g => new SkippedDirectPermissionRevokeDto
+            {
+                PermissionId = g.Key,
+                Name = g.Select(r => r.Permission?.Name).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n))
+                    ?? string.Empty
+            })
+            .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(x => x.PermissionId)
             .ToList();
 
         if (toAdd.Count > 0)
@@ -980,7 +999,10 @@ public class UserService : IUserService
 
         if (toAdd.Count == 0 && toRemove.Count == 0)
         {
-            return new DirectPermissionSyncResultDto();
+            return new DirectPermissionSyncResultDto
+            {
+                SkippedRevokes = skippedRevokes
+            };
         }
 
         using var tx = await _unitOfWork.BeginTransactionAsync();
@@ -1030,7 +1052,8 @@ public class UserService : IUserService
         {
             Added = toAdd.Count,
             Removed = toRemove.Count,
-            SessionsInvalidated = true
+            SessionsInvalidated = true,
+            SkippedRevokes = skippedRevokes
         };
     }
     #endregion

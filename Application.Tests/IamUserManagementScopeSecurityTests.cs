@@ -345,6 +345,10 @@ public class IamUserManagementScopeSecurityTests
         });
 
         Assert.Equal(1, result.Removed);
+        Assert.True(result.SessionsInvalidated);
+        var skipped = Assert.Single(result.SkippedRevokes);
+        Assert.Equal(elevatedId, skipped.PermissionId);
+        Assert.Equal(MilitaryHealthPermissions.Centers.Manage, skipped.Name);
         Assert.True(await db.UserPermissions.AnyAsync(p =>
             p.UserId == "target-1" && p.PermissionId == elevatedId && p.IsActive));
         Assert.False(await db.UserPermissions.AnyAsync(p =>

@@ -158,16 +158,31 @@ namespace API.Controllers.AuthControllers
 
         /// <summary>
         /// يستبدل المجموعة النهائية للصلاحيات المباشرة داخل النطاق. التبديل القديم يبقى Delta.
+        /// الصلاحيات خارج تفويض المنفّذ لا تُسحب وتُعاد في <c>SkippedRevokes</c>.
         /// </summary>
         [HttpPost("[action]")]
         [AuthorizePermission(SystemPermissions.UserManagement.AssignPermissions)]
         public async Task<IResult> SyncDirectPermissions([FromBody] SyncDirectPermissionsDto dto)
         {
             var result = await _userService.SyncDirectPermissionsAsync(dto);
-            var message = result.Added == 0 && result.Removed == 0
-                ? "لم تتغير الصلاحيات المباشرة."
-                : "تمت مزامنة الصلاحيات المباشرة بنجاح.";
-            return ApiResponse.Success(message, result);
+            return ApiResponse.Success(BuildDirectPermissionSyncMessage(result), result);
+        }
+
+        /// <summary>
+        /// يميّز النجاح الكامل والجزئي وحالة عدم التغيير عندما يبقى سحب غير مفوّض قائماً.
+        /// </summary>
+        private static string BuildDirectPermissionSyncMessage(DirectPermissionSyncResultDto result)
+        {
+            var changed = result.Added > 0 || result.Removed > 0;
+            var hasSkips = result.SkippedRevokes is { Count: > 0 };
+
+            if (changed && hasSkips)
+                return "تمت مزامنة الصلاحيات المباشرة جزئياً. بعض الصلاحيات لم تُسحب لأنها خارج حدود تفويضك.";
+            if (changed)
+                return "تمت مزامنة الصلاحيات المباشرة بنجاح.";
+            if (hasSkips)
+                return "لم تُسحب أي صلاحية؛ العناصر المطلوبة للسحب خارج حدود تفويضك.";
+            return "لم تتغير الصلاحيات المباشرة.";
         }
 
         /// <summary>
