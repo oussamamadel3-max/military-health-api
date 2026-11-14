@@ -216,6 +216,21 @@ namespace API.Controllers.AuthControllers
             return ApiResponse.Success("تم جلب الأدوار القابلة للإسناد.", roles);
         }
 
+        /// <summary>
+        /// صلاحيات قابلة للإسناد المباشر لمستخدم ضمن النطاق (FR-018).
+        /// يتطلب UserManagement.AssignPermissions ولا يتطلب PermissionManagement.Read.
+        /// </summary>
+        [HttpGet("[action]")]
+        [AuthorizePermission(SystemPermissions.UserManagement.AssignPermissions)]
+        public async Task<IResult> AssignablePermissions(
+            [FromQuery] string userId,
+            [FromQuery] Guid? centerId = null,
+            CancellationToken cancellationToken = default)
+        {
+            var result = await _userService.GetAssignablePermissionsAsync(userId, centerId, cancellationToken);
+            return ApiResponse.Success("تم جلب الصلاحيات القابلة للإسناد.", result);
+        }
+
         [HttpGet("[action]")]
         [AuthorizePermission(SystemPermissions.UserManagement.Read)]
         public async Task<IResult> GetDropDownUsers()

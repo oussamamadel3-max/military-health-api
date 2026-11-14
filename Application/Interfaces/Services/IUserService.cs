@@ -21,6 +21,14 @@ namespace Application.Interfaces.Services
         Task ToggleRolesForUserAsync(AssignRolesDto dto);
         Task TogglePermissionsForUserAsync(AssignPermissionToUserDto dto);
         Task<DirectPermissionSyncResultDto> SyncDirectPermissionsAsync(SyncDirectPermissionsDto dto);
+        /// <summary>
+        /// قائمة الصلاحيات القابلة للإسناد المباشر ضمن نطاق المستخدم المستهدف (FR-018).
+        /// تتطلب UserManagement.AssignPermissions ولا تتطلب PermissionManagement.Read.
+        /// </summary>
+        Task<AssignablePermissionsDto> GetAssignablePermissionsAsync(
+            string userId,
+            Guid? centerId = null,
+            CancellationToken cancellationToken = default);
         Task RemoveFieldPermissionsFromUserAsync(RemoveFieldPermissionsDto dto);
         Task<UserListItemDto> UpdateUserAsync(string id, UpdateUserPatchRequest dto);
         Task<UpdateUserStatusRequest> UpdateUserStatusAsync(string id, UpdateUserStatusRequest request);

@@ -1056,6 +1056,105 @@ public class UserService : IUserService
             SkippedRevokes = skippedRevokes
         };
     }
+
+    /// <summary>
+    /// يعيد الصلاحيات التي يجوز للمنفّذ منحها/سحبها مباشرة ضمن نطاق المستهدف،
+    /// مع الصلاحيات المباشرة الحالية في ذلك النطاق (مقفولة إن خرجت عن التفويض).
+    /// قراءة فقط — لا تكتب ولا تبطل جلسات.
+    /// </summary>
+    public async Task<AssignablePermissionsDto> GetAssignablePermissionsAsync(
+        string userId,
+        Guid? centerId = null,
+        CancellationToken cancellationToken = default)
+    {
+        _permissionGate.EnsureAll(SystemPermissions.UserManagement.AssignPermissions);
+
+        if (string.IsNullOrWhiteSpace(userId))
+            throw new InvalidUserDataException("معرف المستخدم غير صالح.");
+
+        var user = await _userManager.FindByIdAsync(userId)
+            ?? throw new UserNotFoundException(userId);
+
+        await EnsureCanManageTargetAsync(user.Id, SystemPermissions.UserManagement.AssignPermissions);
+        var actorId = AssignmentStamp.RequireActor(_currentUserService.UserId);
+        var scopeCenterId = await ResolveDirectPermissionScopeAsync(actorId, user.Id, centerId);
+
+        var actorPermissionNames = _permissionGate.GetPermissions()
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var catalog = await _permissionRepository.GetAllOrderedAsync(cancellationToken);
+        var assignable = catalog
+            .Where(p => p.IsActive
+                && !string.IsNullOrWhiteSpace(p.Name)
+                && actorPermissionNames.Contains(p.Name!))
+            .Select(ToAssignableItem)
+            .OrderBy(p => p.ModuleLabel, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(p => p.NameAr, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var currentRows = await _userRepository.QueryUserPermissions(asNoTracking: true)
+            .Include(up => up.Permission)
+            .Where(up => up.UserId == user.Id && up.IsActive && up.CenterId == scopeCenterId)
+            .ToListAsync(cancellationToken);
+
+        var currentDirect = currentRows
+            .Where(row => row.Permission is not null && !string.IsNullOrWhiteSpace(row.Permission.Name))
+            .Select(row =>
+            {
+                var permission = row.Permission!;
+                var name = permission.Name!;
+                var within = actorPermissionNames.Contains(name);
+                var moduleKey = PermissionDependencyRules.GetModuleKey(name);
+                return new CurrentDirectPermissionItemDto
+                {
+                    Id = permission.Id,
+                    Name = name,
+                    NameAr = AuthDisplayNames.PermissionAr(name),
+                    Description = string.IsNullOrWhiteSpace(permission.Description)
+                        ? AuthDisplayNames.PermissionAr(name)
+                        : permission.Description,
+                    ModuleKey = moduleKey,
+                    ModuleLabel = AuthDisplayNames.ModuleAr(moduleKey),
+                    WithinActorDelegation = within,
+                    CanRevoke = within,
+                    IsLocked = !within
+                };
+            })
+            .OrderBy(p => p.IsLocked)
+            .ThenBy(p => p.ModuleLabel, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(p => p.NameAr, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return new AssignablePermissionsDto
+        {
+            UserId = user.Id,
+            ScopeCenterId = scopeCenterId,
+            Assignable = assignable,
+            CurrentDirect = currentDirect
+        };
+    }
+
+    private static AssignablePermissionItemDto ToAssignableItem(Permission permission)
+    {
+        var name = permission.Name ?? string.Empty;
+        var moduleKey = PermissionDependencyRules.GetModuleKey(name);
+        return new AssignablePermissionItemDto
+        {
+            Id = permission.Id,
+            Name = name,
+            NameAr = AuthDisplayNames.PermissionAr(name),
+            Description = string.IsNullOrWhiteSpace(permission.Description)
+                ? AuthDisplayNames.PermissionAr(name)
+                : permission.Description,
+            ModuleKey = moduleKey,
+            ModuleLabel = AuthDisplayNames.ModuleAr(moduleKey),
+            CanGrant = true,
+            CanRevoke = true
+        };
+    }
     #endregion
 
     #region إزالة الصلاحيات الحقلية من مستخدم

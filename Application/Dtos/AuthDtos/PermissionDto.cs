@@ -123,5 +123,47 @@ namespace Application.Dtos.AuthDtos
         public string ModuleLabel { get; set; } = "";
         public List<PermissionModuleItemDto> Permissions { get; set; } = new();
     }
+
+    /// <summary>
+    /// صلاحيات يمكن للمنفّذ إسنادها مباشرة ضمن نطاق محدد، مع الحالة الحالية للمستخدم المستهدف.
+    /// لا يغني عن كتالوج إدارة الصلاحيات (PermissionManagement.Read).
+    /// </summary>
+    public sealed class AssignablePermissionsDto
+    {
+        public string UserId { get; set; } = string.Empty;
+
+        /// <summary>نطاق الإسناد المحلول من الخادم (مركز نشط محلي أو null للنطاق المركزي).</summary>
+        public Guid? ScopeCenterId { get; set; }
+
+        public List<AssignablePermissionItemDto> Assignable { get; set; } = new();
+        public List<CurrentDirectPermissionItemDto> CurrentDirect { get; set; } = new();
+    }
+
+    /// <summary>صلاحية فعّالة ضمن تفويض المنفّذ وقابلة للمنح/السحب في الحوار.</summary>
+    public sealed class AssignablePermissionItemDto
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string NameAr { get; set; } = string.Empty;
+        public string? Description { get; set; }
+        public string ModuleKey { get; set; } = string.Empty;
+        public string ModuleLabel { get; set; } = string.Empty;
+        public bool CanGrant { get; set; } = true;
+        public bool CanRevoke { get; set; } = true;
+    }
+
+    /// <summary>صلاحية مباشرة حالية ضمن النطاق؛ قد تكون مقفولة إن خرجت عن تفويض المنفّذ.</summary>
+    public sealed class CurrentDirectPermissionItemDto
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string NameAr { get; set; } = string.Empty;
+        public string? Description { get; set; }
+        public string ModuleKey { get; set; } = string.Empty;
+        public string ModuleLabel { get; set; } = string.Empty;
+        public bool WithinActorDelegation { get; set; }
+        public bool CanRevoke { get; set; }
+        public bool IsLocked { get; set; }
+    }
 }
 

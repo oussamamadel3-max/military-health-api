@@ -265,8 +265,9 @@ public class MinimumActiveRoleTests
         await SeedUserAsync(db, "actor-1", "auditor");
         await SeedUserAsync(db, "target-1", "admin-user");
         await SeedUserCenterAsync(db, "target-1", CenterA);
-        // Central authority without IAM write set — actor can manage, but is not an IAM admin.
+        // Central AssignRoles without IAM write set — actor can manage, but is not an IAM admin.
         var auditor = await SeedRoleAsync(db, "Auditor");
+        await SeedRolePermissionAsync(db, auditor, SystemPermissions.UserManagement.AssignRoles);
         await SeedRoleLinkAsync(db, "actor-1", auditor, null);
 
         // Sole IAM-capable user (no iam-keeper). Keep ReceptionClerk so minimum-role passes.
@@ -285,7 +286,7 @@ public class MinimumActiveRoleTests
 
         var uow = new RollbackTrackingUnitOfWork(db);
         var harness = CreateAssignmentHarness(db, uow, unrestrictedActor: true);
-        await Assert.ThrowsAsync<ForbiddenPermissionException>(() =>
+        var error = await Assert.ThrowsAsync<ForbiddenPermissionException>(() =>
             harness.Service.RevokeRoleAsync(new RevokeUserRoleDto
             {
                 UserId = "target-1",
@@ -294,6 +295,7 @@ public class MinimumActiveRoleTests
                 Reason = "سحب IAM"
             }));
 
+        Assert.Contains("آخر حساب نشط قادر على إدارة المستخدمين والأدوار والصلاحيات", error.Message);
         Assert.True(uow.RolledBack);
         Assert.False(uow.Committed);
         Assert.Equal(stampBefore, (await db.Users.SingleAsync(u => u.Id == "target-1")).SecurityStamp);

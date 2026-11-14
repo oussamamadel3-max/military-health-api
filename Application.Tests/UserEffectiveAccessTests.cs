@@ -235,6 +235,8 @@ public class UserEffectiveAccessTests
         await SeedUserAsync(db, "target-1", "nurse");
         await SeedUserCenterAsync(db, "target-1", CenterA);
         var auditorRole = await SeedRoleAsync(db, "Auditor");
+        // Scope guard reads central operation grants from DB (not the mocked gate alone).
+        await SeedRolePermissionAsync(db, auditorRole, SystemPermissions.UserManagement.ViewEffectiveAccess);
         await SeedUserRoleAsync(db, "actor-1", auditorRole, null);
 
         var service = CreateService(
