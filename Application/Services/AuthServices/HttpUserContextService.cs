@@ -1,15 +1,20 @@
 using Application.Interfaces.Services;
 using Domain.Enums;
 using Microsoft.AspNetCore.Http;
-using System;
 using System.Security.Claims;
 
 namespace Application.Services.AuthServices;
 
+/// <summary>
+/// يستخرج هوية المستخدم ومعرّفات/أسماء الأدوار وصلاحيات الحقول من JWT.
+/// </summary>
 public class HttpUserContextService : IUserContextService
 {
+    public const string RoleIdClaimType = "role_id";
+
     private readonly IHttpContextAccessor _httpContextAccessor;
     private List<string>? _roleIds;
+    private List<string>? _roleNames;
     private Dictionary<string, FieldAccessType>? _fieldPermissions;
 
     public HttpUserContextService(IHttpContextAccessor httpContextAccessor)
@@ -25,13 +30,25 @@ public class HttpUserContextService : IUserContextService
 
     public IReadOnlyList<string> RoleIds => _roleIds ??= ExtractRoleIds();
 
+    public IReadOnlyList<string> RoleNames => _roleNames ??= ExtractRoleNames();
+
     public IReadOnlyDictionary<string, FieldAccessType> FieldPermissions =>
         _fieldPermissions ??= ExtractFieldPermissions();
 
     private List<string> ExtractRoleIds()
     {
         return User?.Claims
-                   .Where(c => c.Type == ClaimTypes.Role)
+                   .Where(c => c.Type == RoleIdClaimType)
+                   .Select(c => c.Value)
+                   .Where(v => !string.IsNullOrWhiteSpace(v))
+                   .Distinct(StringComparer.OrdinalIgnoreCase)
+                   .ToList() ?? new List<string>();
+    }
+
+    private List<string> ExtractRoleNames()
+    {
+        return User?.Claims
+                   .Where(c => c.Type == ClaimTypes.Role || c.Type == "role")
                    .Select(c => c.Value)
                    .Where(v => !string.IsNullOrWhiteSpace(v))
                    .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -45,8 +62,7 @@ public class HttpUserContextService : IUserContextService
         if (User == null)
             return permissions;
 
-        var fieldPermissionClaims = User.Claims.Where(c => c.Type == "field_permission");
-        foreach (var claim in fieldPermissionClaims)
+        foreach (var claim in User.Claims.Where(c => c.Type == "field_permission"))
         {
             var parts = claim.Value.Split(':');
             if (parts.Length != 3)
@@ -68,5 +84,3 @@ public class HttpUserContextService : IUserContextService
         return permissions;
     }
 }
-
-

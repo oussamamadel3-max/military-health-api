@@ -84,6 +84,34 @@ public static class AuthTestSeed
             Description = "IT manage user centers",
             IsActive = true
         };
+        var fieldPermissionRead = new Permission
+        {
+            Id = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0009"),
+            Name = SystemPermissions.FieldPermissionManagement.Read,
+            Description = "IT field permission read",
+            IsActive = true
+        };
+        var fieldPermissionCreate = new Permission
+        {
+            Id = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeee000a"),
+            Name = SystemPermissions.FieldPermissionManagement.Create,
+            Description = "IT field permission create",
+            IsActive = true
+        };
+        var fieldPermissionEdit = new Permission
+        {
+            Id = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeee000b"),
+            Name = SystemPermissions.FieldPermissionManagement.Edit,
+            Description = "IT field permission edit",
+            IsActive = true
+        };
+        var fieldPermissionDelete = new Permission
+        {
+            Id = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeee000c"),
+            Name = SystemPermissions.FieldPermissionManagement.Delete,
+            Description = "IT field permission delete",
+            IsActive = true
+        };
         db.Permissions.AddRange(
             resetPermission,
             viewPermission,
@@ -92,7 +120,11 @@ public static class AuthTestSeed
             editUserPermission,
             roleCreatePermission,
             createUserPermission,
-            userCentersManagePermission);
+            userCentersManagePermission,
+            fieldPermissionRead,
+            fieldPermissionCreate,
+            fieldPermissionEdit,
+            fieldPermissionDelete);
 
         await db.SaveChangesAsync();
 
@@ -133,7 +165,11 @@ public static class AuthTestSeed
                      editUserPermission.Id,
                      roleCreatePermission.Id,
                      createUserPermission.Id,
-                     userCentersManagePermission.Id
+                     userCentersManagePermission.Id,
+                     fieldPermissionRead.Id,
+                     fieldPermissionCreate.Id,
+                     fieldPermissionEdit.Id,
+                     fieldPermissionDelete.Id
                  })
         {
             db.RolePermissions.Add(new RolePermission

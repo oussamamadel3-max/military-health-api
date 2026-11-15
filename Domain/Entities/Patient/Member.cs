@@ -1,8 +1,13 @@
+using Domain.Attributes;
 using Domain.Entities.Auth;
 using Domain.Entities.Core;
 
 namespace Domain.Entities.Patient;
 
+/// <summary>
+/// ملف المنتسب. ضمن كتالوج صلاحيات الحقول التجريبي (Phase B): الحقل المعتمد حالياً MotherName فقط عبر MemberDetailsDto.
+/// </summary>
+[FieldPermissionEntity("المنتسب")]
 public class Member
 {
     public Guid MemberId { get; set; }

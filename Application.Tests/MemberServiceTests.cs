@@ -25,9 +25,9 @@ namespace Application.Tests;
 
 public class MemberServiceTests
 {
-    private static readonly Guid CenterA = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
-    private static readonly Guid CenterB = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
-    private static readonly Guid RecruitmentCenterId = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
+    internal static readonly Guid CenterA = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+    internal static readonly Guid CenterB = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    internal static readonly Guid RecruitmentCenterId = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
 
     [Fact]
     public async Task Create_assigns_file_and_queue_numbers_identity_and_audit()
@@ -1329,7 +1329,8 @@ public class MemberServiceTests
         bool allowViewCentral = false,
         bool allowEditAfterFinalDecision = false,
         IUnitOfWork? unitOfWork = null,
-        IAuditLogRepository? audit = null)
+        IAuditLogRepository? audit = null,
+        IMemberFieldPermissionGuard? fieldPermissions = null)
     {
         var gate = new Mock<IPermissionGate>();
         gate.Setup(g => g.Has(MilitaryHealthPermissions.Members.EditAfterFinalDecision))
@@ -1445,14 +1446,15 @@ public class MemberServiceTests
                 .ThrowsAsync(new ForbiddenPermissionException());
         }
 
-        return CreateService(db, gate.Object, unitOfWork, audit);
+        return CreateService(db, gate.Object, unitOfWork, audit, fieldPermissions);
     }
 
     private static MemberService CreateService(
         AppDbContext db,
         IPermissionGate gate,
         IUnitOfWork? unitOfWork = null,
-        IAuditLogRepository? audit = null)
+        IAuditLogRepository? audit = null,
+        IMemberFieldPermissionGuard? fieldPermissions = null)
     {
         var config = new TypeAdapterConfig();
         new MemberProfile().Register(config);
@@ -1476,7 +1478,8 @@ public class MemberServiceTests
             mapper,
             gate,
             currentUser,
-            new ExportService());
+            new ExportService(),
+            fieldPermissions: fieldPermissions);
     }
 
     internal static async Task SeedReferencesAsync(AppDbContext db)

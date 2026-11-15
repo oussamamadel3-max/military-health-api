@@ -1,27 +1,34 @@
 using Application.Attributes;
 using Application.Dtos.AuthDtos;
+using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Domain.Enums;
 using System.Reflection;
 
 namespace Application.Common.Permissions
 {
+    /// <summary>
+    /// إنفاذ صلاحيات الحقول على DTOs المحمية بـ <see cref="FieldPermissionAttribute"/> فقط.
+    /// الحقول غير المعلَّمة لا تُمس. غياب تعيين لحقل محمي = <see cref="FieldAccessType.None"/> (Default Deny).
+    /// </summary>
     public class FieldPermissionHelper
     {
         private readonly IFieldPermissionService _fieldPermissionService;
+        private readonly IUserRepository _userRepository;
 
-        public FieldPermissionHelper(IFieldPermissionService fieldPermissionService)
+        public FieldPermissionHelper(
+            IFieldPermissionService fieldPermissionService,
+            IUserRepository userRepository)
         {
             _fieldPermissionService = fieldPermissionService;
+            _userRepository = userRepository;
         }
 
-        /// <summary>
-        /// تطبيق صلاحيات الحقول على DTO واحد
-        /// </summary>
+        /// <summary>تطبيق صلاحيات الحقول على DTO واحد.</summary>
         public async Task<T> ApplyFieldPermissionsAsync<T>(
             T dto,
             string userId,
-            List<string> roleIds,
+            List<string>? roleIds,
             string entityName,
             IReadOnlyDictionary<string, FieldAccessType>? jwtFieldPermissions = null) where T : class
         {
@@ -29,18 +36,14 @@ namespace Application.Common.Permissions
 
             var mergedPermissions = await GetMergedPermissionsAsync(userId, roleIds, entityName);
             ApplyJwtOverrides(mergedPermissions, jwtFieldPermissions, entityName);
-
-            // تطبيق الصلاحيات على DTO
             return ApplyPermissionsToDto(dto, mergedPermissions);
         }
 
-        /// <summary>
-        /// تطبيق صلاحيات الحقول على قائمة DTOs
-        /// </summary>
+        /// <summary>تطبيق صلاحيات الحقول على قائمة DTOs.</summary>
         public async Task<List<T>> ApplyFieldPermissionsAsync<T>(
             List<T> dtos,
             string userId,
-            List<string> roleIds,
+            List<string>? roleIds,
             string entityName,
             IReadOnlyDictionary<string, FieldAccessType>? jwtFieldPermissions = null) where T : class
         {
@@ -51,202 +54,154 @@ namespace Application.Common.Permissions
 
             var result = new List<T>(dtos.Count);
             foreach (var dto in dtos)
-            {
-                var filtered = ApplyPermissionsToDto(dto, mergedPermissions);
-                result.Add(filtered);
-            }
+                result.Add(ApplyPermissionsToDto(dto, mergedPermissions));
 
             return result;
         }
 
+        /// <summary>التحقق من صلاحية الكتابة على حقل محمي.</summary>
+        public async Task<bool> CanWriteFieldAsync(
+            string userId,
+            List<string>? roleIds,
+            string entityName,
+            string fieldName)
+        {
+            var mergedPermissions = await GetMergedPermissionsAsync(userId, roleIds, entityName);
+            var normalizedFieldName = NormalizeFieldKey(fieldName);
+            var accessType = mergedPermissions.TryGetValue(normalizedFieldName, out var access)
+                ? access
+                : FieldAccessSemantics.DefaultWhenUnset;
+
+            return FieldAccessSemantics.CanWrite(accessType);
+        }
+
+        private async Task<Dictionary<string, FieldAccessType>> GetMergedPermissionsAsync(
+            string userId,
+            List<string>? roleIds,
+            string entityName)
+        {
+            var userPermissions = new List<FieldPermissionDto>();
+            if (!string.IsNullOrEmpty(userId))
+            {
+                var filter = new FieldPermissionFilterDto
+                {
+                    UserId = userId,
+                    EntityName = entityName
+                };
+                var userResult = await _fieldPermissionService.GetFieldPermissionsAsync(1, 10000, filter);
+                if (userResult != null)
+                    userPermissions = userResult.Items.ToList();
+            }
+
+            var resolvedRoleIds = await ResolveRoleIdsAsync(userId, roleIds);
+            var rolePermissions = new List<FieldPermissionDto>();
+            foreach (var roleId in resolvedRoleIds)
+            {
+                var filter = new FieldPermissionFilterDto
+                {
+                    RoleId = roleId,
+                    EntityName = entityName
+                };
+                var roleResult = await _fieldPermissionService.GetFieldPermissionsAsync(1, 10000, filter);
+                if (roleResult != null)
+                    rolePermissions.AddRange(roleResult.Items);
+            }
+
+            return MergePermissions(userPermissions, rolePermissions);
+        }
+
         /// <summary>
-        /// دمج صلاحيات المستخدم والأدوار (أولوية للمستخدم)
+        /// يفضّل معرّفات الأدوار الفعلية من قاعدة البيانات للمستخدم.
+        /// إن مُرّرت قيم تشبه GUID تُستخدم؛ أسماء الأدوار من JWT وحدها لا تُعامل كـ RoleId.
         /// </summary>
-        private Dictionary<string, FieldAccessType> MergePermissions(
+        private async Task<List<string>> ResolveRoleIdsAsync(string userId, List<string>? roleIds)
+        {
+            if (!string.IsNullOrWhiteSpace(userId))
+            {
+                var fromDb = await _userRepository.GetActiveRoleIdsAsync(userId);
+                if (fromDb.Count > 0)
+                    return fromDb;
+            }
+
+            return (roleIds ?? new List<string>())
+                .Where(id => !string.IsNullOrWhiteSpace(id) && LooksLikeRoleId(id))
+                .Select(id => id.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static bool LooksLikeRoleId(string value)
+            => Guid.TryParse(value, out _) || value.Length >= 20;
+
+        private static Dictionary<string, FieldAccessType> MergePermissions(
             List<FieldPermissionDto> userPermissions,
             List<FieldPermissionDto> rolePermissions)
         {
-            var merged = new Dictionary<string, FieldAccessType>(StringComparer.OrdinalIgnoreCase);
+            var byField = new Dictionary<string, List<FieldAccessType>>(StringComparer.OrdinalIgnoreCase);
 
-            // إضافة صلاحيات الأدوار أولاً
             foreach (var perm in rolePermissions)
             {
-                var normalizedFieldName = NormalizeFieldKey(perm.FieldName);
-                if (string.IsNullOrEmpty(normalizedFieldName)) continue;
-
-                if (!merged.ContainsKey(normalizedFieldName))
-                    merged[normalizedFieldName] = perm.AccessType;
+                var key = NormalizeFieldKey(perm.FieldName);
+                if (string.IsNullOrEmpty(key)) continue;
+                if (!byField.TryGetValue(key, out var list))
+                {
+                    list = new List<FieldAccessType>();
+                    byField[key] = list;
+                }
+                list.Add(perm.AccessType);
             }
 
-            // استبدالها بصلاحيات المستخدم إن وُجدت
+            var userByField = new Dictionary<string, FieldAccessType>(StringComparer.OrdinalIgnoreCase);
             foreach (var perm in userPermissions)
             {
-                var normalizedFieldName = NormalizeFieldKey(perm.FieldName);
-                if (string.IsNullOrEmpty(normalizedFieldName)) continue;
+                var key = NormalizeFieldKey(perm.FieldName);
+                if (string.IsNullOrEmpty(key)) continue;
+                userByField[key] = perm.AccessType;
+            }
 
-                merged[normalizedFieldName] = perm.AccessType;
+            var allKeys = byField.Keys.Union(userByField.Keys, StringComparer.OrdinalIgnoreCase);
+            var merged = new Dictionary<string, FieldAccessType>(StringComparer.OrdinalIgnoreCase);
+            foreach (var key in allKeys)
+            {
+                userByField.TryGetValue(key, out var userAccess);
+                byField.TryGetValue(key, out var roleAccess);
+                merged[key] = FieldAccessSemantics.ResolveEffective(
+                    userByField.ContainsKey(key) ? userAccess : null,
+                    roleAccess ?? Enumerable.Empty<FieldAccessType>());
             }
 
             return merged;
         }
 
-        /// <summary>
-        /// تطبيق الصلاحيات على DTO باستخدام Reflection
-        /// </summary>
-        private T ApplyPermissionsToDto<T>(T dto, Dictionary<string, FieldAccessType> permissions) where T : class
+        private static T ApplyPermissionsToDto<T>(T dto, Dictionary<string, FieldAccessType> permissions) where T : class
         {
-            var type = typeof(T);
-            var properties = type.GetProperties();
-
-            foreach (var property in properties)
+            foreach (var property in typeof(T).GetProperties())
             {
                 var attribute = property.GetCustomAttribute<FieldPermissionAttribute>();
                 if (attribute == null) continue;
 
                 var fieldName = NormalizeFieldKey(attribute.FieldName);
+                var accessType = permissions.TryGetValue(fieldName, out var access)
+                    ? access
+                    : FieldAccessSemantics.DefaultWhenUnset;
 
-                // إذا لم توجد صلاحية للمستخدم أو الدور، اعطي ReadWrite افتراضيًا
-                var accessType = permissions.ContainsKey(fieldName)
-                    ? permissions[fieldName]
-                    : FieldAccessType.ReadWrite;
-
-                if (accessType == FieldAccessType.None || accessType == FieldAccessType.Write)
-                {
-                    if (property.CanWrite)
-                        property.SetValue(dto, GetDefaultValue(property.PropertyType));
-                }
-                // Read أو ReadWrite => نترك القيمة كما هي
-
+                if (!FieldAccessSemantics.CanRead(accessType) && property.CanWrite)
+                    property.SetValue(dto, GetDefaultValue(property.PropertyType));
             }
 
             return dto;
         }
 
-        /// <summary>
-        /// القيمة الافتراضية لنوع معين
-        /// </summary>
-        private object? GetDefaultValue(Type type)
+        private static object? GetDefaultValue(Type type)
         {
-            // Nullable value types أو المراجع => null
             var underlyingNullable = Nullable.GetUnderlyingType(type);
             if (!type.IsValueType || underlyingNullable != null)
                 return null;
 
-            // أنواع ValueType غير القابلة لـ null نرجع قيمتها الافتراضية لتجنب الاستثناءات
             return Activator.CreateInstance(type);
         }
 
-        /// <summary>
-        /// التحقق من صلاحية الكتابة على حقل معين
-        /// </summary>
-        public async Task<bool> CanWriteFieldAsync(
-            string userId,
-            List<string> roleIds,
-            string entityName,
-            string fieldName)
-        {
-            var userPermissions = new List<FieldPermissionDto>();
-            if (!string.IsNullOrEmpty(userId))
-            {
-                var filter = new FieldPermissionFilterDto
-                {
-                    UserId = userId,
-                    EntityName = entityName
-                };
-                var userResult = await _fieldPermissionService.GetFieldPermissionsAsync(1, 10000, filter);
-                if (userResult != null)
-                    userPermissions = userResult.Items.ToList();
-            }
-
-            var rolePermissions = new List<FieldPermissionDto>();
-            if (roleIds != null && roleIds.Any())
-            {
-                foreach (var roleId in roleIds)
-                {
-                    var filter = new FieldPermissionFilterDto
-                    {
-                        RoleId = roleId,
-                        EntityName = entityName
-                    };
-                    var roleResult = await _fieldPermissionService.GetFieldPermissionsAsync(1, 10000, filter);
-                    if (roleResult != null)
-                        rolePermissions.AddRange(roleResult.Items);
-                }
-            }
-
-            var mergedPermissions = MergePermissions(userPermissions, rolePermissions);
-
-            var normalizedFieldName = NormalizeFieldKey(fieldName);
-            var accessType = mergedPermissions.ContainsKey(normalizedFieldName)
-                        ? mergedPermissions[normalizedFieldName]
-                        : FieldAccessType.ReadWrite; // افتراضي: صلاحية كاملة
-
-            Console.WriteLine("=== Permissions Keys ===");
-
-            Console.WriteLine($"{fieldName} => {accessType}");
-
-            Console.WriteLine("=== Permissions Keys ===");
-            foreach (var k in mergedPermissions.Keys)
-                Console.WriteLine(k);
-
-            return accessType == FieldAccessType.Write || accessType == FieldAccessType.ReadWrite;
-
-        }
-
-        private async Task<Dictionary<string, FieldAccessType>> GetMergedPermissionsAsync(
-     string userId,
-     List<string> roleIds,
-     string entityName)
-        {
-            var userPermissions = new List<FieldPermissionDto>();
-            if (!string.IsNullOrEmpty(userId))
-            {
-                var filter = new FieldPermissionFilterDto
-                {
-                    UserId = userId,
-                    EntityName = entityName
-                };
-                var userResult = await _fieldPermissionService.GetFieldPermissionsAsync(1, 10000, filter);
-                if (userResult != null)
-                    userPermissions = userResult.Items.ToList();
-            }
-            Console.WriteLine("=== User Permissions ===");
-            foreach (var p in userPermissions)
-                Console.WriteLine($"{p.FieldName} => {p.AccessType}");
-
-            var rolePermissions = new List<FieldPermissionDto>();
-            if (roleIds != null && roleIds.Any())
-            {
-                foreach (var roleId in roleIds)
-                {
-                    var filter = new FieldPermissionFilterDto
-                    {
-                        RoleId = roleId,
-                        EntityName = entityName
-                    };
-                    var roleResult = await _fieldPermissionService.GetFieldPermissionsAsync(1, 10000, filter);
-                    if (roleResult != null)
-                        rolePermissions.AddRange(roleResult.Items);
-                }
-            }
-            Console.WriteLine("=== Role Permissions ===");
-            foreach (var p in rolePermissions)
-                Console.WriteLine($"{p.FieldName} => {p.AccessType}");
-
-            var merged = MergePermissions(userPermissions, rolePermissions);
-
-            // 🔹 طباعة المحتوى بعد الدمج
-            Console.WriteLine("=== Merged Permissions ===");
-            foreach (var kvp in merged)
-            {
-                Console.WriteLine($"Field: {kvp.Key}, AccessType: {kvp.Value}");
-            }
-            Console.WriteLine("==========================");
-
-            return merged;
-        }
-
-        private void ApplyJwtOverrides(
+        private static void ApplyJwtOverrides(
             Dictionary<string, FieldAccessType> mergedPermissions,
             IReadOnlyDictionary<string, FieldAccessType>? jwtFieldPermissions,
             string entityName)
@@ -276,8 +231,7 @@ namespace Application.Common.Permissions
             if (separatorIndex < 0)
                 return false;
 
-            var entityPart = key[..separatorIndex];
-            return entityPart.Equals(entityName, StringComparison.OrdinalIgnoreCase);
+            return key[..separatorIndex].Equals(entityName, StringComparison.OrdinalIgnoreCase);
         }
 
         private static string NormalizeFieldKey(string fieldName)
@@ -295,7 +249,5 @@ namespace Application.Common.Permissions
 
             return trimmed;
         }
-
     }
 }
-

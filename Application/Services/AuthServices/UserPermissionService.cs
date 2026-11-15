@@ -1,3 +1,4 @@
+using Application.Common.Permissions;
 using Application.Common.Security;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
@@ -45,25 +46,23 @@ namespace Application.Services.AuthServices
         }
 
         public FieldAccessType GetFieldAccess(string userId, string entityName, string fieldName)
+            => GetFieldAccessAsync(userId, entityName, fieldName).GetAwaiter().GetResult();
+
+        public async Task<FieldAccessType> GetFieldAccessAsync(
+            string userId,
+            string entityName,
+            string fieldName,
+            CancellationToken cancellationToken = default)
         {
-            // 🔹 أولاً: صلاحيات الحقول المخصصة للمستخدم (أولوية أعلى)
-            var userFieldAccess = _userRepository.GetUserFieldAccessAsync(userId, entityName, fieldName).GetAwaiter().GetResult();
+            var userFieldAccess = await _userRepository.GetUserFieldAccessAsync(
+                userId, entityName, fieldName, cancellationToken);
+            var roleIds = await _userRepository.GetActiveRoleIdsAsync(userId, cancellationToken);
+            IReadOnlyList<FieldAccessType> roleAccessTypes = roleIds.Count == 0
+                ? Array.Empty<FieldAccessType>()
+                : await _roleRepository.GetRoleFieldAccessTypesAsync(
+                    roleIds, entityName, fieldName, cancellationToken);
 
-            if (userFieldAccess.HasValue)
-                return userFieldAccess.Value;
-
-            // 🔹 ثانياً: صلاحيات الحقول المربوطة بأدوار المستخدم
-            var roleIds = _userRepository.GetRoleAssociationsAsync(userId).GetAwaiter().GetResult()
-                .Where(ura => ura.RoleId != null)
-                .Select(ura => ura.RoleId!)
-                .ToList();
-
-            if (roleIds.Count == 0)
-                return FieldAccessType.None;
-
-            var roleFieldAccess = _roleRepository.GetRoleFieldAccessAsync(roleIds, entityName, fieldName).GetAwaiter().GetResult();
-
-            return roleFieldAccess ?? FieldAccessType.None;
+            return FieldAccessSemantics.ResolveEffective(userFieldAccess, roleAccessTypes);
         }
     }
 }

@@ -55,6 +55,7 @@ public class SupervisorAssessmentFileService : ISupervisorAssessmentFileService
     private readonly IAuditLogRepository _audit;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IMapper _mapper;
+    private readonly IMemberFieldPermissionGuard? _fieldPermissions;
 
     public SupervisorAssessmentFileService(
         IPermissionGate permissionGate,
@@ -67,7 +68,8 @@ public class SupervisorAssessmentFileService : ISupervisorAssessmentFileService
         IMemberMedicalRequestService medicalRequests,
         IAuditLogRepository audit,
         IUnitOfWork unitOfWork,
-        IMapper mapper)
+        IMapper mapper,
+        IMemberFieldPermissionGuard? fieldPermissions = null)
     {
         _permissionGate = permissionGate;
         _currentUser = currentUser;
@@ -80,6 +82,7 @@ public class SupervisorAssessmentFileService : ISupervisorAssessmentFileService
         _audit = audit;
         _unitOfWork = unitOfWork;
         _mapper = mapper;
+        _fieldPermissions = fieldPermissions;
     }
 
     /// <inheritdoc />
@@ -403,6 +406,9 @@ public class SupervisorAssessmentFileService : ISupervisorAssessmentFileService
                 ExecutedAt = transfer.ExecutedAt
             };
         }
+
+        if (_fieldPermissions is not null)
+            await _fieldPermissions.ApplyReadToDetailsAsync(dto, cancellationToken);
 
         return dto;
     }

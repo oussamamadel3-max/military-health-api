@@ -1,3 +1,5 @@
+using Application.Attributes;
+
 namespace Application.Dtos.Members;
 
 /// <summary>طلب إنشاء ملف منتسب في المركز النشط (بدون CenterId أو أرقام مولّدة أو BMI).</summary>
@@ -91,7 +93,11 @@ public class MemberDetailsDto
     public Guid CurrentMedicalCenterId { get; set; }
     public string? CurrentMedicalCenterNameAr { get; set; }
     public string FullName { get; set; } = null!;
+
+    /// <summary>Phase B: الحقل الوحيد المعتمد في كتالوج صلاحيات الحقول حالياً.</summary>
+    [FieldPermission("MotherName", DisplayName = "اسم الأم")]
     public string MotherName { get; set; } = null!;
+
     public DateOnly BirthDate { get; set; }
     public short MaritalStatusId { get; set; }
     public string? MaritalStatusNameAr { get; set; }

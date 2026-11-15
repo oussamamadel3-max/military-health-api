@@ -16,6 +16,7 @@ public interface IRoleRepository
     Task<List<Guid>> GetFieldPermissionIdsForRolesAsync(IEnumerable<string> roleIds, CancellationToken cancellationToken = default);
     Task<List<(string EntityName, string FieldName, Domain.Enums.FieldAccessType AccessType)>> GetRoleFieldPermissionDetailsAsync(IReadOnlyList<string> roleNames, CancellationToken cancellationToken = default);
     Task<Domain.Enums.FieldAccessType?> GetRoleFieldAccessAsync(IEnumerable<string> roleIds, string entityName, string fieldName, CancellationToken cancellationToken = default);
+    Task<List<Domain.Enums.FieldAccessType>> GetRoleFieldAccessTypesAsync(IEnumerable<string> roleIds, string entityName, string fieldName, CancellationToken cancellationToken = default);
     Task<RolePermission?> FindRolePermissionAsync(string roleId, Guid permissionId, CancellationToken cancellationToken = default);
     void AddRolePermissions(IEnumerable<RolePermission> links);
     void RemoveRolePermissions(IEnumerable<RolePermission> links);

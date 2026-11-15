@@ -54,6 +54,7 @@ public class MemberArchiveService : IMemberArchiveService
     private readonly IUnitOfWork _unitOfWork;
     private readonly IMapper _mapper;
     private readonly IBusinessClock _clock;
+    private readonly IMemberFieldPermissionGuard? _fieldPermissions;
 
     public MemberArchiveService(
         IPermissionGate permissionGate,
@@ -70,7 +71,8 @@ public class MemberArchiveService : IMemberArchiveService
         IAuditLogRepository audit,
         IUnitOfWork unitOfWork,
         IMapper mapper,
-        IBusinessClock? businessClock = null)
+        IBusinessClock? businessClock = null,
+        IMemberFieldPermissionGuard? fieldPermissions = null)
     {
         _permissionGate = permissionGate;
         _currentUser = currentUser;
@@ -87,6 +89,7 @@ public class MemberArchiveService : IMemberArchiveService
         _unitOfWork = unitOfWork;
         _mapper = mapper;
         _clock = businessClock ?? BusinessClock.Utc;
+        _fieldPermissions = fieldPermissions;
     }
 
     /// <inheritdoc />
@@ -750,6 +753,9 @@ public class MemberArchiveService : IMemberArchiveService
             })
             .ToList();
         dto.HasGeneralNotesAlert = dto.GeneralNotes.Count > 0;
+
+        if (_fieldPermissions is not null)
+            await _fieldPermissions.ApplyReadToDetailsAsync(dto, cancellationToken);
 
         var transfer = await _members.GetLastTransferAsync(member.MemberId, cancellationToken);
         if (transfer is not null)

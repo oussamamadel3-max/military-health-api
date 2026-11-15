@@ -76,6 +76,7 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<IRoleAdminOperationsService, RoleAdminOperationsService>();
         services.AddScoped<IRoleService, RoleService>();
         services.AddScoped<IPermissionService, PermissionService>();
+        services.AddScoped<IFieldPermissionCatalog, FieldPermissionCatalog>();
         services.AddScoped<IFieldPermissionService, FieldPermissionService>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<ILoginLockoutService, LoginLockoutService>();
@@ -88,6 +89,7 @@ public static class InfrastructureServiceRegistration
         services.AddScoped<ITokenService, TokenService>();
         services.AddScoped<FieldPermissionHelper>();
         services.AddScoped<IUserContextService, HttpUserContextService>();
+        services.AddScoped<IMemberFieldPermissionGuard, MemberFieldPermissionGuard>();
         #endregion
 
         #region Application services

@@ -47,6 +47,7 @@ public class MemberService : IMemberService
     private readonly ICurrentUserService _currentUser;
     private readonly IExportService _export;
     private readonly IBusinessClock _clock;
+    private readonly IMemberFieldPermissionGuard? _fieldPermissions;
 
     public MemberService(
         IMemberRepository members,
@@ -61,7 +62,8 @@ public class MemberService : IMemberService
         IPermissionGate permissionGate,
         ICurrentUserService currentUser,
         IExportService export,
-        IBusinessClock? businessClock = null)
+        IBusinessClock? businessClock = null,
+        IMemberFieldPermissionGuard? fieldPermissions = null)
     {
         _members = members;
         _importBatches = importBatches;
@@ -76,6 +78,7 @@ public class MemberService : IMemberService
         _currentUser = currentUser;
         _export = export;
         _clock = businessClock ?? BusinessClock.Utc;
+        _fieldPermissions = fieldPermissions;
     }
 
     public async Task<PaginatedList<MemberListItemDto>> ListAsync(
@@ -196,6 +199,15 @@ public class MemberService : IMemberService
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var activeRules = await LoadActiveValidationRulesAsync(cancellationToken);
         MemberFieldValidation.ValidateCreateOrUpdate(request, today, activeRules);
+
+        if (_fieldPermissions is not null)
+        {
+            await _fieldPermissions.EnsureMotherNameWriteAllowedAsync(
+                request.MotherName,
+                existingMotherName: null,
+                isCreate: true,
+                cancellationToken);
+        }
 
         await EnsureReferenceAsync(request.MaritalStatusId, request.RecruitmentCenterId, request.BloodTypeId, cancellationToken);
 
@@ -327,6 +339,15 @@ public class MemberService : IMemberService
 
             var member = await _members.GetByIdInCenterAsync(memberId, centerId, asNoTracking: false, cancellationToken)
                 ?? throw new MemberNotFoundException();
+
+            if (_fieldPermissions is not null)
+            {
+                await _fieldPermissions.EnsureMotherNameWriteAllowedAsync(
+                    request.MotherName,
+                    member.MotherName,
+                    isCreate: false,
+                    cancellationToken);
+            }
 
             var finalDecision = await LoadSingleFinalDecisionAsync(memberId, cancellationToken);
             var afterFinalDecision = finalDecision is not null;
@@ -576,6 +597,11 @@ public class MemberService : IMemberService
         _importBatches.Add(batch);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+        // ValidRowsJson يحتفظ بالقيم الكاملة للاعتماد؛ الاستجابة وحدها تُخفى عند غياب قراءة الحقل.
+        var responseRows = _fieldPermissions is null
+            ? (IReadOnlyList<MemberImportValidRow>)valid
+            : await _fieldPermissions.MaskImportPreviewRowsAsync(valid, cancellationToken);
+
         return new MemberImportPreviewResult
         {
             ImportId = importId,
@@ -583,7 +609,7 @@ public class MemberService : IMemberService
             ValidCount = valid.Count,
             DuplicateCount = duplicateCount,
             InvalidCount = invalidCount,
-            ValidRows = valid,
+            ValidRows = responseRows,
             Issues = issues
         };
     }
@@ -615,6 +641,19 @@ public class MemberService : IMemberService
             ?? new List<MemberImportValidRow>();
         if (rows.Count == 0)
             throw new MemberImportException("لا توجد سجلات صالحة للاعتماد في هذه الجلسة.");
+
+        // مسار بديل لإنشاء MotherName: نفس قيد الكتابة عند تفعيل الإنفاذ.
+        if (_fieldPermissions is not null)
+        {
+            var sampleMotherName = rows
+                .Select(r => r.MotherName)
+                .FirstOrDefault(n => !string.IsNullOrWhiteSpace(n));
+            await _fieldPermissions.EnsureMotherNameWriteAllowedAsync(
+                sampleMotherName,
+                existingMotherName: null,
+                isCreate: true,
+                cancellationToken);
+        }
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var createdFileNumbers = new List<long>();
@@ -994,6 +1033,9 @@ public class MemberService : IMemberService
         dto.HasFinalDecision = await _clinicWorkspace.QueryFinalDecisions(asNoTracking: true)
             .AnyAsync(d => d.MemberId == member.MemberId, cancellationToken);
 
+        if (_fieldPermissions is not null)
+            await _fieldPermissions.ApplyReadToDetailsAsync(dto, cancellationToken);
+
         return dto;
     }
 
@@ -1088,12 +1130,13 @@ public class MemberService : IMemberService
     private async Task<List<ValidationRule>> LoadActiveValidationRulesAsync(CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
-        return await _references.ValidationRules()
-            .Where(r => r.IsActive
-                && r.TargetEntity.ToLower() == "member"
-                && r.ValidFrom <= now
-                && (r.ValidTo == null || r.ValidTo >= now))
+        // مقارنة DateTimeOffset داخل SQL تفشل على SQLite (مصانع التكامل)؛ الكتالوج صغير فيُصفّى زمن الصلاحية في الذاكرة.
+        var rules = await _references.ValidationRules()
+            .Where(r => r.IsActive && r.TargetEntity.ToLower() == "member")
             .ToListAsync(cancellationToken);
+        return rules
+            .Where(r => r.ValidFrom <= now && (r.ValidTo == null || r.ValidTo >= now))
+            .ToList();
     }
 
     private Task<List<BmiCategory>> LoadBmiCategoriesAsync(CancellationToken cancellationToken)

@@ -1,4 +1,3 @@
-using Application.Attributes;
 using Application.Common.Permissions;
 using Application.Common.Results;
 using Application.Common.Utilities;
@@ -7,24 +6,21 @@ using Application.Exceptions;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
-using Domain.Entities;
 using Domain.Entities.Auth;
 using Domain.Enums;
 using MapsterMapper;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using System.Reflection;
-using FieldPermissionEntityAttribute = Domain.Attributes.FieldPermissionEntityAttribute;
 
 namespace Application.Services.AuthServices
 {
+    /// <summary>
+    /// إدارة صلاحيات الحقول (CRUD + كتالوج). الإنفاذ التشغيلي يتم عبر
+    /// إنفاذ الأعمال على MotherName عبر <see cref="Application.Services.Members.MemberFieldPermissionGuard"/>
+    /// عندما يكون <c>FieldPermissions:EnforcementEnabled</c> مفعّلاً.
+    /// </summary>
     public class FieldPermissionService : IFieldPermissionService
     {
-        private static readonly Assembly DomainEntitiesAssembly = typeof(User).Assembly;
-        private static readonly Assembly ApplicationDtosAssembly = typeof(UserDto).Assembly;
-        private static Dictionary<string, string>? _dtoFieldDisplayCache;
-        private static Dictionary<string, Dictionary<string, string>>? _entityDtoFieldsCache;
-
         private readonly IFieldPermissionRepository _fieldPermissionRepository;
         private readonly IUserRepository _userRepository;
         private readonly IRoleRepository _roleRepository;
@@ -33,7 +29,7 @@ namespace Application.Services.AuthServices
         private readonly UserManager<User> _userManager;
         private readonly IMapper _mapper;
         private readonly IPermissionGate _permissionGate;
-        private readonly ICurrentUserService _currentUserService;
+        private readonly IFieldPermissionCatalog _catalog;
 
         public FieldPermissionService(
             IFieldPermissionRepository fieldPermissionRepository,
@@ -44,7 +40,7 @@ namespace Application.Services.AuthServices
             UserManager<User> userManager,
             IMapper mapper,
             IPermissionGate permissionGate,
-            ICurrentUserService currentUserService)
+            IFieldPermissionCatalog catalog)
         {
             _fieldPermissionRepository = fieldPermissionRepository;
             _userRepository = userRepository;
@@ -54,7 +50,7 @@ namespace Application.Services.AuthServices
             _userManager = userManager;
             _mapper = mapper;
             _permissionGate = permissionGate;
-            _currentUserService = currentUserService;
+            _catalog = catalog;
         }
 
         #region CRUD للـ FieldPermissions
@@ -205,18 +201,24 @@ namespace Application.Services.AuthServices
         {
             _permissionGate.EnsureAll(SystemPermissions.FieldPermissionManagement.Create);
 
+            if (!Enum.IsDefined(typeof(FieldAccessType), dto.AccessType))
+                throw new InvalidRoleDataException("نوع الوصول غير صالح.");
+
             var roleIds = NormalizeIds(dto.RoleIds);
             var userIds = NormalizeIds(dto.UserIds);
 
             var fields = (dto.FieldNames ?? new List<string>())
                 .Where(f => !string.IsNullOrWhiteSpace(f))
                 .Select(f => f.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
             if (!fields.Any())
                 throw new InvalidRoleDataException("يجب تحديد حقل واحد على الأقل.");
 
             var entityName = dto.EntityName.Trim();
+            EnsureCatalogAllows(entityName, fields);
+
             var existingPermissions = await _fieldPermissionRepository.GetExistingFieldNamesAsync(entityName);
 
             var duplicateFields = fields
@@ -229,9 +231,8 @@ namespace Application.Services.AuthServices
                 throw new InvalidRoleDataException($"صلاحيات الحقول التالية موجودة مسبقاً في كيان {entityName}: {existingFields}");
             }
 
-            var metadata = GetEntityMetadata(entityName);
-            var entityDisplayName = metadata.DisplayName;
-            var fieldDisplayMap = metadata.FieldDisplayMap;
+            var entityDisplayName = _catalog.GetEntityDisplayName(entityName);
+            var fieldDisplayMap = _catalog.GetFieldDisplayMap(entityName);
 
             var createdDtos = new List<FieldPermissionDto>();
 
@@ -317,6 +318,9 @@ namespace Application.Services.AuthServices
         {
             _permissionGate.EnsureAll(SystemPermissions.FieldPermissionManagement.Edit);
 
+            if (!Enum.IsDefined(typeof(FieldAccessType), dto.AccessType))
+                throw new InvalidRoleDataException("نوع الوصول غير صالح.");
+
             var entity = await _fieldPermissionRepository.FindByIdAsync(id)
                 ?? throw new RoleNotFoundException("صلاحية الحقل غير موجودة.");
 
@@ -327,8 +331,11 @@ namespace Application.Services.AuthServices
             var oldRoleIds = oldRoleLinks.Select(rfp => rfp.RoleId).Distinct().ToList();
 
             _mapper.Map(dto, entity);
-            var metadata = GetEntityMetadata(entity.EntityName);
-            entity.Description = BuildDescription(metadata.DisplayName, metadata.FieldDisplayMap, entity.FieldName, entity.AccessType);
+            entity.Description = BuildDescription(
+                _catalog.GetEntityDisplayName(entity.EntityName),
+                _catalog.GetFieldDisplayMap(entity.EntityName),
+                entity.FieldName,
+                entity.AccessType);
 
             await SetRoleAssignmentsAsync(entity, dto.RoleIds);
             await SetUserAssignmentsAsync(entity, dto.UserIds);
@@ -398,12 +405,18 @@ namespace Application.Services.AuthServices
                 ?? throw new RoleNotFoundException("صلاحية الحقل غير موجودة.");
 
             var oldAccessType = entity.AccessType;
+            if (!Enum.IsDefined(typeof(FieldAccessType), dto.AccessType))
+                throw new InvalidRoleDataException("نوع الوصول غير صالح.");
+
             if (oldAccessType == dto.AccessType)
                 throw new InvalidRoleDataException("نوع الصلاحية الحالي مطابق للنوع الجديد.");
 
             entity.AccessType = dto.AccessType;
-            var metadata = GetEntityMetadata(entity.EntityName);
-            entity.Description = BuildDescription(metadata.DisplayName, metadata.FieldDisplayMap, entity.FieldName, dto.AccessType);
+            entity.Description = BuildDescription(
+                _catalog.GetEntityDisplayName(entity.EntityName),
+                _catalog.GetFieldDisplayMap(entity.EntityName),
+                entity.FieldName,
+                dto.AccessType);
 
             await _unitOfWork.SaveChangesAsync();
 
@@ -413,53 +426,34 @@ namespace Application.Services.AuthServices
 
         #endregion
 
-        #region Reflection: جلب الكيانات والحقول
+        #region الكتالوج
 
         public Task<List<EntityInfoDto>> GetEntitiesAsync()
-        {
-            var types = GetAllEntityTypes();
-            var entities = new Dictionary<string, EntityInfoDto>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var type in types)
-            {
-                var name = type.Name;
-                var displayName = GetEntityDisplayName(type) ?? name;
-
-                if (!entities.ContainsKey(name))
-                {
-                    entities[name] = new EntityInfoDto
-                    {
-                        Name = name,
-                        DisplayName = displayName
-                    };
-                }
-            }
-
-            var ordered = entities.Values
-                .OrderBy(e => e.DisplayName, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            return Task.FromResult(ordered);
-        }
+            => Task.FromResult(_catalog.GetEntities().ToList());
 
         public Task<List<FieldInfoDto>> GetFieldsAsync(string entityName)
+            => Task.FromResult(_catalog.GetFields(entityName).ToList());
+
+        /// <summary>
+        /// يرفض الإنشاء إن كان الكيان أو أي حقل خارج الكتالوج المعتمد (حتى لو كان الكتالوج فارغاً).
+        /// </summary>
+        private void EnsureCatalogAllows(string entityName, IReadOnlyList<string> fieldNames)
         {
-            var types = GetEntityTypes(entityName);
-            if (types.Count == 0)
-                throw new RoleNotFoundException($"Entity '{entityName}' not found.");
+            if (!_catalog.IsEntityRegistered(entityName))
+            {
+                throw new InvalidRoleDataException(
+                    $"الكيان '{entityName}' غير معتمد في كتالوج صلاحيات الحقول.");
+            }
 
-            var fieldMap = BuildFieldDisplayMap(types);
-
-            var list = fieldMap
-                .OrderBy(kvp => kvp.Value, StringComparer.OrdinalIgnoreCase)
-                .Select(kvp => new FieldInfoDto
-                {
-                    Name = kvp.Key,
-                    DisplayName = kvp.Value
-                })
+            var unknown = fieldNames
+                .Where(f => !_catalog.IsFieldRegistered(entityName, f))
                 .ToList();
 
-            return Task.FromResult(list);
+            if (unknown.Count > 0)
+            {
+                throw new InvalidRoleDataException(
+                    $"الحقول التالية غير معتمدة لكيان '{entityName}': {string.Join(", ", unknown)}");
+            }
         }
 
         private static List<string> NormalizeIds(IEnumerable<string>? ids)
@@ -523,220 +517,17 @@ namespace Application.Services.AuthServices
             }
         }
 
-        private static string BuildDescription(string entityDisplayName, Dictionary<string, string> fieldDisplayMap, string fieldName, FieldAccessType accessType)
+        private static string BuildDescription(
+            string entityDisplayName,
+            IReadOnlyDictionary<string, string> fieldDisplayMap,
+            string fieldName,
+            FieldAccessType accessType)
         {
             var accessDescription = EnumHelper.GetEnumDescription(accessType);
             var fieldDisplay = fieldDisplayMap.TryGetValue(fieldName, out var disp) ? disp : fieldName;
             return $"حقل {fieldDisplay} في كيان {entityDisplayName}: ({accessDescription})";
         }
 
-        private EntityMetadata GetEntityMetadata(string entityName)
-        {
-            var types = GetEntityTypes(entityName);
-            var displayName = types
-                .Select(GetEntityDisplayName)
-                .FirstOrDefault(name => !string.IsNullOrWhiteSpace(name)) ?? entityName;
-
-            var fieldDisplayMap = BuildFieldDisplayMap(types);
-            return new EntityMetadata
-            {
-                DisplayName = displayName,
-                FieldDisplayMap = fieldDisplayMap
-            };
-        }
-
-        private static List<Type> GetEntityTypes(string entityName)
-        {
-            return DomainEntitiesAssembly
-                .GetTypes()
-                .Where(t => t.IsClass && !t.IsAbstract &&
-                            t.GetCustomAttribute<FieldPermissionEntityAttribute>() != null &&
-                            t.Name.Equals(entityName, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-        }
-
-        private static IEnumerable<Type> GetAllEntityTypes()
-        {
-            try
-            {
-                return DomainEntitiesAssembly
-                    .GetTypes()
-                    .Where(t => t.IsClass && !t.IsAbstract && t.GetCustomAttribute<FieldPermissionEntityAttribute>() != null)
-                    .ToList();
-            }
-            catch
-            {
-                return Array.Empty<Type>();
-            }
-        }
-
-        private static string? GetEntityDisplayName(Type type)
-        {
-            var domainAttr = type.GetCustomAttribute<FieldPermissionEntityAttribute>();
-            if (!string.IsNullOrWhiteSpace(domainAttr?.DisplayName))
-                return domainAttr!.DisplayName;
-
-            return null;
-        }
-
-        private static Dictionary<string, string> BuildFieldDisplayMap(IEnumerable<Type> entityTypes)
-        {
-            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            var dtoFieldMap = GetDtoFieldDisplayMap();
-
-            var entityNames = entityTypes.Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var type in entityTypes)
-            {
-                var properties = type.GetProperties()
-                    .Where(p => !EntityHelper.IsNavigationProperty(p) && !EntityHelper.IsKeyProperty(p));
-
-                foreach (var property in properties)
-                {
-                    var fieldName = property.Name;
-                    if (!map.ContainsKey(fieldName))
-                    {
-                        if (dtoFieldMap.TryGetValue(fieldName, out var display))
-                        {
-                            map[fieldName] = display;
-                        }
-                        else
-                        {
-                            map[fieldName] = fieldName;
-                        }
-                    }
-                }
-            }
-
-            var relatedDtoFields = GetRelatedDtoFieldsCached(entityNames);
-            foreach (var kvp in relatedDtoFields)
-            {
-                if (!map.ContainsKey(kvp.Key))
-                {
-                    map[kvp.Key] = kvp.Value;
-                }
-            }
-
-            return map;
-        }
-
-        private static Dictionary<string, string> GetRelatedDtoFieldsCached(HashSet<string> entityNames)
-        {
-            var cacheKey = string.Join("|", entityNames.OrderBy(x => x));
-
-            if (_entityDtoFieldsCache != null && _entityDtoFieldsCache.TryGetValue(cacheKey, out var cached))
-            {
-                return cached;
-            }
-
-            var result = GetRelatedDtoFields(entityNames);
-
-            if (_entityDtoFieldsCache == null)
-            {
-                _entityDtoFieldsCache = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
-            }
-            _entityDtoFieldsCache[cacheKey] = result;
-
-            return result;
-        }
-
-        private static Dictionary<string, string> GetRelatedDtoFields(HashSet<string> entityNames)
-        {
-            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-            try
-            {
-                var dtoTypes = ApplicationDtosAssembly
-                    .GetTypes()
-                    .Where(t => t.IsClass && !t.IsAbstract)
-                    .ToList();
-
-                var entityNameLookup = entityNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-                foreach (var dtoType in dtoTypes)
-                {
-                    var dtoName = dtoType.Name;
-
-                    var isRelated = entityNameLookup.Any(entityName =>
-                        dtoName.Contains(entityName, StringComparison.OrdinalIgnoreCase));
-
-                    if (isRelated)
-                    {
-                        var properties = dtoType.GetProperties();
-                        foreach (var property in properties)
-                        {
-                            var attr = property.GetCustomAttribute<FieldPermissionAttribute>();
-                            if (attr == null) continue;
-
-                            var fieldName = string.IsNullOrWhiteSpace(attr.FieldName)
-                                ? property.Name
-                                : attr.FieldName;
-                            var displayName = string.IsNullOrWhiteSpace(attr.DisplayName)
-                                ? fieldName
-                                : attr.DisplayName!;
-
-                            if (!result.ContainsKey(fieldName) || result[fieldName] == fieldName)
-                            {
-                                result[fieldName] = displayName;
-                            }
-                        }
-                    }
-                }
-            }
-            catch
-            {
-                // ignore reflection issues
-            }
-
-            return result;
-        }
-
-        private static Dictionary<string, string> GetDtoFieldDisplayMap()
-        {
-            if (_dtoFieldDisplayCache != null)
-                return _dtoFieldDisplayCache;
-
-            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            try
-            {
-                var dtoTypes = ApplicationDtosAssembly
-                    .GetTypes()
-                    .Where(t => t.IsClass && !t.IsAbstract);
-
-                foreach (var type in dtoTypes)
-                {
-                    foreach (var property in type.GetProperties())
-                    {
-                        var attr = property.GetCustomAttribute<FieldPermissionAttribute>();
-                        if (attr == null) continue;
-
-                        var fieldName = string.IsNullOrWhiteSpace(attr.FieldName)
-                            ? property.Name
-                            : attr.FieldName;
-                        var displayName = string.IsNullOrWhiteSpace(attr.DisplayName)
-                            ? fieldName
-                            : attr.DisplayName!;
-
-                        if (!result.ContainsKey(fieldName) || result[fieldName] == fieldName)
-                        {
-                            result[fieldName] = displayName;
-                        }
-                    }
-                }
-            }
-            catch
-            {
-                // ignore reflection issues
-            }
-
-            _dtoFieldDisplayCache = result;
-            return result;
-        }
         #endregion
-private class EntityMetadata
-        {
-            public string DisplayName { get; set; } = string.Empty;
-            public Dictionary<string, string> FieldDisplayMap { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-        }
     }
 }

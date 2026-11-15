@@ -145,9 +145,7 @@ namespace Application.Common.Permissions
 
 
         private static bool HasWritePermission(FieldAccessType accessType)
-        {
-            return accessType == FieldAccessType.Write || accessType == FieldAccessType.ReadWrite;
-        }
+            => FieldAccessSemantics.CanWrite(accessType);
     }
 }
 

@@ -92,13 +92,29 @@ public class RoleRepository : IRoleRepository
 
     public async Task<Domain.Enums.FieldAccessType?> GetRoleFieldAccessAsync(IEnumerable<string> roleIds, string entityName, string fieldName, CancellationToken cancellationToken = default)
     {
+        var types = await GetRoleFieldAccessTypesAsync(roleIds, entityName, fieldName, cancellationToken);
+        if (types.Count == 0)
+            return null;
+
+        return Application.Common.Permissions.FieldAccessSemantics.MergeRoleAccess(types);
+    }
+
+    public async Task<List<Domain.Enums.FieldAccessType>> GetRoleFieldAccessTypesAsync(
+        IEnumerable<string> roleIds,
+        string entityName,
+        string fieldName,
+        CancellationToken cancellationToken = default)
+    {
         var ids = roleIds.ToList();
+        if (ids.Count == 0)
+            return new List<Domain.Enums.FieldAccessType>();
+
         return await _context.RoleFieldPermissions
             .Where(rfp => ids.Contains(rfp.RoleId)
                 && rfp.FieldPermission.EntityName == entityName
                 && rfp.FieldPermission.FieldName == fieldName)
-            .Select(rfp => (Domain.Enums.FieldAccessType?)rfp.FieldPermission.AccessType)
-            .FirstOrDefaultAsync(cancellationToken);
+            .Select(rfp => rfp.FieldPermission.AccessType)
+            .ToListAsync(cancellationToken);
     }
 
     public async Task<RolePermission?> FindRolePermissionAsync(string roleId, Guid permissionId, CancellationToken cancellationToken = default)

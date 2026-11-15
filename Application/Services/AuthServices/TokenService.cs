@@ -52,6 +52,7 @@ namespace Application.Services.AuthServices
 
             var snapshot = await _access.LoadAsync(user.Id);
             var roleNames = CenterPermissionEvaluator.ApplicableRoleNames(snapshot.Roles, activeCenterId).ToList();
+            var roleIds = CenterPermissionEvaluator.ApplicableRoleIds(snapshot.Roles, activeCenterId).ToList();
             var allPermissions = CenterPermissionEvaluator.Resolve(snapshot.Roles, snapshot.Directs, snapshot.Links, activeCenterId).ToList();
 
             var userFieldPermissions = await _userRepository.GetUserFieldPermissionDetailsAsync(user.Id);
@@ -108,6 +109,12 @@ namespace Application.Services.AuthServices
                     claims.Add(new Claim("role", roleName));
                     claims.Add(new Claim(ClaimTypes.Role, roleName));
                 }
+            }
+
+            foreach (var roleId in roleIds)
+            {
+                if (!string.IsNullOrEmpty(roleId))
+                    claims.Add(new Claim(HttpUserContextService.RoleIdClaimType, roleId));
             }
 
             foreach (var fp in fieldPermissions)

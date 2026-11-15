@@ -238,15 +238,26 @@ public sealed class AuthHttpSession
     }
 
     public async Task<HttpResponseMessage> PostRawJsonAsync(string path, string? json, string? contentType = "application/json")
+        => await SendRawJsonAsync(HttpMethod.Post, path, json, contentType);
+
+    public async Task<HttpResponseMessage> PutRawJsonAsync(string path, string? json, string? contentType = "application/json")
+        => await SendRawJsonAsync(HttpMethod.Put, path, json, contentType);
+
+    public async Task<HttpResponseMessage> DeleteRawAsync(string path)
+        => await SendRawJsonAsync(HttpMethod.Delete, path, json: null, contentType: null);
+
+    public async Task<HttpResponseMessage> SendRawJsonAsync(
+        HttpMethod method,
+        string path,
+        string? json,
+        string? contentType = "application/json")
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, path);
-        if (json is null)
-            request.Content = null;
-        else
+        using var request = new HttpRequestMessage(method, path);
+        if (json is not null)
             request.Content = new StringContent(json, System.Text.Encoding.UTF8, contentType ?? "application/json");
-        if (path.StartsWith("/api/User", StringComparison.OrdinalIgnoreCase)
-            || path.StartsWith("/api/Roles", StringComparison.OrdinalIgnoreCase)
-            || path.StartsWith("/api/centers/select", StringComparison.OrdinalIgnoreCase))
+        // Mutations require X-CSRF-TOKEN in Testing (CsrfMutationGuard); attach for all non-safe methods.
+        if (!HttpMethod.Get.Equals(method) && !HttpMethod.Head.Equals(method)
+            && !HttpMethod.Options.Equals(method) && !HttpMethod.Trace.Equals(method))
             AttachCsrf(request);
         var response = await _client.SendAsync(request);
         LastResponse = response;

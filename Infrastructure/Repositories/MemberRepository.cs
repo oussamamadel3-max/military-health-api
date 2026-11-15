@@ -225,12 +225,21 @@ public class MemberRepository : IMemberRepository
         Guid memberId,
         CancellationToken cancellationToken = default)
     {
-        return await _context.MemberGeneralNotes.AsNoTracking()
+        var query = _context.MemberGeneralNotes.AsNoTracking()
             .Include(n => n.AuthorClinic)
             .Include(n => n.AuthorUser)
-            .Where(n => n.MemberId == memberId && n.IsActive)
-            .OrderByDescending(n => n.WrittenAt)
-            .ToListAsync(cancellationToken);
+            .Where(n => n.MemberId == memberId && n.IsActive);
+
+        // SQLite لا يدعم ORDER BY على DateTimeOffset؛ PostgreSQL يرتّب في الخادم.
+        if (IsNpgsqlProvider())
+        {
+            return await query
+                .OrderByDescending(n => n.WrittenAt)
+                .ToListAsync(cancellationToken);
+        }
+
+        var rows = await query.ToListAsync(cancellationToken);
+        return rows.OrderByDescending(n => n.WrittenAt).ToList();
     }
 
     public Task<MemberGeneralNote?> GetGeneralNoteForUpdateAsync(
@@ -243,16 +252,24 @@ public class MemberRepository : IMemberRepository
 
     public void AddGeneralNote(MemberGeneralNote note) => _context.MemberGeneralNotes.Add(note);
 
-    public Task<MemberTransfer?> GetLastTransferAsync(
+    public async Task<MemberTransfer?> GetLastTransferAsync(
         Guid memberId,
         CancellationToken cancellationToken = default)
     {
-        return _context.MemberTransfers.AsNoTracking()
+        var query = _context.MemberTransfers.AsNoTracking()
             .Include(t => t.FromCenter)
             .Include(t => t.ToCenter)
-            .Where(t => t.MemberId == memberId)
-            .OrderByDescending(t => t.ExecutedAt)
-            .FirstOrDefaultAsync(cancellationToken);
+            .Where(t => t.MemberId == memberId);
+
+        if (IsNpgsqlProvider())
+        {
+            return await query
+                .OrderByDescending(t => t.ExecutedAt)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        var rows = await query.ToListAsync(cancellationToken);
+        return rows.OrderByDescending(t => t.ExecutedAt).FirstOrDefault();
     }
 
     private async Task AcquireAllocationLocksAsync(

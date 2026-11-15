@@ -12,7 +12,7 @@ namespace API.IntegrationTests.Infrastructure;
 /// <summary>
 /// MH-SEC-051: hosts the real API pipeline against an isolated SQLite file — never Dev/Prod connection strings.
 /// </summary>
-public sealed class AuthWebApplicationFactory : WebApplicationFactory<Program>, IAsyncLifetime
+public class AuthWebApplicationFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
     private readonly string _dbPath = Path.Combine(
         Path.GetTempPath(),
@@ -77,6 +77,8 @@ public sealed class AuthWebApplicationFactory : WebApplicationFactory<Program>, 
         builder.UseSetting("RateLimiting:Global:Anonymous:TokensPerPeriod", "1000");
         builder.UseSetting("FileStorage:RootPath", Path.Combine(Path.GetTempPath(), "mh-sec-051-storage"));
         builder.UseSetting("Cors:AllowedOrigins:0", "http://localhost");
+        // Default: enforcement off so Phase B / baseline suites keep pre-C behavior.
+        builder.UseSetting("FieldPermissions:EnforcementEnabled", "false");
 
         // ConfigureTestServices runs after Program DI — required to replace Npgsql with SQLite cleanly.
         builder.ConfigureTestServices(services =>

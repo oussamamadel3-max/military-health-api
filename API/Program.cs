@@ -49,6 +49,10 @@ builder.Services.AddHealthChecks();
 builder.Services.Configure<ClinicWorkspaceOptions>(
     builder.Configuration.GetSection(ClinicWorkspaceOptions.SectionName));
 
+// إنفاذ صلاحيات الحقول على مسارات الأعمال — معطّل افتراضياً حتى اكتمال مراجعة الإسنادات.
+builder.Services.Configure<FieldPermissionsOptions>(
+    builder.Configuration.GetSection(FieldPermissionsOptions.SectionName));
+
 #endregion
 
 var app = builder.Build();

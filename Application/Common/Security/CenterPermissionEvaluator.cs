@@ -109,6 +109,19 @@ public static class CenterPermissionEvaluator
             .ToList();
     }
 
+    /// <summary>معرّفات الأدوار النشطة المنطبقة على سياق المركز الحالي.</summary>
+    public static IReadOnlyList<string> ApplicableRoleIds(
+        IEnumerable<RoleAssignment> roles,
+        Guid? activeCenterId)
+    {
+        return roles
+            .Where(r => r.IsActive && r.RoleIsActive && !string.IsNullOrWhiteSpace(r.RoleId) && AppliesToContext(r.CenterId, activeCenterId))
+            .Select(r => r.RoleId)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(id => id, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     /// <summary>
     /// أهلية سياق مركزي/جلسة (أي دور أو صلاحية مباشرة بـ CenterId فارغ).
     /// لا تُستخدم وحدها لمنح نطاق إدارة مستخدمين غير مقيد (BR-057).
