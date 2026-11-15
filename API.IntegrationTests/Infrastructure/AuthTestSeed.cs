@@ -70,6 +70,13 @@ public static class AuthTestSeed
             Description = "IT create users",
             IsActive = true
         };
+        var roleReadPermission = new Permission
+        {
+            Id = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeee000d"),
+            Name = SystemPermissions.RoleManagement.Read,
+            Description = "IT read roles",
+            IsActive = true
+        };
         var roleCreatePermission = new Permission
         {
             Id = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeee0006"),
@@ -118,6 +125,7 @@ public static class AuthTestSeed
             changeStatusPermission,
             assignRolesPermission,
             editUserPermission,
+            roleReadPermission,
             roleCreatePermission,
             createUserPermission,
             userCentersManagePermission,
@@ -163,6 +171,7 @@ public static class AuthTestSeed
                      changeStatusPermission.Id,
                      assignRolesPermission.Id,
                      editUserPermission.Id,
+                     roleReadPermission.Id,
                      roleCreatePermission.Id,
                      createUserPermission.Id,
                      userCentersManagePermission.Id,

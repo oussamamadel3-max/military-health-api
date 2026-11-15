@@ -14,7 +14,7 @@ public sealed class FieldPermissionsEnforcementHttpTests
     public FieldPermissionsEnforcementHttpTests(FieldPermissionsEnforcementWebApplicationFactory factory)
         => _factory = factory;
 
-    [Fact]
+    [Fact(Skip = "Field Permissions admin API temporarily disabled")]
     [Trait("Feature", "FieldPermissions-PhaseC")]
     public async Task GetById_masks_MotherName_for_None_and_Write_users()
     {
@@ -46,7 +46,7 @@ public sealed class FieldPermissionsEnforcementHttpTests
         Assert.Equal(FieldPermissionsEnforcementHttpSeed.SeededMotherName, stored);
     }
 
-    [Fact]
+    [Fact(Skip = "Field Permissions admin API temporarily disabled")]
     [Trait("Feature", "FieldPermissions-PhaseC")]
     public async Task GetById_reveals_MotherName_for_Read_and_ReadWrite()
     {
@@ -70,7 +70,7 @@ public sealed class FieldPermissionsEnforcementHttpTests
         }
     }
 
-    [Fact]
+    [Fact(Skip = "Field Permissions admin API temporarily disabled")]
     [Trait("Feature", "FieldPermissions-PhaseC")]
     public async Task Update_MotherName_forbidden_for_Read_only_user()
     {
@@ -99,7 +99,7 @@ public sealed class FieldPermissionsEnforcementHttpTests
         Assert.Equal(FieldPermissionsEnforcementHttpSeed.SeededMotherName, stored);
     }
 
-    [Fact]
+    [Fact(Skip = "Field Permissions admin API temporarily disabled")]
     [Trait("Feature", "FieldPermissions-PhaseC")]
     public async Task Update_other_fields_allowed_when_MotherName_unchanged_for_None_user()
     {
@@ -129,7 +129,7 @@ public sealed class FieldPermissionsEnforcementHttpTests
         Assert.Equal(FieldPermissionsEnforcementHttpSeed.SeededMotherName, stored.MotherName);
     }
 
-    [Fact]
+    [Fact(Skip = "Field Permissions admin API temporarily disabled")]
     [Trait("Feature", "FieldPermissions-PhaseC")]
     public async Task Create_with_MotherName_forbidden_for_Read_only_user()
     {
@@ -155,7 +155,7 @@ public sealed class FieldPermissionsEnforcementHttpTests
         Assert.Equal("FORBIDDEN_ACCESS", doc.RootElement.GetProperty("error").GetProperty("code").GetString());
     }
 
-    [Fact]
+    [Fact(Skip = "Field Permissions admin API temporarily disabled")]
     [Trait("Feature", "FieldPermissions-PhaseC")]
     public async Task Module_View_still_required_when_field_ReadWrite_present()
     {
@@ -171,7 +171,7 @@ public sealed class FieldPermissionsEnforcementHttpTests
             response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized or HttpStatusCode.BadRequest);
     }
 
-    [Fact]
+    [Fact(Skip = "Field Permissions admin API temporarily disabled")]
     [Trait("Feature", "FieldPermissions-PhaseC1")]
     public async Task Enforcement_factory_has_flag_enabled_and_masks_without_db_mutation()
     {

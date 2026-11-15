@@ -13,6 +13,11 @@ using System.ComponentModel.DataAnnotations;
 
 namespace API.Controllers.AuthControllers
 {
+    /// <summary>
+    /// واجهة إدارة صلاحيات الحقول معطّلة مؤقتاً: لا تُسجَّل كـ controller ولا تُعرَض في التوجيه.
+    /// الخدمات وDI وإنفاذ MotherName خلف العلم تبقى كما هي حتى لا يتأثر باقي النظام.
+    /// </summary>
+    [NonController]
     [Route("api/[controller]")]
     [ApiController]
     [Authorize]

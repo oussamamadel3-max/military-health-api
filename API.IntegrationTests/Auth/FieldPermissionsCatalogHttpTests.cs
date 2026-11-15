@@ -12,7 +12,7 @@ public sealed class FieldPermissionsCatalogHttpTests
 
     public FieldPermissionsCatalogHttpTests(AuthWebApplicationFactory factory) => _factory = factory;
 
-    [Fact]
+    [Fact(Skip = "Field Permissions admin API temporarily disabled")]
     [Trait("Feature", "FieldPermissions-PhaseB")]
     public async Task GetEntities_returns_Member_only()
     {
@@ -28,7 +28,7 @@ public sealed class FieldPermissionsCatalogHttpTests
         Assert.Equal("المنتسب", data[0].GetProperty("displayName").GetString());
     }
 
-    [Fact]
+    [Fact(Skip = "Field Permissions admin API temporarily disabled")]
     [Trait("Feature", "FieldPermissions-PhaseB")]
     public async Task GetFields_returns_MotherName_only()
     {
@@ -43,7 +43,7 @@ public sealed class FieldPermissionsCatalogHttpTests
         Assert.Equal("اسم الأم", data[0].GetProperty("displayName").GetString());
     }
 
-    [Fact]
+    [Fact(Skip = "Field Permissions admin API temporarily disabled")]
     [Trait("Feature", "FieldPermissions-PhaseB")]
     public async Task Create_rejects_unapproved_field_on_Member()
     {
@@ -65,7 +65,7 @@ public sealed class FieldPermissionsCatalogHttpTests
         Assert.Contains("غير معتمدة", body, StringComparison.Ordinal);
     }
 
-    [Fact]
+    [Fact(Skip = "Field Permissions admin API temporarily disabled")]
     [Trait("Feature", "FieldPermissions-PhaseB")]
     public async Task Create_rejects_unapproved_entity()
     {
@@ -87,7 +87,7 @@ public sealed class FieldPermissionsCatalogHttpTests
         Assert.Contains("غير معتمد في كتالوج", body, StringComparison.Ordinal);
     }
 
-    [Fact]
+    [Fact(Skip = "Field Permissions admin API temporarily disabled")]
     [Trait("Feature", "FieldPermissions-PhaseB")]
     public async Task Create_update_list_delete_MotherName_permission_roundtrip()
     {
@@ -151,7 +151,7 @@ public sealed class FieldPermissionsCatalogHttpTests
         Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
     }
 
-    [Fact]
+    [Fact(Skip = "Field Permissions admin API temporarily disabled")]
     [Trait("Feature", "FieldPermissions-PhaseB")]
     public async Task GetFieldPermissions_without_permission_is_forbidden()
     {

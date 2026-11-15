@@ -51,6 +51,25 @@ public sealed class ConfiguredRateLimitNormalUseTests : IClassFixture<Configured
         Assert.NotEqual(1000, bound.Safety.Authenticated.TokenLimit);
     }
 
+    [Fact]
+    public async Task Field_permission_admin_routes_are_not_exposed()
+    {
+        var session = _factory.CreateSession();
+        Assert.Equal(HttpStatusCode.OK, (await session.LoginAsync(AuthTestSeed.AdminUserName, AuthTestSeed.AdminPassword)).StatusCode);
+
+        foreach (var url in new[]
+        {
+            "/api/FieldPermissions/GetEntities",
+            "/api/FieldPermissions/GetFieldPermissions",
+            "/api/User/RemoveFieldPermissionsFromUser"
+        })
+        {
+            var response = await session.Client.GetAsync(url);
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            response.Dispose();
+        }
+    }
+
     private RateLimitingSettings Settings()
         => _factory.Services.GetRequiredService<IOptions<RateLimitingSettings>>().Value;
 
@@ -59,9 +78,9 @@ public sealed class ConfiguredRateLimitNormalUseTests : IClassFixture<Configured
         var urls = new[]
         {
             "/api/Auth/me",
-            "/api/FieldPermissions/GetFieldPermissions",
-            "/api/FieldPermissions/GetEntities",
-            "/api/FieldPermissions/GetAccessTypes",
+            "/api/Roles/GetDropdownRoles",
+            "/api/Roles/GetDropdownRoles",
+            "/api/Roles/GetDropdownRoles",
             "/api/operational-reports/central/kpis",
             "/api/operational-reports/central/compare",
             "/api/centers"
@@ -108,9 +127,9 @@ public sealed class ConfiguredRateLimitIsolationTests : IClassFixture<Configured
         Assert.DoesNotContain(AuthTestSeed.AdminPassword, body, StringComparison.Ordinal);
         blocked.Dispose();
 
-        var fields = await session.Client.GetAsync("/api/FieldPermissions/GetFieldPermissions");
-        Assert.Equal(HttpStatusCode.OK, fields.StatusCode);
-        fields.Dispose();
+        var adminRead = await session.Client.GetAsync("/api/Roles/GetDropdownRoles");
+        Assert.Equal(HttpStatusCode.OK, adminRead.StatusCode);
+        adminRead.Dispose();
 
         Assert.True(registry.Count(RateLimitPolicies.HeavyRead, RateLimitRejectionReason.CategoryQuota) > before);
         Assert.Equal(0, registry.Count(RateLimitPolicies.Administrative, RateLimitRejectionReason.CategoryQuota));
@@ -136,7 +155,7 @@ public sealed class ConfiguredRateLimitSafetyTests : IClassFixture<ConfiguredRat
 
         var calls = new List<(string Url, string Group)>();
         calls.AddRange(Enumerable.Repeat(("/api/Auth/me", "general"), plan.General));
-        calls.AddRange(Enumerable.Repeat(("/api/FieldPermissions/GetFieldPermissions", "admin"), plan.Admin));
+        calls.AddRange(Enumerable.Repeat(("/api/Roles/GetDropdownRoles", "admin"), plan.Admin));
         calls.AddRange(Enumerable.Repeat(("/api/centers", "reference"), plan.Reference));
         calls.AddRange(Enumerable.Repeat(("/api/operational-reports/central/kpis", "heavy"), plan.Heavy));
         Assert.Equal(settings.Safety.Authenticated.TokenLimit + 1, calls.Count);
@@ -161,7 +180,7 @@ public sealed class ConfiguredRateLimitSafetyTests : IClassFixture<ConfiguredRat
         overflow.Dispose();
         Assert.True(registry.Count(RateLimitPolicies.Safety, RateLimitRejectionReason.SafetyCeiling) > before);
 
-        var stillWithinAdmin = await session.Client.GetAsync("/api/FieldPermissions/GetFieldPermissions");
+        var stillWithinAdmin = await session.Client.GetAsync("/api/Roles/GetDropdownRoles");
         Assert.Equal(HttpStatusCode.TooManyRequests, stillWithinAdmin.StatusCode);
         stillWithinAdmin.Dispose();
         Assert.True(plan.Admin < settings.Administrative.TokenLimit);

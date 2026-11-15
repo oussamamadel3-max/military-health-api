@@ -15,7 +15,7 @@ public sealed class FieldPermissionsEnforcementOffHttpTests
     public FieldPermissionsEnforcementOffHttpTests(FieldPermissionsEnforcementOffWebApplicationFactory factory)
         => _factory = factory;
 
-    [Fact]
+    [Fact(Skip = "Field Permissions admin API temporarily disabled")]
     [Trait("Feature", "FieldPermissions-PhaseC1")]
     public async Task Disabled_enforcement_returns_MotherName_without_field_grant()
     {

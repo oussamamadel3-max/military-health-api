@@ -3,9 +3,11 @@ using Application.Common.Permissions;
 using Application.Dtos.AuthDtos;
 using Application.Interfaces.Services;
 using Domain.Enums;
+using API.RateLimiting;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using System.ComponentModel.DataAnnotations;
 
 namespace API.Controllers.AuthControllers
@@ -114,6 +116,7 @@ namespace API.Controllers.AuthControllers
 
         [HttpGet("[action]")]
         [AuthorizePermission(SystemPermissions.RoleManagement.Read)]
+        [EnableRateLimiting(RateLimitPolicies.Administrative)]
         public async Task<IResult> GetDropdownRoles()
         {
             var roles = await _roleService.GetDropdownRolesAsync();

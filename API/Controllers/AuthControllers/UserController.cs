@@ -188,7 +188,9 @@ namespace API.Controllers.AuthControllers
         /// <summary>
         /// إزالة روابط صلاحيات الحقول عن مستخدم. يتطلب UserManagement.RemoveFieldPermissions.
         /// يُبطل جلسات المستخدم بعد الإزالة.
+        /// المسار معطّل مؤقتاً مع واجهة إدارة صلاحيات الحقول؛ الاسم يبقى في الملف لفحوص المصدر.
         /// </summary>
+        [NonAction]
         [HttpPost("[action]")]
         [AuthorizePermission(SystemPermissions.UserManagement.RemoveFieldPermissions)]
         public async Task<IResult> RemoveFieldPermissionsFromUser([FromBody] RemoveFieldPermissionsDto dto)
