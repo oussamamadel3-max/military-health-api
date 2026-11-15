@@ -1,9 +1,11 @@
+using Application.Common.Localization;
 using Application.Common.Permissions;
 using Application.Common.Results;
 using Application.Exceptions;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
 using Application.ModelsDto.AuditLogDtos;
+using Domain.Entities.Audit;
 using MapsterMapper;
 using Microsoft.EntityFrameworkCore;
 
@@ -16,6 +18,7 @@ namespace Application.Services
     {
         private readonly IAuditLogRepository _auditLogs;
         private readonly IUserRepository _users;
+        private readonly IMedicalCenterRepository _centers;
         private readonly IPermissionGate _permissionGate;
         private readonly IMapper _mapper;
 
@@ -23,12 +26,14 @@ namespace Application.Services
             IAuditLogRepository auditLogs,
             IUserRepository users,
             IMapper mapper,
-            IPermissionGate permissionGate)
+            IPermissionGate permissionGate,
+            IMedicalCenterRepository centers)
         {
             _auditLogs = auditLogs;
             _users = users;
             _mapper = mapper;
             _permissionGate = permissionGate;
+            _centers = centers;
         }
 
         public async Task<AuditLogDetailsDto> GetByIdAsync(long id)
@@ -40,7 +45,7 @@ namespace Application.Services
                 ?? throw new ReportNotFoundException("سجل التدقيق غير موجود.");
 
             var dto = _mapper.Map<AuditLogDetailsDto>(entity);
-            await FillNamesAsync(new[] { dto });
+            await EnrichAsync([dto], [entity]);
             return dto;
         }
 
@@ -74,7 +79,7 @@ namespace Application.Services
                 .ToListAsync();
 
             var mapped = _mapper.Map<List<AuditLogListDto>>(list);
-            await FillNamesAsync(mapped);
+            await EnrichAsync(mapped, list);
             return new PaginatedList<AuditLogListDto>(mapped, total, pageNumber, pageSize);
         }
 
@@ -108,15 +113,28 @@ namespace Application.Services
             return await _auditLogs.GetEntityTypeNamesAsync();
         }
 
-        private async Task FillNamesAsync(IEnumerable<AuditLogListDto> items)
+        private async Task EnrichAsync(IReadOnlyList<AuditLogListDto> items, IReadOnlyList<AuditEvent> events)
         {
-            var list = items.ToList();
             var names = await _users.GetDisplayNamesByIdsAsync(
-                list.Select(x => x.UserId).Where(id => !string.IsNullOrWhiteSpace(id)));
-            foreach (var item in list)
+                items.Select(item => item.UserId).Where(id => !string.IsNullOrWhiteSpace(id)));
+            var centerNames = await AuditPresentation.LoadCurrentCenterNamesAsync(
+                _centers,
+                events.Select(auditEvent => auditEvent.CenterId));
+
+            for (var i = 0; i < items.Count; i++)
             {
+                var item = items[i];
                 if (names.TryGetValue(item.UserId, out var name))
                     item.UserName = name;
+
+                var display = AuditPresentation.Present(events[i]);
+                item.EntityDisplayName = display.EntityDisplayName;
+                item.ChangedValuesSummary = display.ChangedValuesSummary;
+                if (item.CenterId is Guid centerId && centerNames.TryGetValue(centerId, out var centerName))
+                    item.CenterName = centerName;
+
+                if (item is AuditLogDetailsDto details)
+                    details.ChangedFields = display.ChangedFields;
             }
         }
     }

@@ -1,5 +1,6 @@
 using Application.Common.Permissions;
 using Application.Dtos.ReferenceData;
+using Application.Common.ReferenceData;
 using Application.Exceptions;
 using Application.Interfaces;
 using Application.Interfaces.Services;
@@ -190,6 +191,60 @@ public class ReferenceDataServiceTests
         await service.SetActiveAsync(ReferenceCatalogs.ValidationRules, created.Id, false);
         var options = await service.GetActiveOptionsAsync(ReferenceCatalogs.ValidationRules);
         Assert.DoesNotContain(options, x => x.Id == created.Id);
+    }
+
+    [Fact]
+    public async Task Clinic_create_rejects_reserved_name_and_allows_an_extra_clinic()
+    {
+        await using var db = CreateDb();
+        var service = CreateService(db, allowManage: true);
+
+        var rejected = await Assert.ThrowsAsync<InvalidReferenceDataException>(() =>
+            service.CreateAsync(ReferenceCatalogs.Clinics, new ReferenceDataWriteDto
+            {
+                Code = "ORTHO",
+                NameAr = "العظمية",
+                SortOrder = 5,
+                IsActive = true
+            }));
+        Assert.Contains("ORTHOPEDIC", rejected.Message, StringComparison.Ordinal);
+
+        var created = await service.CreateAsync(ReferenceCatalogs.Clinics, new ReferenceDataWriteDto
+        {
+            Code = "CARDIOLOGY",
+            NameAr = "عيادة القلب",
+            SortOrder = 8,
+            IsActive = true
+        });
+
+        Assert.Equal("CARDIOLOGY", created.Code);
+        Assert.Equal(0, await db.Clinics.CountAsync(clinic => clinic.Code == "ORTHO"));
+    }
+
+    [Fact]
+    public async Task Clinic_update_rejects_renaming_into_a_reserved_exam_name()
+    {
+        await using var db = CreateDb();
+        var service = CreateService(db, allowManage: true);
+        var created = await service.CreateAsync(ReferenceCatalogs.Clinics, new ReferenceDataWriteDto
+        {
+            Code = "CARDIOLOGY",
+            NameAr = "عيادة القلب",
+            SortOrder = 8,
+            IsActive = true
+        });
+
+        var rejected = await Assert.ThrowsAsync<InvalidReferenceDataException>(() =>
+            service.UpdateAsync(ReferenceCatalogs.Clinics, created.Id, new ReferenceDataWriteDto
+            {
+                Code = "CARDIOLOGY",
+                NameAr = "عيادة العظمية",
+                SortOrder = 8,
+                IsActive = true
+            }));
+
+        Assert.Contains("ORTHOPEDIC", rejected.Message, StringComparison.Ordinal);
+        Assert.Equal("عيادة القلب", (await db.Clinics.SingleAsync()).NameAr);
     }
 
     private static ReferenceDataService CreateService(AppDbContext db, bool allowManage)

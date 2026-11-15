@@ -1,5 +1,6 @@
 using System.Net;
 using Application.Common.Permissions;
+using Application.Common.ReferenceData;
 using Application.Common.Results;
 using Application.Common.Security;
 using Application.Dtos.ClinicWorkspace;
@@ -22,7 +23,7 @@ public class OrthopedicExamService : IOrthopedicExamService
 {
     public const string OrthopedicExamSavedEventType = "OrthopedicExamSaved";
     public const string ExamConflictEventType = ClinicAssessmentService.ExamConflictEventType;
-    public const string OrthopedicClinicCode = "ORTHOPEDIC";
+    public const string OrthopedicClinicCode = ExamClinicCatalog.OrthopedicCode;
 
     public const short AcceptedResultStatusId = ClinicAssessmentService.AcceptedResultStatusId;
     public const short RejectedResultStatusId = ClinicAssessmentService.RejectedResultStatusId;
@@ -671,7 +672,8 @@ public class OrthopedicExamService : IOrthopedicExamService
             _users, _centerClinics, centerId, clinicId, userId, cancellationToken);
 
         if (!string.Equals(link.Clinic.Code, OrthopedicClinicCode, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOrthopedicExamDataException("فحص العظمية مسموح فقط للعيادة العظمية.");
+            throw new InvalidOrthopedicExamDataException(
+                ExamClinicCatalog.FormatExamMismatch(link.Clinic.Code, OrthopedicClinicCode));
     }
 
     private static bool IsOwnedActiveLock(

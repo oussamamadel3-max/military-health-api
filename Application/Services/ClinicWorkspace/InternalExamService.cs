@@ -1,5 +1,6 @@
 using System.Net;
 using Application.Common.Permissions;
+using Application.Common.ReferenceData;
 using Application.Common.Results;
 using Application.Common.Security;
 using Application.Dtos.ClinicWorkspace;
@@ -22,7 +23,7 @@ public class InternalExamService : IInternalExamService
 {
     public const string InternalExamSavedEventType = "InternalExamSaved";
     public const string ExamConflictEventType = ClinicAssessmentService.ExamConflictEventType;
-    public const string InternalClinicCode = "INTERNAL";
+    public const string InternalClinicCode = ExamClinicCatalog.InternalCode;
 
     public const short AcceptedResultStatusId = ClinicAssessmentService.AcceptedResultStatusId;
     public const short RejectedResultStatusId = ClinicAssessmentService.RejectedResultStatusId;
@@ -740,7 +741,8 @@ public class InternalExamService : IInternalExamService
             _users, _centerClinics, centerId, clinicId, userId, cancellationToken);
 
         if (!string.Equals(link.Clinic.Code, InternalClinicCode, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidInternalExamDataException("فحص الباطنة مسموح فقط لعيادة الباطنة.");
+            throw new InvalidInternalExamDataException(
+                ExamClinicCatalog.FormatExamMismatch(link.Clinic.Code, InternalClinicCode));
     }
 
     private static bool IsOwnedActiveLock(

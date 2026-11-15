@@ -1,3 +1,4 @@
+using Application.Common.ReferenceData;
 using Application.Common.Results;
 using Application.Dtos.ReferenceData;
 using Application.Exceptions;
@@ -55,6 +56,7 @@ public sealed class ClinicCatalogHandler : IReferenceCatalogHandler
     {
         var code = dto.Code.Trim();
         var sort = dto.SortOrder ?? 0;
+        ExamClinicCatalog.EnsureAssignable(code, dto.NameAr);
         if (await _store.Clinics().AnyAsync(x => x.Code.ToLower() == code.ToLower(), cancellationToken))
             throw new ReferenceDataDuplicateException($"رمز العيادة '{code}' مستخدم مسبقاً.");
         if (await _store.Clinics().AnyAsync(x => x.SortOrder == sort, cancellationToken))
@@ -77,6 +79,7 @@ public sealed class ClinicCatalogHandler : IReferenceCatalogHandler
     public async Task<ReferenceDataItemDto> UpdateAsync(string id, ReferenceDataWriteDto dto, CancellationToken cancellationToken)
     {
         var entity = await FindAsync(id, tracking: true, cancellationToken);
+        ExamClinicCatalog.EnsureAssignable(entity.Code, dto.NameAr);
         var sort = dto.SortOrder ?? entity.SortOrder;
         if (await _store.Clinics().AnyAsync(x => x.SortOrder == sort && x.ClinicId != entity.ClinicId, cancellationToken))
             throw new ReferenceDataDuplicateException($"ترتيب العيادة '{sort}' مستخدم مسبقاً.");

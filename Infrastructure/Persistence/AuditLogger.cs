@@ -1,4 +1,5 @@
 using System.Net;
+using Application.Common.Localization;
 using Application.Dtos.AuthDtos;
 using Application.Interfaces.Services;
 using Domain.Entities.Audit;
@@ -11,15 +12,7 @@ namespace Infrastructure.Persistence
 {
     public static class AuditLogger
     {
-        private static readonly string[] IgnoredFields =
-        {
-            "CreatedAt", "CreatedBy", "UpdatedAt", "UpdatedBy",
-            "PasswordHash", "SecurityStamp", "ConcurrencyStamp",
-            "NormalizedUserName", "NormalizedEmail", "LockoutEnd",
-            "AccessFailedCount", "LoginLockoutTier", "LastLoginAt",
-            "Token", "TokenHash", "RefreshToken", "Password",
-            "OldValues", "NewValues"
-        };
+        private static readonly HashSet<string> IgnoredFields = AuditSensitiveFields.All;
 
         private static readonly JsonSerializerOptions JsonSerializerOptions = new JsonSerializerOptions
         {

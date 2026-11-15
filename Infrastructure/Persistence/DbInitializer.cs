@@ -7,6 +7,7 @@ using Domain.Entities.Auth;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Infrastructure.Persistence
 {
@@ -378,6 +379,19 @@ namespace Infrastructure.Persistence
                 await EnsurePermissionsAssignedToRoleAsync(roleSuperAdmin.Id, superAdmin.Id, superAdminMatrix);
 
             await ReceptionReferenceSeed.ApplyAsync(context, superAdmin.Id);
+
+            var clinicSeed = await ExamClinicSeed.ApplyAsync(context);
+            var clinicLogger = scope.ServiceProvider.GetService<ILoggerFactory>()?.CreateLogger("ExamClinicSeed");
+            foreach (var item in clinicSeed.Diagnostics)
+            {
+                clinicLogger?.LogWarning(
+                    "عيادة قائمة مخالفة دون تصحيح تلقائي. الرمز {Code} الاسم {NameAr} الترتيب {SortOrder} المتوقع {ExpectedCode}. {Reason}",
+                    item.Code,
+                    item.NameAr,
+                    item.SortOrder,
+                    item.ExpectedCode,
+                    item.Reason);
+            }
         }
     }
 }

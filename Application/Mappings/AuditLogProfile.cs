@@ -1,5 +1,4 @@
 using Application.Dtos.DashboardDtos;
-using Application.Dtos.ReportDtos;
 using Application.ModelsDto.AuditLogDtos;
 using Domain.Entities.Audit;
 using Mapster;
@@ -40,16 +39,6 @@ namespace Application.Mappings
                 .Map(dest => dest.OldValue, src => src.OldValues)
                 .Map(dest => dest.NewValue, src => src.NewValues)
                 .Ignore(dest => dest.ChangedFields);
-
-            config.NewConfig<AuditEvent, AuditLogReportRowDto>()
-                .Map(dest => dest.LogId, src => src.EventId.ToString())
-                .Map(dest => dest.UserName, src => src.ActorUserId ?? string.Empty)
-                .Map(dest => dest.ActionType, src => src.EventType)
-                .Map(dest => dest.TableName, src => src.EntityType ?? string.Empty)
-                .Map(dest => dest.EntityId, src => src.EntityId)
-                .Map(dest => dest.CenterId, src => src.CenterId == null ? null : src.CenterId.ToString())
-                .Map(dest => dest.Result, src => src.Result)
-                .Map(dest => dest.Timestamp, src => src.OccurredAt);
 
             config.NewConfig<AuditEvent, RecentActivityDto>()
                 .Map(dest => dest.Id, src => src.EventId)

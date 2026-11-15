@@ -1,5 +1,6 @@
 using System.Net;
 using Application.Common.Permissions;
+using Application.Common.ReferenceData;
 using Application.Common.Results;
 using Application.Common.Security;
 using Application.Dtos.ClinicWorkspace;
@@ -22,7 +23,7 @@ public class EntExamService : IEntExamService
 {
     public const string EntExamSavedEventType = "EntExamSaved";
     public const string ExamConflictEventType = ClinicAssessmentService.ExamConflictEventType;
-    public const string EntClinicCode = "ENT";
+    public const string EntClinicCode = ExamClinicCatalog.EntCode;
 
     public const short AcceptedResultStatusId = ClinicAssessmentService.AcceptedResultStatusId;
     public const short RejectedResultStatusId = ClinicAssessmentService.RejectedResultStatusId;
@@ -718,7 +719,8 @@ public class EntExamService : IEntExamService
             _users, _centerClinics, centerId, clinicId, userId, cancellationToken);
 
         if (!string.Equals(link.Clinic.Code, EntClinicCode, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidEntExamDataException("فحص الأذنية مسموح فقط لعيادة الأذنية.");
+            throw new InvalidEntExamDataException(
+                ExamClinicCatalog.FormatExamMismatch(link.Clinic.Code, EntClinicCode));
     }
 
     private static bool IsOwnedActiveLock(

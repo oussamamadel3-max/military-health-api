@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using Application.Common.Localization;
 using Application.Common.Permissions;
 using Application.Common.Security;
 using Application.Interfaces;
@@ -10,7 +11,6 @@ using Application.Dtos.ExportDtos;
 using Application.Dtos.ReportDtos;
 using Application.ModelsDto.AuditLogDtos;
 using Domain.Entities.Audit;
-using MapsterMapper;
 using Microsoft.EntityFrameworkCore;
 
 namespace Application.Services.Reports
@@ -21,9 +21,9 @@ namespace Application.Services.Reports
 
         private readonly IAuditLogRepository _auditLogRepository;
         private readonly IUserRepository _users;
+        private readonly IMedicalCenterRepository _centers;
         private readonly IExportService _export;
         private readonly IDashboardService _dashboard;
-        private readonly IMapper _mapper;
         private readonly IPermissionGate _permissionGate;
         private readonly ICurrentUserService _currentUser;
         private readonly IUnitOfWork _unitOfWork;
@@ -33,19 +33,19 @@ namespace Application.Services.Reports
             IUserRepository users,
             IExportService export,
             IDashboardService dashboard,
-            IMapper mapper,
             IPermissionGate permissionGate,
             ICurrentUserService currentUser,
-            IUnitOfWork unitOfWork)
+            IUnitOfWork unitOfWork,
+            IMedicalCenterRepository centers)
         {
             _auditLogRepository = auditLogRepository;
             _users = users;
             _export = export;
             _dashboard = dashboard;
-            _mapper = mapper;
             _permissionGate = permissionGate;
             _currentUser = currentUser;
             _unitOfWork = unitOfWork;
+            _centers = centers;
         }
 
         #region Export Audit Logs
@@ -58,13 +58,34 @@ namespace Application.Services.Reports
             q = q.OrderByDescending(a => a.OccurredAt);
 
             var list = await q.ToListAsync();
-            var rows = _mapper.Map<List<AuditLogReportRowDto>>(list);
             var names = await _users.GetDisplayNamesByIdsAsync(list.Select(x => x.ActorUserId).Where(id => !string.IsNullOrWhiteSpace(id))!);
-            for (var i = 0; i < rows.Count; i++)
+            var centerNames = await AuditPresentation.LoadCurrentCenterNamesAsync(
+                _centers,
+                list.Select(auditEvent => auditEvent.CenterId));
+            var rows = new List<AuditLogReportRowDto>(list.Count);
+            foreach (var auditEvent in list)
             {
-                var actorId = list[i].ActorUserId;
-                if (!string.IsNullOrWhiteSpace(actorId) && names.TryGetValue(actorId, out var name))
-                    rows[i].UserName = name;
+                var display = AuditPresentation.Present(auditEvent);
+                var actorId = auditEvent.ActorUserId;
+                var userName = !string.IsNullOrWhiteSpace(actorId) && names.TryGetValue(actorId, out var name)
+                    ? name
+                    : actorId ?? string.Empty;
+                var centerName = auditEvent.CenterId is Guid centerId && centerNames.TryGetValue(centerId, out var currentName)
+                    ? currentName
+                    : "—";
+
+                rows.Add(new AuditLogReportRowDto
+                {
+                    LogId = auditEvent.EventId.ToString(),
+                    TableName = display.EntityLabel ?? "—",
+                    ActionType = display.EventLabel ?? "—",
+                    UserName = string.IsNullOrWhiteSpace(userName) ? "—" : userName,
+                    EntityDisplayName = display.EntityDisplayName ?? "—",
+                    CenterName = centerName,
+                    Result = display.ResultLabel ?? "—",
+                    ChangeSummary = display.ExportSummary ?? "—",
+                    Timestamp = auditEvent.OccurredAt
+                });
             }
 
             var periodText = BuildPeriodText(filter.From, filter.To);
@@ -83,12 +104,13 @@ namespace Application.Services.Reports
                 ColumnMappings = new Dictionary<string, string>
                 {
                     ["LogId"] = "رقم السجل",
-                    ["TableName"] = "اسم الجدول",
-                    ["ActionType"] = "الإجراء",
+                    ["TableName"] = "نوع المورد",
+                    ["ActionType"] = "العملية",
                     ["UserName"] = "المستخدم",
-                    ["EntityId"] = "معرف الكيان",
-                    ["CenterId"] = "المركز",
+                    ["EntityDisplayName"] = "السجل المتأثر",
+                    ["CenterName"] = "اسم المركز الحالي",
                     ["Result"] = "النتيجة",
+                    ["ChangeSummary"] = "ملخص العملية",
                     ["Timestamp"] = "التاريخ",
                 }
             };

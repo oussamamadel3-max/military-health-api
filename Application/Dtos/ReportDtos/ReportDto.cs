@@ -12,9 +12,15 @@ namespace Application.Dtos.ReportDtos
         public string TableName { get; set; } = "";
         public string ActionType { get; set; } = "";
         public string UserName { get; set; } = "";
-        public string? EntityId { get; set; }
-        public string? CenterId { get; set; }
+
+        /// <summary>اسم السجل من لقطة الحدث، أو «—» عند غيابها. ليس معرّف الكيان.</summary>
+        public string? EntityDisplayName { get; set; }
+
+        /// <summary>اسم المركز الحالي، وليس بالضرورة الاسم وقت وقوع الحدث.</summary>
+        public string? CenterName { get; set; }
+
         public string? Result { get; set; }
+        public string? ChangeSummary { get; set; }
         public DateTimeOffset Timestamp { get; set; }
     }
 }

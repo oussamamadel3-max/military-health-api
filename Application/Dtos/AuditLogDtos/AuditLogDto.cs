@@ -17,6 +17,16 @@ namespace Application.ModelsDto.AuditLogDtos
         public string? ContextScope { get; set; }
 
         public string? ChangeSummary { get; set; }
+
+        /// <summary>الاسم العربي الحالي للمركز. ليس بالضرورة الاسم وقت وقوع الحدث.</summary>
+        public string? CenterName { get; set; }
+
+        /// <summary>اسم السجل كما حفظته لقطة الحدث. يبقى فارغاً إن لم تحتوي اللقطة اسماً.</summary>
+        public string? EntityDisplayName { get; set; }
+
+        /// <summary>ملخص عربي للقيم المتغيرة بعد استبعاد الحقول الحساسة. لا يغيّر القيم المخزنة.</summary>
+        public string? ChangedValuesSummary { get; set; }
+
         public DateTimeOffset Timestamp { get; set; }
         public string? IPAddress { get; set; }
 

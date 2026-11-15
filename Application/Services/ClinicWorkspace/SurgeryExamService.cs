@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using Application.Common.Permissions;
+using Application.Common.ReferenceData;
 using Application.Common.Results;
 using Application.Common.Security;
 using Application.Dtos.ClinicWorkspace;
@@ -22,7 +23,7 @@ public class SurgeryExamService : ISurgeryExamService
 {
     public const string SurgeryExamSavedEventType = "SurgeryExamSaved";
     public const string ExamConflictEventType = ClinicAssessmentService.ExamConflictEventType;
-    public const string SurgeryClinicCode = "SURGERY";
+    public const string SurgeryClinicCode = ExamClinicCatalog.SurgeryCode;
 
     public const short AcceptedResultStatusId = ClinicAssessmentService.AcceptedResultStatusId;
     public const short RejectedResultStatusId = ClinicAssessmentService.RejectedResultStatusId;
@@ -679,7 +680,8 @@ public class SurgeryExamService : ISurgeryExamService
             _users, _centerClinics, centerId, clinicId, userId, cancellationToken);
 
         if (!string.Equals(link.Clinic.Code, SurgeryClinicCode, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidSurgeryExamDataException("فحص الجراحة مسموح فقط لعيادة الجراحة.");
+            throw new InvalidSurgeryExamDataException(
+                ExamClinicCatalog.FormatExamMismatch(link.Clinic.Code, SurgeryClinicCode));
     }
 
     private static bool IsOwnedActiveLock(

@@ -291,13 +291,12 @@ public class AuditSecurityHardeningTests
             new AuditLogRepository(db),
             new UserRepository(db),
             new Mapper(config),
-            gate.Object);
+            gate.Object,
+            new MedicalCenterRepository(db));
     }
 
     private static ReportsService CreateReportsService(AppDbContext db, IExportService export, bool allowExport)
     {
-        var config = new TypeAdapterConfig();
-        new AuditLogProfile().Register(config);
         var gate = new Mock<IPermissionGate>();
         if (allowExport)
             gate.Setup(g => g.EnsureAll(It.IsAny<string[]>()));
@@ -309,10 +308,10 @@ public class AuditSecurityHardeningTests
             new UserRepository(db),
             export,
             Mock.Of<IDashboardService>(),
-            new Mapper(config),
             gate.Object,
             new TestCurrentUser(),
-            new TestUnitOfWork(db));
+            new TestUnitOfWork(db),
+            new MedicalCenterRepository(db));
     }
 
     private static async Task SeedCentersAndUserAsync(AppDbContext db)

@@ -1,5 +1,6 @@
 using System.Net;
 using Application.Common.Permissions;
+using Application.Common.ReferenceData;
 using Application.Common.Results;
 using Application.Common.Security;
 using Application.Dtos.ClinicWorkspace;
@@ -22,7 +23,7 @@ public class EyeExamService : IEyeExamService
 {
     public const string EyeExamSavedEventType = "EyeExamSaved";
     public const string ExamConflictEventType = ClinicAssessmentService.ExamConflictEventType;
-    public const string EyeClinicCode = "EYE";
+    public const string EyeClinicCode = ExamClinicCatalog.EyeCode;
 
     public const short AcceptedResultStatusId = ClinicAssessmentService.AcceptedResultStatusId;
     public const short RejectedResultStatusId = ClinicAssessmentService.RejectedResultStatusId;
@@ -918,7 +919,8 @@ public class EyeExamService : IEyeExamService
             _users, _centerClinics, centerId, clinicId, userId, cancellationToken);
 
         if (!string.Equals(link.Clinic.Code, EyeClinicCode, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidEyeExamDataException("فحص العيون مسموح فقط لعيادة العيون.");
+            throw new InvalidEyeExamDataException(
+                ExamClinicCatalog.FormatExamMismatch(link.Clinic.Code, EyeClinicCode));
     }
 
     private static bool IsOwnedActiveLock(
