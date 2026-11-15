@@ -75,6 +75,19 @@ public class AuthWebApplicationFactory : WebApplicationFactory<Program>, IAsyncL
         builder.UseSetting("RateLimiting:Global:Authenticated:TokensPerPeriod", "1000");
         builder.UseSetting("RateLimiting:Global:Anonymous:TokenLimit", "1000");
         builder.UseSetting("RateLimiting:Global:Anonymous:TokensPerPeriod", "1000");
+        // Functional suites are not rate-limit tests. Real appsettings.json numbers are covered by
+        // ConfiguredRateLimitWebApplicationFactory, which reapplies that file after these overrides.
+        builder.UseSetting("RateLimiting:Safety:Authenticated:TokenLimit", "1000");
+        builder.UseSetting("RateLimiting:Safety:Authenticated:TokensPerPeriod", "1000");
+        builder.UseSetting("RateLimiting:Safety:Anonymous:TokenLimit", "1000");
+        builder.UseSetting("RateLimiting:Safety:Anonymous:TokensPerPeriod", "1000");
+        builder.UseSetting("RateLimiting:HeavyRead:ConcurrencyLimit", "1000");
+        builder.UseSetting("RateLimiting:HeavyRead:TokenLimit", "1000");
+        builder.UseSetting("RateLimiting:HeavyRead:TokensPerPeriod", "1000");
+        builder.UseSetting("RateLimiting:Administrative:TokenLimit", "1000");
+        builder.UseSetting("RateLimiting:Administrative:TokensPerPeriod", "1000");
+        builder.UseSetting("RateLimiting:ReferenceData:TokenLimit", "1000");
+        builder.UseSetting("RateLimiting:ReferenceData:TokensPerPeriod", "1000");
         builder.UseSetting("FileStorage:RootPath", Path.Combine(Path.GetTempPath(), "mh-sec-051-storage"));
         builder.UseSetting("Cors:AllowedOrigins:0", "http://localhost");
         // Default: enforcement off so Phase B / baseline suites keep pre-C behavior.
@@ -156,7 +169,7 @@ public class AuthWebApplicationFactory : WebApplicationFactory<Program>, IAsyncL
             services.Remove(descriptor);
     }
 
-    private static string FindApiProjectDirectory()
+    protected static string FindApiProjectDirectory()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)

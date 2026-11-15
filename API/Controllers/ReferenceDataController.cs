@@ -1,11 +1,13 @@
 using System.ComponentModel.DataAnnotations;
 using API.Infrastructure;
+using API.RateLimiting;
 using Application.Common.Permissions;
 using Application.Dtos.ReferenceData;
 using Application.Exceptions;
 using Application.Interfaces.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace API.Controllers;
 
@@ -20,6 +22,7 @@ public class ReferenceDataController : ControllerBase
 
     [HttpGet("catalogs")]
     [AuthorizePermission(MilitaryHealthPermissions.System.ReferenceData)]
+    [EnableRateLimiting(RateLimitPolicies.ReferenceData)]
     public IResult GetCatalogs()
     {
         var catalogs = _referenceData.GetCatalogs();
@@ -29,6 +32,7 @@ public class ReferenceDataController : ControllerBase
     /// <summary>شاشة الإدارة: يشمل القيم غير الفعالة.</summary>
     [HttpGet("{catalog}")]
     [AuthorizePermission(MilitaryHealthPermissions.System.ReferenceData)]
+    [EnableRateLimiting(RateLimitPolicies.ReferenceData)]
     public async Task<IResult> GetAdminList(
         string catalog,
         [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
@@ -43,6 +47,7 @@ public class ReferenceDataController : ControllerBase
 
     /// <summary>نماذج الإدخال التشغيلية: القيم الفعالة فقط.</summary>
     [HttpGet("{catalog}/options")]
+    [EnableRateLimiting(RateLimitPolicies.ReferenceData)]
     public async Task<IResult> GetActiveOptions(string catalog, CancellationToken cancellationToken = default)
     {
         var result = await _referenceData.GetActiveOptionsAsync(catalog, cancellationToken);
@@ -51,6 +56,7 @@ public class ReferenceDataController : ControllerBase
 
     [HttpGet("{catalog}/{id}")]
     [AuthorizePermission(MilitaryHealthPermissions.System.ReferenceData)]
+    [EnableRateLimiting(RateLimitPolicies.ReferenceData)]
     public async Task<IResult> GetById(string catalog, string id, CancellationToken cancellationToken = default)
     {
         var item = await _referenceData.GetByIdAsync(catalog, id, cancellationToken);

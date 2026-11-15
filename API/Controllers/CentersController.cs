@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using API.Infrastructure;
+using API.RateLimiting;
 using Application.Common.Permissions;
 using Application.Dtos.AuthDtos;
 using Application.Dtos.Centers;
@@ -7,6 +8,7 @@ using Application.Exceptions;
 using Application.Interfaces.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace API.Controllers;
 
@@ -34,6 +36,7 @@ public class CentersController : ControllerBase
 
     [HttpGet]
     [AuthorizePermission(MilitaryHealthPermissions.Centers.Manage)]
+    [EnableRateLimiting(RateLimitPolicies.ReferenceData)]
     public async Task<IResult> GetCenters(
         [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
         [FromQuery][Range(1, 500)] int pageSize = 10,

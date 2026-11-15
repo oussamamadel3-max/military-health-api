@@ -1,10 +1,12 @@
 using System.Security.Claims;
 using API.Infrastructure;
+using API.RateLimiting;
 using Application.Dtos.AuthDtos;
 using Application.Interfaces.Services;
 using Application.Services.AuthServices;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace API.Controllers.AuthControllers;
 
@@ -25,6 +27,7 @@ public class ActiveCenterController : ControllerBase
     }
 
     [HttpGet("mine")]
+    [EnableRateLimiting(RateLimitPolicies.ReferenceData)]
     public async Task<IResult> Mine(CancellationToken cancellationToken)
     {
         var centers = await _centers.GetMyCentersAsync(cancellationToken);

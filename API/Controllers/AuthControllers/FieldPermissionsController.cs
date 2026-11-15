@@ -1,4 +1,5 @@
 using API.Infrastructure;
+using API.RateLimiting;
 using Application.Common.Permissions;
 using Application.Common.Utilities;
 using Application.Dtos.AuthDtos;
@@ -7,6 +8,7 @@ using Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using System.ComponentModel.DataAnnotations;
 
 namespace API.Controllers.AuthControllers
@@ -25,6 +27,7 @@ namespace API.Controllers.AuthControllers
 
         [HttpGet("[action]")]
         [AuthorizePermission(SystemPermissions.FieldPermissionManagement.Read)]
+        [EnableRateLimiting(RateLimitPolicies.Administrative)]
         public async Task<IResult> GetFieldPermissions(
             [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,
             [FromQuery][Range(1, 500)] int pageSize = 10,
@@ -49,6 +52,7 @@ namespace API.Controllers.AuthControllers
 
         [HttpGet("[action]/{id}")]
         [AuthorizePermission(SystemPermissions.FieldPermissionManagement.Read)]
+        [EnableRateLimiting(RateLimitPolicies.Administrative)]
         public async Task<IResult> GetById(Guid id)
         {
             var result = await _fieldPermissionService.GetByIdAsync(id);
@@ -89,6 +93,7 @@ namespace API.Controllers.AuthControllers
 
         [HttpGet("[action]")]
         [AuthorizePermission(SystemPermissions.FieldPermissionManagement.Read)]
+        [EnableRateLimiting(RateLimitPolicies.Administrative)]
         public async Task<IResult> GetEntities()
         {
             var result = await _fieldPermissionService.GetEntitiesAsync();
@@ -97,6 +102,7 @@ namespace API.Controllers.AuthControllers
 
         [HttpGet("[action]/{entityName}")]
         [AuthorizePermission(SystemPermissions.FieldPermissionManagement.Read)]
+        [EnableRateLimiting(RateLimitPolicies.Administrative)]
         public async Task<IResult> GetFields(string entityName)
         {
             var result = await _fieldPermissionService.GetFieldsAsync(entityName);
@@ -105,6 +111,7 @@ namespace API.Controllers.AuthControllers
 
         [HttpGet("[action]")]
         [AuthorizePermission(SystemPermissions.FieldPermissionManagement.Read)]
+        [EnableRateLimiting(RateLimitPolicies.Administrative)]
         public IResult GetAccessTypes()
         {
             var list = Enum.GetValues(typeof(FieldAccessType))

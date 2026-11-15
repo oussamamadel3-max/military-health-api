@@ -10,19 +10,16 @@ public sealed class RateLimitingSettingsValidator : IValidateOptions<RateLimitin
 
         ValidateTokenBucket("RateLimiting:Global:Authenticated", options.Global.Authenticated, errors);
         ValidateTokenBucket("RateLimiting:Global:Anonymous", options.Global.Anonymous, errors);
+        ValidateTokenBucket("RateLimiting:Safety:Authenticated", options.Safety.Authenticated, errors);
+        ValidateTokenBucket("RateLimiting:Safety:Anonymous", options.Safety.Anonymous, errors);
+        ValidateTokenBucket("RateLimiting:Administrative", options.Administrative, errors);
+        ValidateTokenBucket("RateLimiting:ReferenceData", options.ReferenceData, errors);
         ValidateTokenBucket("RateLimiting:Public", options.Public, errors);
 
         ValidateSlidingWindow("RateLimiting:Login", options.Login, errors);
         ValidateSlidingWindow("RateLimiting:Refresh", options.Refresh, errors);
-
-        if (options.Reports.ConcurrencyLimit <= 0)
-            errors.Add("RateLimiting:Reports:ConcurrencyLimit must be > 0.");
-        if (options.Reports.TokenLimit <= 0)
-            errors.Add("RateLimiting:Reports:TokenLimit must be > 0.");
-        if (options.Reports.TokensPerPeriod <= 0)
-            errors.Add("RateLimiting:Reports:TokensPerPeriod must be > 0.");
-        if (options.Reports.ReplenishmentPeriodSeconds <= 0)
-            errors.Add("RateLimiting:Reports:ReplenishmentPeriodSeconds must be > 0.");
+        ValidateConcurrencyBucket("RateLimiting:Reports", options.Reports, errors);
+        ValidateConcurrencyBucket("RateLimiting:HeavyRead", options.HeavyRead, errors);
 
         return errors.Count > 0
             ? ValidateOptionsResult.Fail(errors)
@@ -41,6 +38,18 @@ public sealed class RateLimitingSettingsValidator : IValidateOptions<RateLimitin
 
     private static void ValidateTokenBucket(string prefix, TokenBucketSettings settings, List<string> errors)
     {
+        if (settings.TokenLimit <= 0)
+            errors.Add($"{prefix}:TokenLimit must be > 0.");
+        if (settings.TokensPerPeriod <= 0)
+            errors.Add($"{prefix}:TokensPerPeriod must be > 0.");
+        if (settings.ReplenishmentPeriodSeconds <= 0)
+            errors.Add($"{prefix}:ReplenishmentPeriodSeconds must be > 0.");
+    }
+
+    private static void ValidateConcurrencyBucket(string prefix, ReportsRateLimitSettings settings, List<string> errors)
+    {
+        if (settings.ConcurrencyLimit <= 0)
+            errors.Add($"{prefix}:ConcurrencyLimit must be > 0.");
         if (settings.TokenLimit <= 0)
             errors.Add($"{prefix}:TokenLimit must be > 0.");
         if (settings.TokensPerPeriod <= 0)

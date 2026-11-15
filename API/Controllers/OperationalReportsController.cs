@@ -29,6 +29,7 @@ public class OperationalReportsController : ControllerBase
     /// <summary>لوحة مؤشرات المركز النشط (FR-062).</summary>
     [HttpGet("local/kpis")]
     [AuthorizeOperation(MilitaryHealthPermissions.Reports.Local, OperationScope.Local)]
+    [EnableRateLimiting(RateLimitPolicies.HeavyRead)]
     public async Task<IResult> LocalKpis(
         [FromQuery] LocalKpiQuery query,
         CancellationToken cancellationToken = default)
@@ -43,6 +44,7 @@ public class OperationalReportsController : ControllerBase
     /// <summary>مؤشرات مجمعة عبر المراكز (FR-063).</summary>
     [HttpGet("central/kpis")]
     [AuthorizeOperation(MilitaryHealthPermissions.Reports.Central, OperationScope.Central)]
+    [EnableRateLimiting(RateLimitPolicies.HeavyRead)]
     public async Task<IResult> CentralKpis(
         [FromQuery] CentralKpiQuery query,
         CancellationToken cancellationToken = default)
@@ -66,6 +68,7 @@ public class OperationalReportsController : ControllerBase
     /// <summary>القائمة النهائية للمنتسبين (FR-064).</summary>
     [HttpGet("local/final-members")]
     [AuthorizeOperation(MilitaryHealthPermissions.Reports.Local, OperationScope.Local)]
+    [EnableRateLimiting(RateLimitPolicies.HeavyRead)]
     public async Task<IResult> FinalMembers(
         [FromQuery] FinalMembersQuery query,
         CancellationToken cancellationToken = default)
@@ -92,6 +95,7 @@ public class OperationalReportsController : ControllerBase
     /// <summary>قائمة قيد الانتظار — تفصيل waitingCount (FR-062).</summary>
     [HttpGet("local/waiting-members")]
     [AuthorizeOperation(MilitaryHealthPermissions.Reports.Local, OperationScope.Local)]
+    [EnableRateLimiting(RateLimitPolicies.HeavyRead)]
     public async Task<IResult> WaitingMembers(
         [FromQuery] WaitingMembersQuery query,
         CancellationToken cancellationToken = default)
@@ -118,6 +122,7 @@ public class OperationalReportsController : ControllerBase
     /// <summary>تقرير الحالات المؤجلة المحلي (FR-065).</summary>
     [HttpGet("local/deferred")]
     [AuthorizeOperation(MilitaryHealthPermissions.Reports.Local, OperationScope.Local)]
+    [EnableRateLimiting(RateLimitPolicies.HeavyRead)]
     public async Task<IResult> LocalDeferred(
         [FromQuery] DeferredReportQuery query,
         CancellationToken cancellationToken = default)
@@ -146,6 +151,7 @@ public class OperationalReportsController : ControllerBase
     /// <summary>تقرير المؤجلات المركزي (FR-065 A4).</summary>
     [HttpGet("central/deferred")]
     [AuthorizeOperation(MilitaryHealthPermissions.Reports.Central, OperationScope.Central)]
+    [EnableRateLimiting(RateLimitPolicies.HeavyRead)]
     public async Task<IResult> CentralDeferred(
         [FromQuery] DeferredReportQuery query,
         CancellationToken cancellationToken = default)
@@ -157,6 +163,7 @@ public class OperationalReportsController : ControllerBase
     /// <summary>تقرير محلي بالأعداد والنسب (FR-066).</summary>
     [HttpGet("local/summary")]
     [AuthorizeOperation(MilitaryHealthPermissions.Reports.Local, OperationScope.Local)]
+    [EnableRateLimiting(RateLimitPolicies.HeavyRead)]
     public async Task<IResult> LocalSummary(
         [FromQuery] LocalSummaryQuery query,
         CancellationToken cancellationToken = default)
@@ -180,6 +187,7 @@ public class OperationalReportsController : ControllerBase
     /// <summary>مقارنة المراكز (FR-067).</summary>
     [HttpGet("central/compare")]
     [AuthorizeOperation(MilitaryHealthPermissions.Reports.Central, OperationScope.Central)]
+    [EnableRateLimiting(RateLimitPolicies.HeavyRead)]
     public async Task<IResult> CentralCompare(
         [FromQuery] CentralCompareQuery query,
         CancellationToken cancellationToken = default)
@@ -203,6 +211,7 @@ public class OperationalReportsController : ControllerBase
     /// <summary>ربط المنتسبين بالأطباء (FR-068).</summary>
     [HttpGet("local/doctor-linkage")]
     [AuthorizeOperation(MilitaryHealthPermissions.Reports.Local, OperationScope.Local)]
+    [EnableRateLimiting(RateLimitPolicies.HeavyRead)]
     public async Task<IResult> DoctorLinkage(
         [FromQuery] DoctorLinkageQuery query,
         CancellationToken cancellationToken = default)
